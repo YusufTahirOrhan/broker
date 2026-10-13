@@ -23,15 +23,12 @@
         <springdoc.version>3.0.0</springdoc.version>
     </properties>
 
-    <!--
-        Planlanan modüller (HANDOFF.md): broker-runtime, broker-env-admin, broker-admin, broker-log-sink.
-        Her biri yazıldıkça buraya eklenir; olmayan modül CI'ı kırmasın diye şimdilik yalnızca çekirdek var.
-    -->
     <modules>
         <module>broker-core</module>
         <module>broker-env-admin</module>
         <module>broker-runtime</module>
         <module>broker-log-sink</module>
+        <module>broker-admin</module>
     </modules>
 
     <dependencyManagement>

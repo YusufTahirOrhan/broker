@@ -117,7 +117,7 @@ Ham metin backend'de saklanmaz; ekran da onu tarayıcı deposuna (localStorage) 
 
 - **Talep:** Subtask ya da profil ekranındaki "Taşı" penceresi hedef ortamı (yalnızca bir sonraki ortam), versiyonu (kaynak ortamda aktif olan) ve aksiyonu sorar (`POST /promotions`). Subtask'te `DEPLOY`, `DISABLE`, `ENABLE`, `ROLLBACK`; profilde `DEPLOY` ve `ROLLBACK` vardır. Onay isteyen taleplerde gerekçe ya da değişiklik kaydı numarası zorunludur.
 - **Ön kontrol:** Başarısız olursa talep açılmaz. 422 `PRECHECK_FAILED` yanıtındaki `checks` listesi madde madde gösterilir, örneğin "yetki hedef ortamda yok".
-- **Sonuç:** Onay gerekmiyorsa yanıt talebin son durumunu taşır: `APPLIED` ya da `FAILED`. Onay gerekiyorsa talep `PENDING_APPROVAL` olur.
+- **Sonuç:** Onay gerekmiyorsa yanıt talebin son durumunu taşır: `APPLIED` ya da `FAILED`; ortamdan yanıt alınamadıysa `APPLYING` (bkz. `RETRY`). Onay gerekiyorsa talep `PENDING_APPROVAL` olur.
 - **Talepler listesi:** Durum, hedef ortam, proje ve "benim taleplerim" filtreleri (`GET /promotions`). Onaylayanın varsayılan görünümü onay bekleyenlerdir.
 - **Talep detayı:** Hedef ortamdaki mevcut versiyonla fark, yoklama sonucu ve profilde onu kullanan route'lar. Başka projeden eklenen yetkiler ve anonim erişim ayrı bir uyarı kutusunda gösterilir.
 - **Düğmeler:** Yanıttaki `allowedActions` listesine göre gösterilir: `APPROVE`, `REJECT`, `CANCEL`, `RETRY`. Talep eden kendi talebinde onay düğmesini görmez; backend de 403 `FOUR_EYES` döner.
@@ -179,6 +179,7 @@ Hatalar RFC 9457 problem detail olarak (`application/problem+json`) döner. `cod
 | `PRECHECK_FAILED` | 422 | Taşıma ön kontrolü geçmedi; `checks` listesi döner |
 | `ENV_UNREACHABLE` | 502 | Ortamın Admin API'sine ulaşılamadı |
 | `UPSTREAM_ERROR` | 502 | Proje servisi, yetkilendirme servisi ya da servisin spec'i hata verdi |
+| `INTERNAL_ERROR` | 500 | Beklenmeyen sunucu hatası; ayrıntı backend logundadır |
 
 ## Uç noktalar
 
@@ -375,6 +376,36 @@ Gövde `fields` tanımına uymazsa istek gönderilmez: `outcome` `INVALID_REQUES
 }
 ```
 
+### Gövde ve yanıt ayrıntıları
+
+Yukarıdaki örneklerde görünmeyen gövde ve yanıt alanları. Alan adları camelCase'tir; zamanlar ISO 8601 UTC'dir.
+
+| Uç nokta | Gövde | Yanıt ve kurallar |
+| --- | --- | --- |
+| `GET /me` | — | `{"username", "displayName", "roles": [...]}`; `ROUTE_EDITOR` ya da `APPROVER` olan kullanıcıda `VIEWER` da listelenir. Hiç rolü olmayan kullanıcı her uçta 403 alır |
+| `GET /environments/{env}/status` | — | `{"environment", "configVersion", "configUpdatedAt", "instanceCount", "upToDateCount", "instances": [{"instanceId", "loadedVersion", "loadedAt", "upToDate", "lagging"}]}`. `lagging`: bir dakikadan uzun süredir geride. Ortama ulaşılamazsa 502 `ENV_UNREACHABLE` |
+| `POST /projects` | `{"externalProjectId", "maintask", "permissionPrefix", "name", "ownerTeam", "description", "defaultResponseProfileId"}` | `name` boşsa proje servisinden gelir. `externalProjectId` olmadan kayıt `UNLINKED` olur (geçiş için). 201 ve proje |
+| `PATCH /projects/{id}` | Değişecek alanlar: `name`, `ownerTeam`, `description`, `defaultResponseProfileId` (`null` temizler), `externalProjectId` | `externalProjectId` yalnızca `UNLINKED` projeyi bağlar, proje `LINKED` olur. `maintask` ya da `permissionPrefix` farklı gönderilirse 400 |
+| `GET /projects`, `GET /projects/{id}` | — | Proje alanları, `defaultResponseProfile: {id, name}` ve `environments: [{environment, baseUrl, specPath, enabled}]` |
+| `PUT /projects/{id}/environments/{env}` | `{"baseUrl", "specPath", "enabled"}` | `specPath` varsayılan `/v3/api-docs`, `enabled` varsayılan `true`. Yanıt `{"environment", "baseUrl", "specPath", "enabled", "configVersion"}` |
+| `GET /projects/{id}/permissions?env=` | — | `env` verilmezse ilk ortam. Öğe `{"code", "suffix", "description", "routeCount"}`; `routeCount` tüm projelerde yetkiyi kullanan, arşivde olmayan subtask sayısı |
+| `POST /projects/{id}/permissions` | `{"suffix", "description", "environments": ["DEV"]}` | `environments` boşsa tüm ortamlar; son ek büyük harfe çevrilir. 201 `{"code", "environments": [{"environment", "created"}]}`; hiçbir ortamda yeni açılmadıysa 409 `DUPLICATE` |
+| `POST /projects/{id}/routes`, `PUT /routes/{id}` | Örnekteki gövde ve isteğe bağlı `specOperation` | `specOperation`, spec karşılaştırmasındaki öğenin aynı adlı alanıdır; kaydedilince `specFingerprint` hesaplanır ve `CHANGED` bundan bulunur. Kayıtta her yetki ilk ortamın (DEV) yetkilendirme servisinde aranır; yoksa alan hatası döner |
+| `POST /routes/{id}/archive`, `/restore` | İsteğe bağlı `{"version", "comment"}` | Güncel subtask |
+| `POST /routes/{id}/rollback`, `POST /response-profiles/{id}/rollback` | `{"restoreVersion": 3, "version": 5, "comment"}` | `restoreVersion` dönülecek versiyon; `version` okunan versiyondur (iyimser kilit), verilmezse güncel versiyon kabul edilir |
+| `GET /routes/{id}/history/{version}` | — | `{"version", "action", "changedBy", "changedAt", "comment", "snapshot"}`; `snapshot`: `subtask`, `httpMethod`, `pathTemplate`, `permissions`, `foreignPermissions`, `anonymous`, `responseProfileId`, `definition`, `status`. Profilde `name`, `description`, `definition` |
+| `GET /routes/{id}/compare` | — | `{"from", "to", "changes": [{"path", "before", "after"}], "foreignPermissionsAdded", "foreignPermissionsRemoved", "opensAnonymous"}`; profilde yalnızca `from`, `to`, `changes` |
+| `POST /routes/validate` | Subtask gövdesi ve `projectId` | Her zaman 200: `{"valid", "errors"}`. Yetkilendirme servisine gitmez |
+| `POST /routes/preview` | Test gövdesi ve `projectId` | Tanım hatalıysa 400 `VALIDATION_FAILED`. Örnek gövde uymuyorsa 200 ve `request: null`. Base URL seçilen ortamınkidir (`environment` yoksa ilk ortam) |
+| `GET /projects/{id}/spec?env=` | — | `{"environment", "items": [{"group", "httpMethod", "path", "operationId", "summary", "fingerprint", "specOperation", "route", "proposal", "changes"}]}`. `route`: `{id, subtask, version, pathTemplate, specFingerprint}` ya da `null`; `proposal` yalnızca `NEW`'de, `changes` yalnızca `CHANGED`'de dolu. Sıra `MISSING`, `CHANGED`, `NEW`, `SAME`. Eşleşmede path değişkenlerinin adı yok sayılır: `/orders/{id}` ile `/orders/{orderId}` aynıdır |
+| `POST /projects/{id}/templates/from-sample` | `{"text", "environment", "operation": {"httpMethod", "path"}}` | `{"maintask", "subtask", "removedHeaders", "maskedSample", "fields", "proposal", "unmatchedFields", "unmatchedServiceParameters"}`. `operation` verilmezse `proposal` boştur. Metin okunamazsa 400 (`errors[].field` = `text`) |
+| `POST /projects/{id}/test` | Örnekteki gövde | Profil, ortamda aktif versiyonuyla uygulanır; ortamda yoksa güncel versiyonuyla. `userId` verilmezse oturumdaki kullanıcıdır |
+| `POST /projects/{id}/probe` | `{"environment", "httpMethod", "pathTemplate", "pathVariables"}` | `{"result", "status", "allow", "url", "message"}`; değeri verilmeyen path değişkenine `1` yazılır, redirect izlenmez |
+| `GET /response-profiles/{id}` | — | Profil alanları, `deployments` ve `usage: [{"environment", "routes": [{"routeId", "maintask", "subtask", "version"}]}]` |
+| `POST /response-profiles/preview` | `{"definition", "status", "body"}` | `{"status", "body", "outcome"}`; `status: null` timeout'u temsil eder |
+| `POST /promotions` | Örnekteki gövde | `DISABLE` ve `ENABLE`'da `version` verilmeyebilir; hedefte çalışan versiyon kullanılır. Ortamdan yanıt alınamazsa talep `APPLYING`'de kalır ve `failureReason` dolar; `RETRY` ile tamamlanır |
+| `GET /promotions` | — | `status` virgülle birden fazla değer alır (`status=APPLIED,FAILED`); `size` en fazla 100 |
+
 ## Alan kuralları ve sabit değerler
 
 Ekran bu kuralları `GET /meta/definition-rules` yanıtından okur ve kendi içinde sabit kodlamaz; backend aynı kuralları kayıtta yeniden uygular.
@@ -453,6 +484,8 @@ Değeri yalnızca bir yer tutucudan oluşan alan değerin tipini korur: `"${requ
 | `DEPLOYED_IN_TARGET` | `DISABLE` ve `ENABLE`'da subtask hedef ortamda var |
 | `PREVIOUSLY_APPLIED` | `ROLLBACK`'te versiyon hedef ortama daha önce uygulanmış |
 
+Aksiyona göre çalışan kontroller: `DEPLOY`'da `SUBJECT_ACTIVE`, `NEXT_ENVIRONMENT`, `SOURCE_ACTIVE` (ilk ortamda yok), `NO_OPEN_REQUEST`, `PERMISSIONS_EXIST`, `PROFILE_ACTIVE`, `PROJECT_ENABLED`. `ROLLBACK`'te `NEXT_ENVIRONMENT` ve `SOURCE_ACTIVE` yerine `PREVIOUSLY_APPLIED`. `DISABLE`'da `NO_OPEN_REQUEST` ve `DEPLOYED_IN_TARGET` (hedefte `ACTIVE`). `ENABLE`'da `SUBJECT_ACTIVE`, `NO_OPEN_REQUEST`, `DEPLOYED_IN_TARGET` (hedefte `DISABLED`) ile yetki, profil ve proje kontrolleri. Profil taleplerinde yalnızca `NEXT_ENVIRONMENT`, `SOURCE_ACTIVE`, `NO_OPEN_REQUEST` ve `PREVIOUSLY_APPLIED`. `422` yanıtı çalışan kontrollerin hepsini `ok` bilgisiyle listeler.
+
 ### Broker'ın uygulamalara döndüğü yanıtlar
 
 Test panelindeki `clientResponse` bu kurallarla üretilir; uygulama frontend'leri de aynısını alır.
@@ -487,11 +520,13 @@ Backend geliştirildikçe bu tablo güncellenir; en yeni kayıt en üsttedir. Bi
 
 | Tarih | Değişiklik |
 | --- | --- |
+| 2026-10-13 | Backend uygulandı (`broker-admin`); uç noktalar çalışan bir sunucuda. Netleşen gövde ve yanıtlar "Gövde ve yanıt ayrıntıları" bölümünde: yetki açmada `environments`, geri almada `restoreVersion`, spec karşılaştırmasında `items` ve `specOperation`, istekten şablon, yoklama, ortam durumu ve profil önizleme. Talep listesinde öğeler `diff` ve `affectedRoutes` taşımaz, `status` virgülle çoklu değer alır; `DISABLE`/`ENABLE`'da `version` isteğe bağlı. Ön kontrollerin aksiyona göre listesi eklendi. Yeni hata kodu: `INTERNAL_ERROR` (500) |
 | 2026-10-13 | İlk sürüm: ekranlar, API sözleşmesi, alan kuralları ve hata kodları. Backend geliştirme aşamasında; uç noktalar henüz çalışan bir sunucuda yok |
 
 ### Netleşmemiş noktalar
 
 - [ ] **SSO:** Hangi OIDC sağlayıcısı kullanılıyor ve roller token'ın hangi claim'inde geliyor?
+- [ ] **Proje servisi:** Arama ve ID ile okuma için varsayılan uçlar (`GET /projects?query=`, `GET /projects/{id}`) gerçek API netleşince uyarlanacak; ekranın gördüğü `/catalog/projects` değişmez.
 - [ ] **Yetkilendirme servisi:** Yetki listeleme, açma ve varlık kontrolü için gerçek uçlar netleşince `Yetkiler` sekmesi ona göre doğrulanacak.
 - [ ] **PROD base URL'i:** Şimdilik yalnızca `APPROVER` değiştirebiliyor; ileride onay akışına alınabilir.
 - [ ] **Acil durum:** PROD'da `DISABLE` ve `ROLLBACK` de onay istiyor; tasarım dokümanında açık bir karar.

@@ -30,7 +30,7 @@ import com.acme.broker.core.logging.EventCodec;
 import com.acme.broker.core.logging.LogEvent;
 import com.acme.broker.core.testing.CoreFixtures;
 import com.acme.broker.core.testing.FakeHttpServer;
-import com.acme.broker.envadmin.testing.JsonHttp;
+import com.acme.broker.core.testing.JsonHttp;
 import com.acme.broker.runtime.log.Spool;
 import com.acme.broker.runtime.route.RouteCache;
 import com.acme.broker.runtime.support.EventCollector;

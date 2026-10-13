@@ -1,0 +1,24 @@
+# Yerel geliştirme: SSO yerine HTTP Basic (viewer, editor, approver, lead; şifre = kullanıcı adı),
+# proje ve yetkilendirme servisleri bellekte, ortam Admin API'leri yerelde (broker-env-admin local profili 8081'de).
+spring:
+  flyway:
+    placeholders:
+      dev_admin_api_url: http://localhost:8081
+      test_admin_api_url: http://localhost:8081
+      prod_admin_api_url: http://localhost:8081
+
+broker:
+  admin:
+    cors:
+      allowed-origins: http://localhost:5173
+    catalog:
+      mode: memory
+      projects:
+        P-100: Sipariş Servisi
+        P-200: Log Projesi
+    authorization:
+      mode: memory
+      permissions:
+        DEV: [ORDER_READ, ORDER_WRITE, LOGPROJECT_TEMEL]
+        TEST: [ORDER_READ, ORDER_WRITE, LOGPROJECT_TEMEL]
+        PROD: [ORDER_READ, ORDER_WRITE, LOGPROJECT_TEMEL]

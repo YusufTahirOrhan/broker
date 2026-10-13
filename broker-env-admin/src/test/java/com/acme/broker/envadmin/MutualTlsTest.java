@@ -14,9 +14,9 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-import com.acme.broker.envadmin.testing.JsonHttp;
+import com.acme.broker.core.testing.JsonHttp;
+import com.acme.broker.core.testing.TestCertificates;
 import com.acme.broker.envadmin.testing.RuntimeContainers;
-import com.acme.broker.envadmin.testing.TestCertificates;
 
 /** The Admin API with the production TLS setup: client certificates are required and their subjects checked. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {

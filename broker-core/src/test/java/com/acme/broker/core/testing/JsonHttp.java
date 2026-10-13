@@ -1,4 +1,4 @@
-package com.acme.broker.envadmin.testing;
+package com.acme.broker.core.testing;
 
 import java.io.IOException;
 import java.net.URI;

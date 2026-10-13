@@ -1,0 +1,79 @@
+spring:
+  application:
+    name: broker-admin
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${BROKER_ADMIN_DB_URL:jdbc:postgresql://localhost:5432/broker}
+    username: ${BROKER_ADMIN_DB_USER:broker_admin_app}
+    password: ${BROKER_ADMIN_DB_PASSWORD:}
+    hikari:
+      # Tasarımdaki trigger fonksiyonları tabloları şemasız çağırır; bağlantının search_path'i broker_admin olmalı
+      schema: broker_admin
+  flyway:
+    # DDL şema sahibiyle çalışır; uygulama broker_admin_app ile yazar
+    user: ${BROKER_ADMIN_DB_OWNER_USER:${spring.datasource.username}}
+    password: ${BROKER_ADMIN_DB_OWNER_PASSWORD:${spring.datasource.password}}
+    schemas: broker_admin
+    default-schema: broker_admin
+    locations: classpath:db/migration/broker_admin
+    placeholders:
+      dev_admin_api_url: ${BROKER_DEV_ADMIN_API_URL:https://broker-env-admin.dev.internal:8443}
+      test_admin_api_url: ${BROKER_TEST_ADMIN_API_URL:https://broker-env-admin.test.internal:8443}
+      prod_admin_api_url: ${BROKER_PROD_ADMIN_API_URL:https://broker-env-admin.prod.internal:8443}
+  # Şirket SSO'su (OIDC): SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUERURI ortam değişkeniyle verilir.
+  # Burada boş varsayılan yok: boş issuer her token'ı reddeder, hiç verilmezse uygulama başlamaz.
+  # Rollerin geldiği claim broker.admin.security altında.
+
+server:
+  port: ${BROKER_ADMIN_PORT:8080}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+broker:
+  admin:
+    # Broker'ların broker.readable-headers listesiyle aynı olmalı
+    readable-headers:
+      - Accept-Language
+      - X-Clientip
+      - X-User-Agent
+    cors:
+      allowed-origins: ${BROKER_ADMIN_CORS_ORIGINS:}
+    security:
+      roles-claim: ${BROKER_ADMIN_ROLES_CLAIM:roles}
+      username-claim: preferred_username
+      display-name-claim: name
+      # SSO grubu → rol; token'da rol adları doğrudan geliyorsa boş kalır
+      group-roles: {}
+    environments:
+      connect-timeout: 3s
+      timeout: 30s
+      lag-warning: 1m
+    catalog:
+      mode: http
+      url: ${BROKER_PROJECT_SERVICE_URL:}
+      sync-cron: "0 7 * * * *"
+    authorization:
+      mode: http
+      urls:
+        DEV: ${BROKER_DEV_AUTHORIZATION_URL:}
+        TEST: ${BROKER_TEST_AUTHORIZATION_URL:}
+        PROD: ${BROKER_PROD_AUTHORIZATION_URL:}
+    drift:
+      cron: "0 23 2 * * *"
+
+logging:
+  structured:
+    format:
+      console: ${BROKER_LOG_FORMAT:}

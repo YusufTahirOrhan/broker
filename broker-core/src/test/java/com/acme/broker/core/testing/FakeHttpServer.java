@@ -44,6 +44,7 @@ public final class FakeHttpServer implements AutoCloseable {
     private final HttpServer server;
     private final Map<String, Handler> handlers = new ConcurrentHashMap<>();
     private final List<Recorded> requests = new CopyOnWriteArrayList<>();
+    private volatile Handler otherwise;
 
     private FakeHttpServer(HttpServer server) {
         this.server = server;
@@ -65,6 +66,12 @@ public final class FakeHttpServer implements AutoCloseable {
     /** {@code method} may be {@code *} for any method. */
     public FakeHttpServer on(String method, String path, Handler handler) {
         handlers.put(method + " " + path, handler);
+        return this;
+    }
+
+    /** Handles requests no {@code METHOD path} handler matched; without it they get 404. */
+    public FakeHttpServer otherwise(Handler handler) {
+        this.otherwise = handler;
         return this;
     }
 
@@ -92,6 +99,7 @@ public final class FakeHttpServer implements AutoCloseable {
     public void reset() {
         handlers.clear();
         requests.clear();
+        otherwise = null;
     }
 
     public static void respond(HttpExchange exchange, int status, Map<String, String> headers, byte[] body)
@@ -122,6 +130,9 @@ public final class FakeHttpServer implements AutoCloseable {
         Handler handler = handlers.get(exchange.getRequestMethod() + " " + path);
         if (handler == null) {
             handler = handlers.get("* " + path);
+        }
+        if (handler == null) {
+            handler = otherwise;
         }
         try {
             if (handler == null) {

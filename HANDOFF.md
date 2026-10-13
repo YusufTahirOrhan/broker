@@ -1,6 +1,6 @@
 # Devir notu
 
-Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı. Modüller "Sıradaki adımlar" sırasıyla yazılıyor; her biri `mvn -B verify` yeşil olunca commit'lenir. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
+Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; çekirdek ve dört modül yazıldı, `mvn -B verify` yeşil. Kalan iş "Sıradaki adımlar" ve "Açık noktalar"da. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
 
 Son güncelleme: 2026-10-13.
 
@@ -66,7 +66,7 @@ Modüller arası sözleşmeler de burada:
 | `runtime` | `RuntimeSignals`: `broker:routes-changed` kanalı, `broker:loaded:{instanceId}` anahtarı ve değeri `{"version": 43, "loadedAt": "..."}` (60 sn TTL) |
 | `testcall` | `TestCallRequest` / `TestCallResult` / `TestInterpretation`: merkez → ortam Admin API → broker'ın iç endpoint'i (`POST /internal/v1/test`, `X-Broker-Test-Secret`) |
 
-Test-jar (`com.acme.broker.core.testing`): `CoreFixtures` (add_order_note, log-project, openapi-sample) ve `FakeHttpServer` (JDK `HttpServer` ile sahte servis); diğer modüllerin testleri kullanır.
+Test-jar (`com.acme.broker.core.testing`): `CoreFixtures` (add_order_note, log-project, openapi-sample), `FakeHttpServer` (JDK `HttpServer` ile sahte servis), `JsonHttp` (test HTTP istemcisi) ve `TestCertificates` (keytool ile mTLS sertifikaları); diğer modüllerin testleri kullanır.
 
 ### broker-runtime (yeşil)
 
@@ -112,12 +112,26 @@ Paket `com.acme.broker.envadmin`. Uçlar `/admin/v1` altında; hatalar merkezle 
 - **Şema:** `db/migration/broker_runtime/V1__runtime_schema.sql` (tasarımdaki DDL; rol yoksa GRANT atlanır). Flyway şema sahibiyle (`BROKER_RUNTIME_DB_OWNER_*`), uygulama `broker_runtime_writer` ile çalışır.
 - **mTLS:** `server.ssl.bundle=env-admin`, `client-auth=need`; bundle `mtls` profilinde (`application-mtls.yml`). Profil açılmazsa uygulama başlamaz. `broker.env-admin.allowed-client-subjects` doluysa sertifika konusu da kontrol edilir (403 `CLIENT_NOT_ALLOWED`). Actuator ayrı portta (9090), TLS'siz.
 - **Audit:** `broker.audit` logger'ı; `operation`, `actor` (gövdeden ya da `X-Actor`), `promotion_id`, `client` alanları.
-- **Paketleme:** çalıştırılabilir jar `-exec` ekiyle; düz jar ve test-jar (`RuntimeContainers`, `JsonHttp`, `TestCertificates`) broker-runtime testlerinde kullanılır.
+- **Paketleme:** çalıştırılabilir jar `-exec` ekiyle; düz jar ve test-jar (`RuntimeContainers`: PostgreSQL + Redis) broker-runtime testlerinde kullanılır.
 - **Testler:** Testcontainers PostgreSQL ve Redis, `FakeHttpServer`; mTLS keytool ile üretilen sertifikalarla uçtan uca denenir.
 
-### broker-admin (yapılacak)
+### broker-admin (yeşil)
 
-Sözleşme: `docs/frontend-guide.md`. Merkezi şema Flyway ile (rol yoksa GRANT atlanır; ortamlar placeholder ile seed). Proje servisi ve yetkilendirme servisi istemcileri ayarlanabilir HTTP; `local` profilinde bellek içi. Ortam Admin API istemcisi `SslBundles` ile mTLS. Gece drift yoklaması ve katalog senkronizasyonu zamanlanmış görev. Testler Testcontainers PostgreSQL ve sahte ortam istemcisiyle.
+Paket `com.acme.broker.admin`. Sözleşme `docs/frontend-guide.md`; uygulama sırasında netleşen gövde ve yanıtlar oradaki "Gövde ve yanıt ayrıntıları" tablosunda.
+
+| Paket | İçerik |
+| --- | --- |
+| `security` | `!local`: OAuth2 resource server (JWT); roller `broker.admin.security.roles-claim` claim'inden, rol adı değilse `group-roles` ile eşlenir; kullanıcı adı `preferred_username` (yoksa `sub`). `local`: HTTP Basic, `viewer`/`editor`/`approver`/`lead`. Rol kontrolleri serviste (`User.require`); rolü olmayan kullanıcı her uçta 403. 401/403 problem formatında |
+| `environment` | `EnvironmentRepository` (sıra, onay, test ayarı DB'den), `EnvironmentClient` (Admin API; `ssl-bundle` ile mTLS, redirect yok). Bağlanamama `UnreachableException` (hiçbir şey değişmedi), istek gitti ama yanıt yok `NoAnswerException` (uygulanmış olabilir) |
+| `project`, `catalog`, `authz` | Proje kaydı (önek çakışması `PREFIX_OVERLAP`, harf duyarsız `DUPLICATE`), ortam ayarı önce ortama, sonra merkeze. Proje ve yetkilendirme servisleri `mode: http` (varsayılan API'ler sınıf yorumlarında) ya da `memory` |
+| `route`, `profile` | Güncel satır + aynı transaction'da history (`to_jsonb`), iyimser kilit (`VERSION_CONFLICT` + `currentVersion`), geri alma, arşiv (`ROUTE_DEPLOYED`), karşılaştırma, doğrulama, önizleme (`BackendRequestBuilder`) |
+| `promotion` | Ön kontroller, onay kuralı (hedef `requires_approval` ya da versiyon anonim erişimi açıyorsa), dört göz (`FOUR_EYES` + `ck_four_eyes`), uygulama: yoklama → Admin API (`promotionId` = talep ID'si) → `route_deployment`/`response_profile_deployment`. Yanıt kaybolursa talep `APPLYING`'de kalır, `RETRY` aynı ID ile tamamlar |
+| `spec` | Spec karşılaştırma (method + path, değişken adları yok sayılır; `CHANGED` saklanan `spec_fingerprint`'ten), istekten şablon, test (yalnızca `test_calls_allowed`; `broker.audit` logu), yoklama |
+| `jobs` | `DriftCheck` (gece; ortamın listesiyle karşılaştırma + her ACTIVE route'a yoklama, `broker.admin.drift` sayacı, `last_probe_status`), `CatalogSync` (ad yenileme, servisten kalkan proje `MISSING`). Birden çok instance'ta aynı anda çalışmaları zararsız (idempotent) |
+
+- **Şema:** `db/migration/broker_admin/V1__central_schema.sql` tasarımdaki DDL'in birebir kopyası (rol yoksa GRANT atlanır); `V2__environments.sql` ortamları `dev/test/prod_admin_api_url` placeholder'larıyla seed eder. Trigger fonksiyonları tabloları şemasız çağırdığı için bağlantının `search_path`'i `broker_admin` olmalı (`spring.datasource.hikari.schema`).
+- **Ayar:** SSO issuer'ı `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUERURI` ile verilir (boş varsayılan yok; boş issuer her token'ı reddeder). mTLS istemci sertifikası `mtls` profilinde (`application-mtls.yml`, bundle `env-client`).
+- **Testler:** Testcontainers PostgreSQL, `local` profili ve bellek içi `FakeEnvironments` (üç ortamın Admin API'si; promotion ID idempotency'si, eski talebin reddi, proje/profil yokluğu, sessiz kalma). SSO testi gerçek imzalı JWT ile; ortam istemcisinin mTLS'i istemci sertifikası isteyen bir `HttpsServer`'a karşı.
 
 ### broker-log-sink (yeşil)
 
@@ -133,25 +147,30 @@ Paket `com.acme.broker.sink`. İki `@KafkaListener` (toplu), her biri kendi cons
 
 ## Spring Boot 4 notları
 
-Derlemede en olası hata kaynakları bunlar; şüphede `mvn dependency:tree` ile doğrulayın.
+Derlemede doğrulandı (Boot 4.1.1, Spring Framework 7.0, Jackson 3.1, Kafka 4.2, Testcontainers 2.0).
 
-- Starter adları modülerleşti: `spring-boot-starter-webmvc`, `spring-boot-starter-kafka`, `spring-boot-starter-flyway` (+ `flyway-database-postgresql`), `spring-boot-starter-data-redis`, `spring-boot-starter-jdbc`, `spring-boot-starter-actuator`. OAuth2 resource server starter'ının Boot 4'teki adı kontrol edilmeli.
-- Test: `spring-boot-starter-test`, `spring-boot-starter-webmvc-test`, `spring-boot-testcontainers`; Testcontainers 2.x artefaktları `org.testcontainers:testcontainers-postgresql`, `testcontainers-junit-jupiter`.
-- springdoc: `springdoc-openapi-starter-webmvc-ui` 3.x (sürüm kök pom'da `springdoc.version`).
+- Starter'lar: `spring-boot-starter-webmvc`, `-jdbc`, `-flyway` (+ `flyway-database-postgresql`), `-data-redis`, `-kafka`, `-actuator`, `-security`, `-security-oauth2-resource-server`. Test: `spring-boot-starter-test`, `spring-kafka-test`, `testcontainers-postgresql`, `testcontainers-junit-jupiter`; `@LocalServerPort` `org.springframework.boot.test.web.server` paketinde. Yeni `org.testcontainers.postgresql.PostgreSQLContainer` generic değil.
+- springdoc `3.0.0` Boot 4.1.1 ile çalışıyor (`/v3/api-docs`, `/swagger-ui.html`).
+- `spring-boot-maven-plugin` `repackage` execution'ının id'si `repackage` olmalı; yoksa parent'ın execution'ı da çalışıp düz jar'ı çalıştırılabilir jar'la ezer. Modüllerde çalıştırılabilir jar `-exec` ekiyle.
+- JKS SSL bundle'ları açılışta yüklenir; dosyası olmayan bundle `server.ssl.enabled=false` olsa da uygulamayı düşürür. Bundle tanımları bu yüzden `mtls` profilinde.
+- Flyway auto-config, test sınıf yolunda Flyway olan her modülde çalışır; broker-runtime'da `spring.flyway.enabled=false`.
+- `jwt.issuer-uri` boş string verilirse Boot `iss` doğrulayıcısını boş değerle kurar.
 
 ## Sıradaki adımlar
 
-1. ~~`mvn -B verify`; `broker-core` derleme ve test hatalarını düzelt.~~
-2. ~~`broker-env-admin` (runtime şeması burada; runtime testleri de kullanır).~~
-3. ~~`broker-runtime`.~~
-4. ~~`broker-log-sink`.~~
-5. `broker-admin`.
-6. Her modül yeşil olunca kök pom'a ekle, commit'le, push'la; sözleşme değiştiyse `docs/frontend-guide.md`'yi güncelle.
+Dört modül ve çekirdek yazıldı; `mvn -B verify` yeşil (131 test). Sıradakiler:
+
+1. "Açık noktalar"daki teyitler: oturum kaydının formatı, eski sayacın tag'leri, Elastic ay hesabının saat dilimi, SSO claim'i, proje ve yetkilendirme servislerinin gerçek API'leri (varsayılan uçlar `HttpProjectCatalog` ve `HttpAuthorizationService` yorumlarında).
+2. Dağıtım: dört uygulamanın imajları ve ortam manifestleri (env-admin ve admin `mtls` profiliyle; broker'da kalıcı spool volume'u önerilir). Kafka topic'i ve DLQ tasarımdaki ayarlarla açılmalı; ClickHouse DDL'i ve Elastic bileşen şablonu `broker-log-sink/src/main/resources` altında.
+3. Geçiş planı adım 1–2 (tasarım "Geçiş planı"): DEV'de eski broker ile sink'in Elastic dokümanlarını alan alan karşılaştırma; statik subtask'leri `runtime_route`'a ve merkezi history'ye aktaran tek seferlik script.
+4. Frontend: sözleşme `docs/frontend-guide.md`'de; canlı sürüm (artifact) bu dosyadan eşitlenmeli.
 
 ## Açık noktalar
 
-- Redis'teki oturum kaydının gerçek anahtarı ve formatı.
-- `broker.gelen.istekler` sayacının tag anahtarları ve eski Elastic indeksinin ay hesabındaki saat dilimi.
+- Redis'teki oturum kaydının gerçek anahtarı ve formatı (`broker.session.*` ile ayarlanabilir).
+- `broker.gelen.istekler` sayacının tag anahtarları (`broker.legacy-counter.*`) ve eski Elastic indeksinin ay hesabındaki saat dilimi (`broker.sink.elastic.index-zone`).
 - SSO sağlayıcısı ve rol claim'i; yetkilendirme servisi ile proje servisinin gerçek API'leri.
 - Profilsiz yanıtlarda `data_response` içeriği (şimdilik yalnızca status).
-- PROD'da base URL değişikliğinin onay akışına alınması; PROD'da `DISABLE`/`ROLLBACK` için acil durum politikası.
+- PROD'da base URL değişikliğinin onay akışına alınması; PROD'da `DISABLE`/`ROLLBACK` için acil durum politikası (şimdilik onay istiyor).
+- Frontend gövdesinde üst seviyede `broker` adlı alan gönderen istek var mı (eski dokümanda ezilir).
+- Broker span'ının `maintask/subtask` diye adlandırılması için OTel agent API'si.

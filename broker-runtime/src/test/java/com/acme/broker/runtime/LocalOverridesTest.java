@@ -24,7 +24,7 @@ import org.springframework.test.context.DynamicPropertySource;
 
 import com.acme.broker.core.testing.CoreFixtures;
 import com.acme.broker.core.testing.FakeHttpServer;
-import com.acme.broker.envadmin.testing.JsonHttp;
+import com.acme.broker.core.testing.JsonHttp;
 import com.acme.broker.runtime.route.RouteCache;
 import com.acme.broker.runtime.support.RuntimeFixture;
 

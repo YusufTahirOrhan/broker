@@ -8,7 +8,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-import com.acme.broker.envadmin.testing.JsonHttp;
+import com.acme.broker.core.testing.JsonHttp;
 import com.acme.broker.envadmin.testing.RuntimeContainers;
 
 /** PROD: the Admin API refuses test calls; a POST there would create real records. */

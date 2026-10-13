@@ -1,4 +1,4 @@
-package com.acme.broker.envadmin.testing;
+package com.acme.broker.core.testing;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -78,7 +78,7 @@ public final class TestCertificates {
         }
     }
 
-    private static KeyStore load(Path path) throws Exception {
+    public static KeyStore load(Path path) throws Exception {
         KeyStore store = KeyStore.getInstance("PKCS12");
         try (InputStream in = Files.newInputStream(path)) {
             store.load(in, PASSWORD.toCharArray());
