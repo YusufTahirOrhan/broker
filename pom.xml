@@ -30,6 +30,7 @@
     <modules>
         <module>broker-core</module>
         <module>broker-env-admin</module>
+        <module>broker-runtime</module>
     </modules>
 
     <dependencyManagement>

@@ -68,23 +68,30 @@ Modüller arası sözleşmeler de burada:
 
 Test-jar (`com.acme.broker.core.testing`): `CoreFixtures` (add_order_note, log-project, openapi-sample) ve `FakeHttpServer` (JDK `HttpServer` ile sahte servis); diğer modüllerin testleri kullanır.
 
-### broker-runtime (yapılacak)
+### broker-runtime (yeşil)
 
-Tek endpoint: `POST /broker`. Sıra (tasarım "Broker'da istek işleme"):
+Paket `com.acme.broker.runtime`. Tek endpoint `POST /broker`; akış `web/BrokerHandler`'da, tasarımdaki sırayla:
 
-1. `requestId` = UUIDv7, `queryId` = rastgele UUID, trace ID gelen `traceparent`'tan ya da yeni.
-2. Gövde JSON nesnesi değilse 400; `X-Token` yoksa 400.
-3. `RouteCache.find(maintask, subtask)` (bellek, `Names.key`); yoksa 404.
-4. Oturum ve yetki (Redis tek okuma; any-of; `perm_list` = tüm yetkiler).
-5. REQUEST olayı Kafka'ya, `send(...).get(timeout)` ile onay beklenir. Onay yoksa servis çağrılmaz, 500 `{"result": false}`.
-6. `RequestBodyValidator`; hata varsa 400 (önce RESPONSE olayı onaylanır).
-7. `BackendRequestBuilder` + JDK `HttpClient` (route timeout; yalnızca GET'te 502/503/504/IOException için retry).
-8. Dosya yanıtı: status ve header'lar gelince RESPONSE olayı, onaydan sonra stream. Değilse gövde okunur (üst sınır ayarlı), outcome gerçek status'tan, profil varsa zarflanır, RESPONSE onayı, yanıt.
-9. Her yanıtta `X-Request-Id`. Hata yollarında da iki olay onaylanmadan yanıt dönmez.
+1. `requestId` UUIDv7, `queryId` rastgele UUID; trace gelen `traceparent`'tan (geçersizse yeni), servise yeni span ID ile gider.
+2. Gövde JSON nesnesi değilse 400; `X-Token` yoksa 400 (`INVALID_REQUEST`). Gövde üst sınırı `broker.forward.max-request-bytes`.
+3. `RouteCache.find` (bellek, `Names.key`); yoksa 404 `UNKNOWN_TASK`.
+4. `login`/`logout`: oturum okunmaz, route anonim değilse 403. Diğerleri: tek Redis GET (`broker.session.*`). Anonim olmayan route'ta oturum yoksa 401, yetki yoksa 403 (any-of). Redis okunamazsa anonim olmayan route 503 `TECHNICAL_ERROR`, anonim route kullanıcısız devam eder.
+5. REQUEST olayı; onay yoksa servis çağrılmaz, 500 `{"result": false}`, olaylar spool'a.
+6. `RequestBodyValidator` + `BackendRequestBuilder`; servise `X-uid`, `X-Request-Id`, `traceparent`, ayarlıysa `X-User-Context` (`v1.<payload>.<HMAC-SHA256>`, payload `{userId, requestId, issuedAt}`).
+7. JDK `HttpClient` (HTTP/1.1, proxy yok, redirect izlenmez). Retry yalnızca GET'te 502/503/504 ve bağlantı hatasında; timeout tekrarlanmaz (route'un bütçesini zaten harcamıştır). Gövde okuma da route timeout'una tabidir.
+8. Dosya yanıtı (`BINARY` ya da `Content-Disposition`): RESPONSE olayı onaylanınca stream; `client_response` `{"info": ...}`, `body_size` `Content-Length`'ten. Değilse gövde okunur, outcome gerçek status'tan; profil varsa zarflanır (`client_response`'ta `data` boş string), yoksa gövde olduğu gibi döner ve `client_response` `{"status": <kod>}`.
+9. Her yanıtta `X-Request-Id`; hata yollarında REQUEST ve RESPONSE birlikte gönderilip ikisi de beklenir.
 
-Bileşenler: `RouteCache` (REPEATABLE READ snapshot yükleme, `broker:routes-changed` pub/sub, 15 sn versiyon kontrolü, `broker:loaded:{instanceId}` 60 sn TTL, `ApplicationRunner` ile açılış ve readiness), Kafka producer (tasarımdaki ayarlar; açılışta `partitionsFor` ısınması), spool (yerel dizine JSON satırları, arka planda yeniden gönderim), metrikler (`broker.requests` timer: maintask, subtask, outcome; eski sayaç), iç test endpoint'i (yalnızca ayarla açılır, paylaşılan gizli header), `local` profilinde override dosyası.
-
-Testler: Testcontainers PostgreSQL ve Redis, `spring-kafka-test` EmbeddedKafka, JDK `HttpServer` ile sahte servis. Mutlaka: log kapısı (Kafka onayı yoksa servis çağrılmaz ve 500 döner), dosya yanıtı stream'i ve gövdenin loglanmaması, Türkçe locale'de harf duyarsız eşleşme, profil zarflama, hata formatları.
+- **`status_code`:** Servis yanıt verdiyse servisin status'u; vermediyse (broker hataları, timeout, bağlantı hatası) frontend'e dönen status. ClickHouse kolonu böylece boş kalmaz.
+- **Log isteği gövdesi:** `logRequestBody=false` ise REQUEST olayında yalnızca zarf alanları yazılır (eski ana doküman zarfı yine taşır).
+- **RouteCache:** `RouteRepository.loadSnapshot()` REPEATABLE READ READ ONLY; bozuk route/profil atlanır (`broker.routes.skipped`). `broker:routes-changed` aboneliği, `broker.cache.verify-interval` (15 sn) kontrolü, her kontrolde `broker:loaded:{instanceId}` (60 sn TTL). İlk yükleme ve Kafka metadata ısınması `ApplicationRunner` (ısınma önce).
+- **Spool:** istek başına bir `.jsonl` dosyası (atomik taşıma), `broker.spool.resend-interval` ile eskiden yeniye gönderilir; ilk hatada durur. Gauge `broker.log.spool.files`.
+- **Metrikler:** `broker.requests` (maintask, subtask, outcome; bilinmeyen subtask `UNKNOWN`), `broker.gelen.istekler` (tag anahtarları ve "Bilinmeyen ..." değerleri `broker.legacy-counter.*`), `broker.log.ack`, `broker.log.unavailable`, `broker.routes.config.version`.
+- **İç test endpoint'i:** `POST /internal/v1/test`, yalnızca `broker.test.enabled=true` iken oluşur; `X-Broker-Test-Secret` sabit zamanlı karşılaştırılır. Kafka'ya yazmaz.
+- **`local` profili:** `LocalOverrides` (`broker-local.json`, `baseUrls` + `routes`, dosya değişince 2 sn içinde uygulanır), `log-sink: console`, `broker.local.skip-permission-check-for-overrides`.
+- **Flyway kapalı** (`spring.flyway.enabled=false`): broker şemaya hiç yazmaz.
+- **Testler:** env-admin'in migration'ı ve `RuntimeStore`'u ile runtime DB, Testcontainers PostgreSQL ve Redis, EmbeddedKafka, `FakeHttpServer`. Log kapısı topic'i olmayan bir Kafka ile denenir (servis çağrılmaz, 500, spool; topic açılınca spool gönderilir).
+- **Tracing:** span adı ve attribute'lar OTel Java agent'ına bırakıldı; broker `traceparent`'ı taşır. Span'ı `maintask/subtask` diye adlandırmak için agent'ın API'si eklenmeli (açık).
 
 ### broker-env-admin (yeşil)
 
@@ -128,7 +135,7 @@ Derlemede en olası hata kaynakları bunlar; şüphede `mvn dependency:tree` ile
 
 1. ~~`mvn -B verify`; `broker-core` derleme ve test hatalarını düzelt.~~
 2. ~~`broker-env-admin` (runtime şeması burada; runtime testleri de kullanır).~~
-3. `broker-runtime`.
+3. ~~`broker-runtime`.~~
 4. `broker-log-sink`.
 5. `broker-admin`.
 6. Her modül yeşil olunca kök pom'a ekle, commit'le, push'la; sözleşme değiştiyse `docs/frontend-guide.md`'yi güncelle.

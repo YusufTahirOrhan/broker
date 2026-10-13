@@ -1,0 +1,90 @@
+spring:
+  application:
+    name: broker-runtime
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    # Runtime DB'yi yalnızca okur
+    url: ${BROKER_RUNTIME_DB_URL:jdbc:postgresql://localhost:5432/broker}
+    username: ${BROKER_RUNTIME_DB_USER:broker_runtime_reader}
+    password: ${BROKER_RUNTIME_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 4
+      read-only: true
+  flyway:
+    # Şema ortam Admin API'sinindir; broker runtime DB'ye hiç yazmaz
+    enabled: false
+  data:
+    redis:
+      host: ${BROKER_REDIS_HOST:localhost}
+      port: ${BROKER_REDIS_PORT:6379}
+      timeout: 500ms
+  kafka:
+    bootstrap-servers: ${BROKER_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      acks: all                       # onay = olay en az iki replikada (min.insync.replicas=2)
+      compression-type: zstd
+      batch-size: 131072
+      buffer-memory: 67108864
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+      properties:
+        enable.idempotence: true
+        linger.ms: 2                  # her istek kendi onayını beklediği için kısa
+        max.block.ms: 50              # metadata ya da tampon yoksa beklemeden hata ver
+        request.timeout.ms: 1500
+        delivery.timeout.ms: 2000     # bir olayın onay bütçesi; aşılırsa istek 500 alır
+
+server:
+  port: ${BROKER_PORT:8080}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+broker:
+  environment: ${BROKER_ENVIRONMENT:DEV}
+  instance-id: ${BROKER_INSTANCE_ID:}
+  readable-headers:
+    - Accept-Language
+    - X-Clientip
+    - X-User-Agent
+  log-sink: kafka
+  cache:
+    verify-interval: 15s
+  session:
+    # Gerçek anahtar ve format bugünkü broker kodundan teyit edilmeli
+    key-pattern: "broker:session:{token}"
+    user-id-field: userId
+    permissions-field: permissions
+  kafka:
+    topic: broker.logs.v1
+    ack-timeout: 2500ms
+  spool:
+    directory: ${BROKER_SPOOL_DIR:/var/lib/broker/log-spool}
+    resend-interval: 10s
+  forward:
+    connect-timeout: 2s
+    user-context-secret: ${BROKER_USER_CONTEXT_SECRET:}
+  legacy-counter:
+    # Tag anahtarları eski koddan teyit edilmeli
+    name: broker.gelen.istekler
+    project-tag: maintask
+    endpoint-tag: subtask
+  test:
+    # Yalnızca DEV ve TEST'te açılır; ortam Admin API'si paylaşılan gizli anahtarla çağırır
+    enabled: ${BROKER_TEST_ENABLED:false}
+    secret: ${BROKER_TEST_SECRET:}
+
+logging:
+  structured:
+    format:
+      console: ${BROKER_LOG_FORMAT:}

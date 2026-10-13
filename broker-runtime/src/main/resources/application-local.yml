@@ -1,0 +1,19 @@
+# Geliştiricinin makinesi: route'lar DEV runtime DB'sinden salt okunur kullanıcıyla, üstüne broker-local.json
+spring:
+  datasource:
+    url: ${BROKER_DEV_RUNTIME_DB_URL:jdbc:postgresql://localhost:5432/broker}
+    username: ${BROKER_DEV_RUNTIME_DB_USER:broker_runtime_reader}
+    password: ${BROKER_DEV_RUNTIME_DB_PASSWORD:}
+
+broker:
+  local-overrides: file:./broker-local.json
+  log-sink: console                        # Kafka'ya yazmaz, DEV loglarını kirletmez
+  cache:
+    verify-interval: 2s                    # override dosyası değişince restart gerekmesin
+  spool:
+    directory: ./var/log-spool
+  local:
+    skip-permission-check-for-overrides: false
+  test:
+    enabled: true
+    secret: local-test-secret
