@@ -1,0 +1,173 @@
+package com.acme.broker.core.request;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+
+import org.junit.jupiter.api.Test;
+
+import com.acme.broker.core.json.Json;
+import com.acme.broker.core.route.HttpMethodName;
+import com.acme.broker.core.route.PathTemplate;
+import com.acme.broker.core.route.RouteDefinition;
+import com.acme.broker.core.route.RouteDefinitionParser;
+import com.acme.broker.core.route.RouteValidator;
+import com.acme.broker.core.route.RouteValidatorTest;
+import com.acme.broker.core.validation.FieldError;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
+
+class BackendRequestBuilderTest {
+
+    private static final RouteValidator.Context READABLE = RouteValidator.Context.of(List.of("Accept-Language"));
+
+    private static RouteDefinition definition(String json) {
+        RouteDefinitionParser.Parsed parsed = RouteDefinitionParser.parse(Json.parse(json));
+        assertThat(parsed.errors()).isEmpty();
+        return parsed.definition();
+    }
+
+    private static BackendRequest build(String method, String path, String definitionJson, String bodyJson,
+                                        Map<String, String> headers, String userId) {
+        RouteDefinition definition = definition(definitionJson);
+        ObjectNode body = (ObjectNode) Json.parse(bodyJson);
+        RequestBodyValidator.Result validated = RequestBodyValidator.validate(body, definition.request().fields());
+        assertThat(validated.errors()).isEmpty();
+        TreeMap<String, String> caseInsensitive = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        caseInsensitive.putAll(headers);
+        RequestContext context = new RequestContext(body, validated.effectiveBody(), caseInsensitive::get, READABLE,
+                userId, "0192f1c4-7a3b-7c1e-9d2f-5b8e4a1c3d20");
+        return BackendRequestBuilder.build(HttpMethodName.valueOf(method), PathTemplate.parse(path), definition,
+                "http://order-service.dev.svc:8080/", context);
+    }
+
+    @Test
+    void designDocumentExample() {
+        BackendRequest request = build("POST", "/orders/{id}/notes", RouteValidatorTest.ADD_ORDER_NOTE, """
+                {"maintask": "order-service", "subtask": "add_order_note", "application": "web", "uid": "u12345",
+                 "siparisNo": 981, "notMetni": "Kapıya bırakın"}
+                """, Map.of("accept-language", "tr-TR"), "u12345");
+
+        assertThat(request.uri().toString()).isEqualTo("http://order-service.dev.svc:8080/orders/981/notes?notify=false");
+        assertThat(request.headers()).containsEntry("X-Channel", List.of("WEB"))
+                .containsEntry("Accept-Language", List.of("tr-TR"))
+                .containsEntry("X-uid", List.of("u12345"))
+                .containsEntry("Content-Type", List.of("application/json"));
+        JsonNode body = Json.parse(request.body());
+        assertThat(body).isEqualTo(Json.parse("""
+                {"text": "Kapıya bırakın", "authorId": "u12345", "source": "WEB"}
+                """));
+    }
+
+    @Test
+    void userComesFromTheSessionNotFromTheBody() {
+        BackendRequest request = build("POST", "/orders/{id}/notes", RouteValidatorTest.ADD_ORDER_NOTE, """
+                {"uid": "someone-else", "siparisNo": 1, "notMetni": "x"}
+                """, Map.of(), "u12345");
+        assertThat(request.headers().get("X-uid")).containsExactly("u12345");
+        assertThat(Json.text(Json.parse(request.body()).get("authorId"))).isEqualTo("u12345");
+    }
+
+    @Test
+    void optionalValuesWithoutAValueAreNotSent() {
+        BackendRequest request = build("GET", "/orders", """
+                {"request": {"fields": [{"name": "status", "type": "string"}, {"name": "ids", "type": "array"}],
+                             "queryParams": {"status": "${request.status}", "id": "${request.ids}"},
+                             "headers": {"Accept-Language": "${header.Accept-Language}"}}}
+                """, """
+                {"ids": [3, 4]}
+                """, Map.of(), null);
+        assertThat(request.uri().toString()).isEqualTo("http://order-service.dev.svc:8080/orders?id=3&id=4");
+        assertThat(request.headers()).doesNotContainKeys("Accept-Language", "X-uid", "Content-Type");
+        assertThat(request.hasBody()).isFalse();
+    }
+
+    @Test
+    void pathValuesAreEncodedAsOneSegment() {
+        BackendRequest request = build("GET", "/files/{name}", """
+                {"request": {"fields": [{"name": "ad", "type": "string", "required": true}],
+                             "pathVariables": {"name": "${request.ad}"}}}
+                """, """
+                {"ad": "a/b ç?.txt"}
+                """, Map.of(), null);
+        assertThat(request.uri().getRawPath()).isEqualTo("/files/a%2Fb%20%C3%A7%3F.txt");
+    }
+
+    @Test
+    void passThroughDropsOnlyTheEnvelope() {
+        BackendRequest request = build("POST", "/orders", """
+                {"request": {"body": {"mode": "PASS_THROUGH"}}}
+                """, """
+                {"maintask": "m", "subtask": "s", "application": "web", "uid": "u", "a": 1, "b": {"c": true}}
+                """, Map.of(), "u12345");
+        assertThat(Json.parse(request.body())).isEqualTo(Json.parse("{\"a\": 1, \"b\": {\"c\": true}}"));
+    }
+
+    @Test
+    void defaultsAreAppliedBeforeMapping() {
+        BackendRequest request = build("POST", "/orders/{id}/notes", RouteValidatorTest.ADD_ORDER_NOTE, """
+                {"siparisNo": 7, "notMetni": "n", "bildir": true}
+                """, Map.of(), "u");
+        assertThat(request.uri().getQuery()).isEqualTo("notify=true");
+    }
+
+    @Test
+    void multipartCarriesFilesAndText() {
+        String content = Base64.getEncoder().encodeToString("merhaba".getBytes(StandardCharsets.UTF_8));
+        BackendRequest request = build("POST", "/upload", """
+                {"request": {"fields": [{"name": "dosya", "type": "object", "required": true},
+                                        {"name": "aciklama", "type": "string"}],
+                             "body": {"mode": "MULTIPART", "parts": [
+                               {"name": "file", "value": "${request.dosya}", "file": true},
+                               {"name": "note", "value": "${request.aciklama}"}]}}}
+                """, """
+                {"dosya": {"fileName": "a.txt", "contentType": "text/plain", "base64": "%s"}, "aciklama": "not"}
+                """.formatted(content), Map.of(), null);
+        String body = new String(request.body(), StandardCharsets.UTF_8);
+        assertThat(request.contentType()).startsWith("multipart/form-data; boundary=");
+        assertThat(body).contains("name=\"file\"; filename=\"a.txt\"", "Content-Type: text/plain", "merhaba",
+                "name=\"note\"", "\r\n\r\nnot\r\n");
+        assertThat(request.previewBody().get(0).get("size").intValue()).isEqualTo(7);
+    }
+
+    @Test
+    void bodyValidationReportsMissingAndWrongTypes() {
+        RouteDefinition definition = definition(RouteValidatorTest.ADD_ORDER_NOTE);
+        RequestBodyValidator.Result result = RequestBodyValidator.validate(
+                (ObjectNode) Json.parse("{\"siparisNo\": \"981\"}"), definition.request().fields());
+        assertThat(result.errors()).extracting(FieldError::field).containsExactly("siparisNo", "notMetni");
+        assertThat(result.errors().getFirst().message()).isEqualTo("integer bekleniyor");
+    }
+
+    @Test
+    void nestedFieldsUseDottedPaths() {
+        RouteDefinition definition = definition("""
+                {"request": {"fields": [{"name": "adres.il", "type": "string", "required": true},
+                                        {"name": "adres.ulke", "type": "string", "default": "TR"}]}}
+                """);
+        RequestBodyValidator.Result result = RequestBodyValidator.validate(
+                (ObjectNode) Json.parse("{\"adres\": {\"il\": \"Ankara\"}}"), definition.request().fields());
+        assertThat(result.errors()).isEmpty();
+        assertThat(Json.text(result.effectiveBody().get("adres").get("ulke"))).isEqualTo("TR");
+
+        result = RequestBodyValidator.validate((ObjectNode) Json.parse("{\"adres\": \"Ankara\"}"),
+                definition.request().fields());
+        assertThat(result.errors()).extracting(FieldError::field).containsExactly("adres.il");
+    }
+
+    @Test
+    void missingPathValueFailsTheBuild() {
+        RouteDefinition definition = definition("""
+                {"request": {"pathVariables": {"id": "${request.id}"}}}
+                """);
+        RequestContext context = new RequestContext(Json.object(), Json.object(), name -> null, READABLE, null, "r");
+        assertThatThrownBy(() -> BackendRequestBuilder.build(HttpMethodName.GET, PathTemplate.parse("/o/{id}"),
+                definition, "http://x", context)).isInstanceOf(RequestBuildException.class);
+    }
+}

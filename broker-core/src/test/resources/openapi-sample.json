@@ -1,0 +1,81 @@
+{
+  "openapi": "3.0.1",
+  "info": { "title": "order-service", "version": "v0" },
+  "paths": {
+    "/orders/{id}": {
+      "get": {
+        "operationId": "getOrder",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "integer", "format": "int64" } } ],
+        "responses": { "200": { "description": "OK", "content": { "*/*": { "schema": { "$ref": "#/components/schemas/OrderDto" } } } } }
+      },
+      "delete": {
+        "operationId": "deleteOrder",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } } ],
+        "responses": { "204": { "description": "No Content" } }
+      }
+    },
+    "/orders/{id}/notes": {
+      "post": {
+        "operationId": "addNote",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "name": "notify", "in": "query", "required": false, "schema": { "type": "boolean" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NoteRequest" } } }
+        },
+        "responses": { "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NoteDto" } } } } }
+      }
+    },
+    "/reports/{id}/excel": {
+      "get": {
+        "operationId": "excel",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } } ],
+        "responses": { "200": { "description": "OK", "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } } } }
+      }
+    },
+    "/files": {
+      "post": {
+        "operationId": "upload",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [ "file" ],
+                "properties": { "file": { "type": "string", "format": "binary" }, "note": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "OK" } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "NoteRequest": {
+        "type": "object",
+        "required": [ "text" ],
+        "properties": {
+          "text": { "type": "string" },
+          "authorId": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "NoteDto": { "type": "object", "properties": { "id": { "type": "integer" } } },
+      "OrderDto": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/OrderItem" } }
+        }
+      },
+      "OrderItem": {
+        "type": "object",
+        "properties": { "sku": { "type": "string" }, "order": { "$ref": "#/components/schemas/OrderDto" } }
+      }
+    }
+  }
+}

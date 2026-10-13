@@ -1,0 +1,115 @@
+# Devir notu
+
+Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; kodda yalnızca ortak çekirdek (`broker-core`) yazıldı ve **henüz hiç derlenmedi**. Önceki çalışma ortamında Maven Central'a erişim yoktu. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
+
+Son güncelleme: 2026-10-13.
+
+## Kaynaklar
+
+| Belge | Repodaki kopya | Canlı sürüm |
+| --- | --- | --- |
+| Tasarım dokümanı | `docs/design.md` | https://claude.ai/code/artifact/b5c786de-4fe3-430e-b5f4-5a44d6730c0b |
+| Frontend rehberi (admin API sözleşmesi) | `docs/frontend-guide.md` | https://claude.ai/code/artifact/77705450-7cee-4350-94a9-accec2378a1a |
+
+`docs/frontend-guide.md` merkezi admin API'sinin sözleşmesidir: yollar, gövdeler, hata kodları ve kurallar oradan birebir uygulanır. Sözleşme değişirse aynı commit'te bu dosya ve sonundaki "Değişiklik kaydı" tablosu güncellenir, commit mesajına "Frontend rehberi değişti" yazılır. Canlı sürüm oradan eşitlenir.
+
+## Verilmiş kararlar
+
+Tasarım dokümanındakilere ek olarak bu oturumda netleşenler:
+
+- **Platform:** Java 25, Spring Boot 4.1.1, Maven çok modüllü proje. Paket kökü `com.acme.broker` (şirket adına göre toplu değiştirilebilir).
+- **JSON:** Jackson 3 (`tools.jackson.*`; anotasyonlar `com.fasterxml.jackson.annotation.*`). Ağaç API'si yalnızca `broker-core/.../json/Json.java` içinden kullanılır; Jackson metot adı hatası çıkarsa tek yerde düzeltilir.
+- **Veri erişimi:** JPA yok; `JdbcClient` ve tasarımdaki SQL. Şemalar Flyway ile, tasarımdaki DDL'den.
+- **Broker'ın ortak hata formatı:** `{"result": false, "status": 403, "outcome": "DENIED", "message": "...", "requestId": "...", "errors": []}`. Durumlar: `X-Token` yok 400 `INVALID_REQUEST`, oturum yok 401 `DENIED`, yetki yok 403 `DENIED`, route yok 404 `UNKNOWN_TASK`, gövde `fields`'a uymuyor 400 `INVALID_REQUEST` (alan bazında `errors`).
+- **Log yazılamazsa:** `500` ve `{"result": false}`, outcome `LOG_UNAVAILABLE`; olaylar spool'a yazılır. Profil uygulanmaz.
+- **Profilsiz yanıt:** Gövde olduğu gibi döner. RESPONSE olayındaki `client_response` bu durumda yalnızca `{"status": <kod>}` olur, böylece loglanmamış veri `data_response`'a sızmaz (kullanıcıya teyit ettirilecek).
+- **Dosya yanıtı** (`BINARY` route ya da servis `Content-Disposition` döndürdü): `client_response` = `{"info": <route'un binaryInfo'su ya da "Dosya yanıtı: <dosya adı>">}`; gövde loglanmaz, onaydan sonra stream edilir.
+- **Timeout ve bağlantı hatası, profil yoksa:** ortak formatta 504 `TIMEOUT` ve 502 `TECHNICAL_ERROR`.
+- **Oturum:** `X-Token` değeri `login` ya da `logout` ise oturum işlemidir: oturum okunmaz, route anonim olmalıdır, parametre logu ve `broker.gelen.istekler` sayacı dışında kalır. Diğer isteklerde Redis'ten tek okuma yapılır. Anahtar ve format ayarla değiştirilebilir olmalı; varsayım: `broker:session:{token}` → `{"userId": "...", "permissions": [...]}`. Gerçek format bugünkü broker kodundan teyit edilmeli.
+- **Anonim route + oturum:** Token geçerliyse kullanıcı yine çözülür (`X-uid`, `perm_list`); geçersizse anonim route yine çalışır.
+- **Servise giden header'lar:** `X-uid` (oturumdaki kullanıcı), `X-Request-Id`, `traceparent`; gizli anahtar ayarlıysa HMAC imzalı `X-User-Context`.
+- **Test çağrıları** Kafka'ya log yazmaz; merkezi admin bunları kendisi audit eder.
+- **Eski sayaç:** `broker.gelen.istekler` tag anahtarları ayarla verilir (eski koddan teyit edilmeli). Bilinmeyenler "Bilinmeyen Proje" / "Bilinmeyen Endpoint".
+- **Elastic aylık indeks:** Ay, request ID'deki (UUIDv7) zamandan, ayarlanabilir saat diliminde (varsayılan UTC) hesaplanır; eski kodun saat dilimiyle teyit edilmeli. Parametre dokümanı `_id`'si `UUID.nameUUIDFromBytes(requestId|alan|sıra)`.
+- **Admin kimliği:** OAuth2 resource server (JWT); rollerin geldiği claim ve grup→rol eşlemesi ayardan. `local` profilinde HTTP Basic: `viewer`, `editor`, `approver`, `lead` (şifre = kullanıcı adı; `lead` üç role de sahip).
+- **Roller:** `VIEWER`, `ROUTE_EDITOR`, `APPROVER`. `ROUTE_EDITOR` DEV'e doğrudan uygular (talep onaysız uygulanır), TEST ve PROD için talep açar.
+- **Taşıma kuralları:** Onay gerekir = hedef ortam `requires_approval` **ya da** versiyon anonim erişimi açıyorsa (hangi ortam olursa olsun). Onay gerekenlerde gerekçe zorunlu. `ROLLBACK` yalnızca hedef ortama daha önce `APPLIED` olmuş bir versiyona; `DISABLE`/`ENABLE` hedefteki mevcut versiyonla. Profil önce, route sonra uygulanır. Ön kontroller ve adları `docs/frontend-guide.md`'de.
+- **Ortam ayarı:** `PUT /projects/{id}/environments/{env}` ortama hemen uygulanır; ortama ulaşılamazsa merkezde de değişmez (502 `ENV_UNREACHABLE`). Onay isteyen ortamda yalnızca `APPROVER` değiştirir (açık nokta).
+- **Arşiv:** Yalnızca hiçbir ortamda `ACTIVE` olmayan subtask arşivlenir (409 `ROUTE_DEPLOYED`).
+
+## Modüller ve durum
+
+### broker-core (yazıldı, derlenmedi)
+
+| Paket | İçerik |
+| --- | --- |
+| `json` | `Json`: Jackson 3 ağaç API'sinin tek kullanıldığı yer |
+| `naming` | `Names`: `Locale.ROOT` ile harf duyarsız anahtar, maintask/subtask/önek/son ek desenleri, önek çakışması |
+| `route` | Tanım modeli (`RouteDefinition`, `RequestSpec`, `FieldSpec`, `BodySpec`...), `RouteDefinitionParser` (yapısal hatalar), `RouteValidator` (kurallar, form yollarıyla hatalar), `PathTemplate` |
+| `template` | `${...}` motoru: `TemplateString`, `JsonTemplate`; tek yer tutucu tipini korur, değeri olmayan alan yazılmaz |
+| `request` | `RequestBodyValidator` (zorunlu/tip/varsayılan), `BackendRequestBuilder` (path, query, header, NONE/PASS_THROUGH/TEMPLATE/MULTIPART body), `RequestContext` |
+| `response` | `Outcome`, `ResponseProfile` (profil doğrulama ve zarflama; 5xx gövdesi şablona verilmez), `ClientResponse` |
+| `logging` | `LogEvent` + `EventCodec` (Kafka'daki snake_case şema), `Masker` (her derinlikte, harf duyarsız; kırpma) |
+| `legacy` | `LegacyDocuments`: olaylardan eski Elastic ana ve parametre dokümanları (`ElasticOperation`) |
+| `ids` | UUIDv7, trace/span ID, parametre dokümanı ID'si |
+| `spec` | `OpenApiSpec` ($ref çözümü, fingerprint), `SpecProposal` (operasyondan tanım önerisi) |
+| `sample` | `SampleParser` (JSON ya da bash/cmd "Copy as cURL"; kimlik header'larını atar), `SampleTemplate` (alan çıkarımı ve operasyona ad eşleme) |
+| `diff` | `JsonDiff`: alan yolu bazında fark |
+| `rules` | `DefinitionRules`: `GET /meta/definition-rules` yanıtı |
+
+Testleri `broker-core/src/test` altında; tasarım dokümanındaki örnekleri (add_order_note, log-project profili, eski Elastic dokümanları) doğruluyorlar.
+
+### broker-runtime (yapılacak)
+
+Tek endpoint: `POST /broker`. Sıra (tasarım "Broker'da istek işleme"):
+
+1. `requestId` = UUIDv7, `queryId` = rastgele UUID, trace ID gelen `traceparent`'tan ya da yeni.
+2. Gövde JSON nesnesi değilse 400; `X-Token` yoksa 400.
+3. `RouteCache.find(maintask, subtask)` (bellek, `Names.key`); yoksa 404.
+4. Oturum ve yetki (Redis tek okuma; any-of; `perm_list` = tüm yetkiler).
+5. REQUEST olayı Kafka'ya, `send(...).get(timeout)` ile onay beklenir. Onay yoksa servis çağrılmaz, 500 `{"result": false}`.
+6. `RequestBodyValidator`; hata varsa 400 (önce RESPONSE olayı onaylanır).
+7. `BackendRequestBuilder` + JDK `HttpClient` (route timeout; yalnızca GET'te 502/503/504/IOException için retry).
+8. Dosya yanıtı: status ve header'lar gelince RESPONSE olayı, onaydan sonra stream. Değilse gövde okunur (üst sınır ayarlı), outcome gerçek status'tan, profil varsa zarflanır, RESPONSE onayı, yanıt.
+9. Her yanıtta `X-Request-Id`. Hata yollarında da iki olay onaylanmadan yanıt dönmez.
+
+Bileşenler: `RouteCache` (REPEATABLE READ snapshot yükleme, `broker:routes-changed` pub/sub, 15 sn versiyon kontrolü, `broker:loaded:{instanceId}` 60 sn TTL, `ApplicationRunner` ile açılış ve readiness), Kafka producer (tasarımdaki ayarlar; açılışta `partitionsFor` ısınması), spool (yerel dizine JSON satırları, arka planda yeniden gönderim), metrikler (`broker.requests` timer: maintask, subtask, outcome; eski sayaç), iç test endpoint'i (yalnızca ayarla açılır, paylaşılan gizli header), `local` profilinde override dosyası.
+
+Testler: Testcontainers PostgreSQL ve Redis, `spring-kafka-test` EmbeddedKafka, JDK `HttpServer` ile sahte servis. Mutlaka: log kapısı (Kafka onayı yoksa servis çağrılmaz ve 500 döner), dosya yanıtı stream'i ve gövdenin loglanmaması, Türkçe locale'de harf duyarsız eşleşme, profil zarflama, hata formatları.
+
+### broker-env-admin (yapılacak)
+
+Tasarım "Ortam Admin API sözleşmesi": uygulama SQL'i (`promotion_id` ile idempotent, commit sonrası `PUBLISH`), kill switch, route listesi, `cache-status` (`broker:loaded:*`), spec çekme (base URL runtime DB'den, yol istekten ama doğrulanmış), OPTIONS yoklaması (redirect izlenmez), test (broker'ın iç endpoint'ine), `PUT /projects/{maintask}`. Runtime şeması Flyway ile bu modülde. mTLS (`server.ssl.client-auth=need`).
+
+### broker-admin (yapılacak)
+
+Sözleşme: `docs/frontend-guide.md`. Merkezi şema Flyway ile (rol yoksa GRANT atlanır; ortamlar placeholder ile seed). Proje servisi ve yetkilendirme servisi istemcileri ayarlanabilir HTTP; `local` profilinde bellek içi. Ortam Admin API istemcisi `SslBundles` ile mTLS. Gece drift yoklaması ve katalog senkronizasyonu zamanlanmış görev. Testler Testcontainers PostgreSQL ve sahte ortam istemcisiyle.
+
+### broker-log-sink (yapılacak)
+
+`broker-logs-elastic` ve `broker-logs-clickhouse` consumer group'ları, toplu dinleyici. Elastic: `LegacyDocuments` → `_bulk` NDJSON (`update` + `doc_as_upsert`, parametre dokümanları `index`). ClickHouse: `INSERT ... FORMAT JSONEachRow`, `date_time_input_format=best_effort`, token saklanmaz. Ayrıştırılamayan mesaj `broker.logs.v1.dlq`'ya; offset yalnızca başarılı yazmadan sonra.
+
+## Spring Boot 4 notları
+
+Derlemede en olası hata kaynakları bunlar; şüphede `mvn dependency:tree` ile doğrulayın.
+
+- Starter adları modülerleşti: `spring-boot-starter-webmvc`, `spring-boot-starter-kafka`, `spring-boot-starter-flyway` (+ `flyway-database-postgresql`), `spring-boot-starter-data-redis`, `spring-boot-starter-jdbc`, `spring-boot-starter-actuator`. OAuth2 resource server starter'ının Boot 4'teki adı kontrol edilmeli.
+- Test: `spring-boot-starter-test`, `spring-boot-starter-webmvc-test`, `spring-boot-testcontainers`; Testcontainers 2.x artefaktları `org.testcontainers:testcontainers-postgresql`, `testcontainers-junit-jupiter`.
+- springdoc: `springdoc-openapi-starter-webmvc-ui` 3.x (sürüm kök pom'da `springdoc.version`).
+
+## Sıradaki adımlar
+
+1. `mvn -B verify`; `broker-core` derleme ve test hatalarını düzelt.
+2. `broker-env-admin` (runtime şeması burada; runtime testleri de kullanır).
+3. `broker-runtime`.
+4. `broker-log-sink`.
+5. `broker-admin`.
+6. Her modül yeşil olunca kök pom'a ekle, commit'le, push'la; sözleşme değiştiyse `docs/frontend-guide.md`'yi güncelle.
+
+## Açık noktalar
+
+- Redis'teki oturum kaydının gerçek anahtarı ve formatı.
+- `broker.gelen.istekler` sayacının tag anahtarları ve eski Elastic indeksinin ay hesabındaki saat dilimi.
+- SSO sağlayıcısı ve rol claim'i; yetkilendirme servisi ile proje servisinin gerçek API'leri.
+- Profilsiz yanıtlarda `data_response` içeriği (şimdilik yalnızca status).
+- PROD'da base URL değişikliğinin onay akışına alınması; PROD'da `DISABLE`/`ROLLBACK` için acil durum politikası.
