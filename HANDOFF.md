@@ -1,6 +1,6 @@
 # Devir notu
 
-Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; kodda yalnızca ortak çekirdek (`broker-core`) yazıldı ve **henüz hiç derlenmedi**. Önceki çalışma ortamında Maven Central'a erişim yoktu. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
+Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı. Modüller "Sıradaki adımlar" sırasıyla yazılıyor; her biri `mvn -B verify` yeşil olunca commit'lenir. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
 
 Son güncelleme: 2026-10-13.
 
@@ -39,7 +39,7 @@ Tasarım dokümanındakilere ek olarak bu oturumda netleşenler:
 
 ## Modüller ve durum
 
-### broker-core (yazıldı, derlenmedi)
+### broker-core (yeşil)
 
 | Paket | İçerik |
 | --- | --- |
@@ -59,6 +59,15 @@ Tasarım dokümanındakilere ek olarak bu oturumda netleşenler:
 
 Testleri `broker-core/src/test` altında; tasarım dokümanındaki örnekleri (add_order_note, log-project profili, eski Elastic dokümanları) doğruluyorlar.
 
+Modüller arası sözleşmeler de burada:
+
+| Paket | İçerik |
+| --- | --- |
+| `runtime` | `RuntimeSignals`: `broker:routes-changed` kanalı, `broker:loaded:{instanceId}` anahtarı ve değeri `{"version": 43, "loadedAt": "..."}` (60 sn TTL) |
+| `testcall` | `TestCallRequest` / `TestCallResult` / `TestInterpretation`: merkez → ortam Admin API → broker'ın iç endpoint'i (`POST /internal/v1/test`, `X-Broker-Test-Secret`) |
+
+Test-jar (`com.acme.broker.core.testing`): `CoreFixtures` (add_order_note, log-project, openapi-sample) ve `FakeHttpServer` (JDK `HttpServer` ile sahte servis); diğer modüllerin testleri kullanır.
+
 ### broker-runtime (yapılacak)
 
 Tek endpoint: `POST /broker`. Sıra (tasarım "Broker'da istek işleme"):
@@ -77,9 +86,27 @@ Bileşenler: `RouteCache` (REPEATABLE READ snapshot yükleme, `broker:routes-cha
 
 Testler: Testcontainers PostgreSQL ve Redis, `spring-kafka-test` EmbeddedKafka, JDK `HttpServer` ile sahte servis. Mutlaka: log kapısı (Kafka onayı yoksa servis çağrılmaz ve 500 döner), dosya yanıtı stream'i ve gövdenin loglanmaması, Türkçe locale'de harf duyarsız eşleşme, profil zarflama, hata formatları.
 
-### broker-env-admin (yapılacak)
+### broker-env-admin (yeşil)
 
-Tasarım "Ortam Admin API sözleşmesi": uygulama SQL'i (`promotion_id` ile idempotent, commit sonrası `PUBLISH`), kill switch, route listesi, `cache-status` (`broker:loaded:*`), spec çekme (base URL runtime DB'den, yol istekten ama doğrulanmış), OPTIONS yoklaması (redirect izlenmez), test (broker'ın iç endpoint'ine), `PUT /projects/{maintask}`. Runtime şeması Flyway ile bu modülde. mTLS (`server.ssl.client-auth=need`).
+Paket `com.acme.broker.envadmin`. Uçlar `/admin/v1` altında; hatalar merkezle aynı problem formatında (`code`, `detail`, `errors`).
+
+| Uç | Davranış |
+| --- | --- |
+| `PUT /routes/{maintask}/{subtask}` | Tasarımdaki tek ifadeyle uygular. Yanıt `{"applied", "configVersion", "alreadyApplied", "signalled"}`. Aynı `promotionId` tekrar gelirse `alreadyApplied: true`; daha yeni talep varsa 409 `STALE_PROMOTION` (`currentPromotionId`); proje ya da profil ortamda yoksa 409 `PROJECT_NOT_FOUND` / `PROFILE_NOT_FOUND`. Tanım `RouteValidator` ile (header okunabilirliği hariç) doğrulanır |
+| `PUT /response-profiles/{name}` | Aynı desen; `ResponseProfile.parse` ile doğrulanır |
+| `POST /routes/{m}/{s}/disable` | Kill switch, `promotionId` ile; route yoksa 404 `ROUTE_NOT_FOUND`. `ENABLE` ayrı uç değil: hedefteki versiyon `PUT` ile yeniden uygulanır |
+| `PUT /projects/{maintask}` | `{"baseUrl", "enabled", "actor"}`; değişiklik varsa config versiyonu artar ve sinyal gider (broker'lar base URL'i snapshot'la okur) |
+| `GET /routes` | Projeler, profiller, tüm route'lar (DISABLED dahil) ve config versiyonu |
+| `GET /cache-status` | `broker:loaded:*` (SCAN) → instance başına `loadedVersion`, `loadedAt`, `upToDate` |
+| `GET /projects/{maintask}/spec?path=` | Base URL runtime DB'den; yol doğrulanır (`..`, `//`, şema, ters bölü reddedilir). Hata: 502 `UPSTREAM_ERROR` (`upstreamStatus`) |
+| `POST /probe` | `{"maintask", "httpMethod", "pathTemplate", "pathVariables"}` → `{"result", "status", "allow", "url", "message"}`; değeri verilmeyen path değişkeni `1` olur; redirect izlenmez; ulaşılamazsa `INCONCLUSIVE`, `status: null` |
+| `POST /test` | `TestCallRequest`'e kayıtlı base URL'i koyup broker'ın iç endpoint'ine iletir; kapalıysa 403 `TEST_NOT_ALLOWED`, broker'a ulaşılamazsa 502 `BROKER_UNREACHABLE` |
+
+- **Şema:** `db/migration/broker_runtime/V1__runtime_schema.sql` (tasarımdaki DDL; rol yoksa GRANT atlanır). Flyway şema sahibiyle (`BROKER_RUNTIME_DB_OWNER_*`), uygulama `broker_runtime_writer` ile çalışır.
+- **mTLS:** `server.ssl.bundle=env-admin`, `client-auth=need`; bundle `mtls` profilinde (`application-mtls.yml`). Profil açılmazsa uygulama başlamaz. `broker.env-admin.allowed-client-subjects` doluysa sertifika konusu da kontrol edilir (403 `CLIENT_NOT_ALLOWED`). Actuator ayrı portta (9090), TLS'siz.
+- **Audit:** `broker.audit` logger'ı; `operation`, `actor` (gövdeden ya da `X-Actor`), `promotion_id`, `client` alanları.
+- **Paketleme:** çalıştırılabilir jar `-exec` ekiyle; düz jar ve test-jar (`RuntimeContainers`, `JsonHttp`, `TestCertificates`) broker-runtime testlerinde kullanılır.
+- **Testler:** Testcontainers PostgreSQL ve Redis, `FakeHttpServer`; mTLS keytool ile üretilen sertifikalarla uçtan uca denenir.
 
 ### broker-admin (yapılacak)
 
@@ -99,8 +126,8 @@ Derlemede en olası hata kaynakları bunlar; şüphede `mvn dependency:tree` ile
 
 ## Sıradaki adımlar
 
-1. `mvn -B verify`; `broker-core` derleme ve test hatalarını düzelt.
-2. `broker-env-admin` (runtime şeması burada; runtime testleri de kullanır).
+1. ~~`mvn -B verify`; `broker-core` derleme ve test hatalarını düzelt.~~
+2. ~~`broker-env-admin` (runtime şeması burada; runtime testleri de kullanır).~~
 3. `broker-runtime`.
 4. `broker-log-sink`.
 5. `broker-admin`.

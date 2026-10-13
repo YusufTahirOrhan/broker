@@ -1,0 +1,63 @@
+spring:
+  application:
+    name: broker-env-admin
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${BROKER_RUNTIME_DB_URL:jdbc:postgresql://localhost:5432/broker}
+    username: ${BROKER_RUNTIME_DB_USER:broker_runtime_writer}
+    password: ${BROKER_RUNTIME_DB_PASSWORD:}
+  flyway:
+    # DDL şema sahibiyle çalışır; uygulama broker_runtime_writer ile yazar
+    user: ${BROKER_RUNTIME_DB_OWNER_USER:${spring.datasource.username}}
+    password: ${BROKER_RUNTIME_DB_OWNER_PASSWORD:${spring.datasource.password}}
+    schemas: broker_runtime
+    default-schema: broker_runtime
+    locations: classpath:db/migration/broker_runtime
+  data:
+    redis:
+      host: ${BROKER_REDIS_HOST:localhost}
+      port: ${BROKER_REDIS_PORT:6379}
+
+server:
+  port: ${BROKER_ENV_ADMIN_PORT:8443}
+  # mTLS: bundle "mtls" profilinde tanımlıdır (application-mtls.yml). Profil açılmazsa bundle bulunamaz ve
+  # uygulama başlamaz; TLS'siz bir Admin API yanlışlıkla ayağa kalkmaz.
+  ssl:
+    enabled: ${BROKER_ENV_ADMIN_SSL_ENABLED:true}
+    bundle: env-admin
+    client-auth: need
+
+management:
+  server:
+    # health ve metrikler ayrı portta, mTLS'siz (kubelet ve izleme istemci sertifikası taşımaz)
+    port: ${BROKER_ENV_ADMIN_MANAGEMENT_PORT:9090}
+    ssl:
+      enabled: false
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+broker:
+  env-admin:
+    environment: ${BROKER_ENVIRONMENT:DEV}
+    # İzin verilen istemci sertifikası konuları (RFC 2253). DN virgül içerdiği için liste indeksle verilir:
+    # BROKER_ENVADMIN_ALLOWEDCLIENTSUBJECTS_0="CN=broker-admin,O=Acme". Boş liste trust store'un kabul ettiği
+    # her sertifikayı kabul eder.
+    allowed-client-subjects: []
+    upstream:
+      connect-timeout: 2s
+      request-timeout: 10s
+    test:
+      # yalnızca test çağrısına açık ortamlarda (DEV, TEST); PROD'da kapalı kalır
+      enabled: ${BROKER_ENV_ADMIN_TEST_ENABLED:false}
+      broker-url: ${BROKER_INTERNAL_URL:}
+      secret: ${BROKER_TEST_SECRET:}
+      timeout: 65s
+
+logging:
+  structured:
+    format:
+      console: ${BROKER_LOG_FORMAT:}

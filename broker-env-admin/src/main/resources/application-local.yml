@@ -1,0 +1,16 @@
+# Yerel geliştirme: TLS yok, test çağrıları yerel broker'a gider
+server:
+  port: 8081
+  ssl:
+    enabled: false
+
+management:
+  server:
+    port: 9091
+
+broker:
+  env-admin:
+    test:
+      enabled: true
+      broker-url: http://localhost:8080
+      secret: local-test-secret

@@ -36,15 +36,25 @@ public final class RouteValidator {
     private RouteValidator() {
     }
 
-    /** Headers of the frontend request that {@code ${header.<name>}} may read. */
+    /**
+     * Headers of the frontend request that {@code ${header.<name>}} may read; {@code readableHeaders} null means any.
+     */
     public record Context(Set<String> readableHeaders) {
 
         public static Context of(Collection<String> readableHeaders) {
             return new Context(readableHeaders.stream().map(Names::key).collect(Collectors.toUnmodifiableSet()));
         }
 
+        /**
+         * Accepts every header. For components that do not own the readable-header list, such as the environment
+         * Admin API; the broker still refuses to read a header outside its list.
+         */
+        public static Context anyHeader() {
+            return new Context(null);
+        }
+
         public boolean canRead(String header) {
-            return header != null && readableHeaders.contains(Names.key(header));
+            return header != null && (readableHeaders == null || readableHeaders.contains(Names.key(header)));
         }
     }
 
