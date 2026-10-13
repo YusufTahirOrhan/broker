@@ -1009,7 +1009,7 @@ Spool artık bir yanıtın dönmesi için yeterli sayılmaz. Yalnızca log yazı
 
 ### ClickHouse
 
-TTL'deki 180 gün ve 400 gün örnek değerlerdir; saklama süreleri açık bir karardır. Bu DDL bu çalışma ortamında bir ClickHouse sunucusunda çalıştırılamadı; ilk kurulumda bir test sunucusunda denenmelidir. JSON yazılırken ISO 8601 zaman damgaları için `date_time_input_format = 'best_effort'` ayarı gerekir.
+TTL'deki 180 gün ve 400 gün örnek değerlerdir; saklama süreleri açık bir karardır. Bu DDL ClickHouse 24.8'de çalıştırıldı; sink'in yazdığı satırlar, dakikalık metrik view'ı ve `FINAL` ile tekilleştirme `broker-log-sink`'in testinde gerçek sunucuyla denenir. JSON yazılırken ISO 8601 zaman damgaları için `date_time_input_format = 'best_effort'` ayarı gerekir.
 
 ```sql
 CREATE DATABASE IF NOT EXISTS broker_logs;
@@ -1294,7 +1294,7 @@ Path tabanlı bir sözleşme (`POST /api/{maintask}/{subtask}`) ileride hazır g
 - [ ] **Elastic ve ClickHouse'un rolü:** Uzun vadede Elastic yalnızca arama için mi kalacak, yoksa tek depo ClickHouse mu olacak?
 - [ ] **Acil durum politikası:** PROD'da DISABLE ve ROLLBACK önceden onay mı istesin, yoksa sonradan gözden geçirme mi yeterli?
 - [ ] **Çalışma ortamı:** Kubernetes mi, VM mi? Servis keşfi ve spool'un diski buna göre seçilir.
-- [ ] **ClickHouse DDL'i:** Bir test sunucusunda çalıştırılıp doğrulanmalı.
+- [x] **ClickHouse DDL'i:** ClickHouse 24.8'de çalıştırıldı ve sink'in satırlarıyla doğrulandı (`broker-log-sink`, `RealTargetsTest`).
 - [x] **Spring Boot sürümü:** Java 25 ve Spring Boot 4.1.1. ECS formatında loglama Spring Boot'un yapılandırılmış loglamasıyla (`logging.structured.format.console=ecs`) gelir; OTel Java agent'ı bundan bağımsız eklenir.
 - [x] **`perm_list`:** Bugünkü gibi kullanıcının tüm yetkileri yazılır. Yalnızca erişimi sağlayan yetkilerle süzmek şimdilik yapılmayacak; ileride eklenebilir.
 - [ ] **`alarm` indeksi:** Örneği yok; kullanılıyorsa bir örnek dokümanla aynı şekilde taşınacak.
