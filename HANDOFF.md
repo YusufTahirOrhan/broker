@@ -119,9 +119,17 @@ Paket `com.acme.broker.envadmin`. Uçlar `/admin/v1` altında; hatalar merkezle 
 
 Sözleşme: `docs/frontend-guide.md`. Merkezi şema Flyway ile (rol yoksa GRANT atlanır; ortamlar placeholder ile seed). Proje servisi ve yetkilendirme servisi istemcileri ayarlanabilir HTTP; `local` profilinde bellek içi. Ortam Admin API istemcisi `SslBundles` ile mTLS. Gece drift yoklaması ve katalog senkronizasyonu zamanlanmış görev. Testler Testcontainers PostgreSQL ve sahte ortam istemcisiyle.
 
-### broker-log-sink (yapılacak)
+### broker-log-sink (yeşil)
 
-`broker-logs-elastic` ve `broker-logs-clickhouse` consumer group'ları, toplu dinleyici. Elastic: `LegacyDocuments` → `_bulk` NDJSON (`update` + `doc_as_upsert`, parametre dokümanları `index`). ClickHouse: `INSERT ... FORMAT JSONEachRow`, `date_time_input_format=best_effort`, token saklanmaz. Ayrıştırılamayan mesaj `broker.logs.v1.dlq`'ya; offset yalnızca başarılı yazmadan sonra.
+Paket `com.acme.broker.sink`. İki `@KafkaListener` (toplu), her biri kendi consumer group'unda; `broker.sink.elastic.enabled` ve `broker.sink.clickhouse.enabled` ile ayrı ayrı açılır (aynı imaj iki deployment olarak da çalışabilir).
+
+- **Elastic (`broker-logs-elastic`):** `LegacyDocuments` → tek `_bulk` NDJSON; ana doküman `update` + `doc_as_upsert` + `retry_on_conflict`, parametre dokümanları `index`. Kimlik `ApiKey` ya da basic. Öğe hatası 429/5xx → batch yeniden denenir; diğer 4xx → o olay DLQ'ya.
+- **ClickHouse (`broker-logs-clickhouse`):** `INSERT INTO broker_logs.broker_log FORMAT JSONEachRow`, `date_time_input_format=best_effort`; satırda `null` yok (varsayılanlar), `token`/`perm_list`/`client_response`/`query_id` yazılmaz. 400 → satır satır tekrar, kabul edilmeyen satır DLQ'ya; 401/403/404/5xx/bağlantı → batch yeniden denenir.
+- **DLQ:** `broker.logs.v1.dlq`, orijinal key/değer ve `broker.dlq.sink`, `broker.dlq.reason`, `broker.dlq.origin` header'ları; DLQ onayı gelmeden offset commit edilmez.
+- **Offset:** `ack-mode: batch`; hata durumunda `DefaultErrorHandler` sınırsız sabit aralıkla (`broker.sink.retry-interval`) aynı batch'i dener, kayıt atlanmaz. Batch: `max-poll-records` 10.000, `fetch-max-wait` 1 sn.
+- **Kurulum dosyaları:** `clickhouse/broker_logs.sql` (tasarımdaki DDL) ve `elastic/broker-fields.component-template.json` (mevcut `requests_*` şablonunun `composed_of` listesine eklenir). Sink tablo ya da şablon oluşturmaz.
+- **Testler:** EmbeddedKafka; Elastic ve ClickHouse HTTP sahteleri (`update`/`doc_as_upsert` birleştirmesini uygular). REQUEST/RESPONSE sırası, bir hedef düşükken diğerinin ilerlemesi ve düşük hedefin offset'inin commit edilmemesi, bozuk mesajın DLQ'ya gidip partition'ı durdurmaması, hedefin reddettiği olayların DLQ'ya gitmesi denenir.
+- **Açık:** ClickHouse DDL'i ve gerçek Elastic eşlemesi bu oturumda da gerçek sunucuda çalıştırılamadı (Docker Hub 429). İlk kurulumda bir test sunucusunda `broker_logs.sql` çalıştırılıp sink'in satırları kabul edildiği görülmeli.
 
 ## Spring Boot 4 notları
 
@@ -136,7 +144,7 @@ Derlemede en olası hata kaynakları bunlar; şüphede `mvn dependency:tree` ile
 1. ~~`mvn -B verify`; `broker-core` derleme ve test hatalarını düzelt.~~
 2. ~~`broker-env-admin` (runtime şeması burada; runtime testleri de kullanır).~~
 3. ~~`broker-runtime`.~~
-4. `broker-log-sink`.
+4. ~~`broker-log-sink`.~~
 5. `broker-admin`.
 6. Her modül yeşil olunca kök pom'a ekle, commit'le, push'la; sözleşme değiştiyse `docs/frontend-guide.md`'yi güncelle.
 

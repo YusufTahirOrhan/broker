@@ -1,0 +1,61 @@
+spring:
+  application:
+    name: broker-log-sink
+  threads:
+    virtual:
+      enabled: true
+  kafka:
+    bootstrap-servers: ${BROKER_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+      max-poll-records: 10000           # toplu yazım: 10.000 satır
+      fetch-max-wait: 1s                # ya da 1 saniye
+      fetch-min-size: 1048576
+      properties:
+        max.poll.interval.ms: 600000    # hedef düşükken aynı batch uzun süre yeniden denenebilir
+    producer:
+      # yalnızca DLQ için
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+    listener:
+      ack-mode: batch                   # offset yalnızca batch başarıyla yazılınca
+      concurrency: ${BROKER_SINK_CONCURRENCY:3}
+
+server:
+  port: ${BROKER_SINK_PORT:8090}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+broker:
+  sink:
+    topic: broker.logs.v1
+    dlq-topic: broker.logs.v1.dlq
+    retry-interval: 5s
+    elastic:
+      enabled: ${BROKER_SINK_ELASTIC_ENABLED:true}
+      url: ${BROKER_ELASTIC_URL:http://localhost:9200}
+      index-prefix: requests_
+      # Eski kodun ay hesabındaki saat dilimi; teyit edilmeli
+      index-zone: ${BROKER_ELASTIC_INDEX_ZONE:UTC}
+      api-key: ${BROKER_ELASTIC_API_KEY:}
+      username: ${BROKER_ELASTIC_USERNAME:}
+      password: ${BROKER_ELASTIC_PASSWORD:}
+    clickhouse:
+      enabled: ${BROKER_SINK_CLICKHOUSE_ENABLED:true}
+      url: ${BROKER_CLICKHOUSE_URL:http://localhost:8123}
+      table: broker_logs.broker_log
+      user: ${BROKER_CLICKHOUSE_USER:}
+      password: ${BROKER_CLICKHOUSE_PASSWORD:}
+
+logging:
+  structured:
+    format:
+      console: ${BROKER_LOG_FORMAT:}

@@ -8,6 +8,6 @@ Frontend'lerin tek endpoint'e gönderdiği `maintask`/`subtask` isteklerini, Dev
 | `broker-runtime` | Yazıldı | `POST /broker`: route çözümleme, yetki, Kafka onay kapısı, forward, zarflama |
 | `broker-env-admin` | Yazıldı | Ortam Admin API'si: runtime DB'ye uygulama, yoklama, spec, test |
 | `broker-admin` | Planlandı | Merkezi admin API'si (`docs/frontend-guide.md`) |
-| `broker-log-sink` | Planlandı | Kafka'dan Elastic (eski yapı) ve ClickHouse'a |
+| `broker-log-sink` | Yazıldı | Kafka'dan Elastic (eski yapı) ve ClickHouse'a |
 
 Derleme: Java 25 ve `mvn -B verify`. Ayrıntılar `HANDOFF.md`, `docs/design.md` ve `docs/frontend-guide.md`'de.
