@@ -5,13 +5,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
 import com.acme.broker.core.json.Json;
 import com.acme.broker.core.spec.OpenApiSpec;
+import com.acme.broker.core.testing.CoreFixtures;
 
 import tools.jackson.databind.JsonNode;
 
@@ -75,9 +75,7 @@ class SampleTest {
 
     @Test
     void draftMapsFieldsToTheChosenOperationByName() {
-        Map<String, OpenApiSpec.Operation> operations = OpenApiSpec.operations(
-                        com.acme.broker.core.spec.OpenApiSpecTest.sampleSpec()).stream()
-                .collect(Collectors.toMap(OpenApiSpec.Operation::key, Function.identity()));
+        Map<String, OpenApiSpec.Operation> operations = CoreFixtures.operationsByKey(CoreFixtures.sampleSpec());
         SampleTemplate.Result result = SampleTemplate.draft("""
                 {"maintask": "order-service", "subtask": "add_order_note", "siparisNo": 981, "text": "x",
                  "author_id": "u1", "adres": {"il": "Ankara"}}
@@ -95,7 +93,7 @@ class SampleTest {
 
     @Test
     void namesMatchIgnoringCaseAndSeparators() {
-        assertThat(SampleTemplate.match("authorId", List.of("author_id", "x").stream().collect(Collectors.toSet())))
+        assertThat(SampleTemplate.match("authorId", Set.of("author_id", "x")))
                 .isEqualTo("author_id");
         assertThat(SampleTemplate.match("il", java.util.Set.of("adres.il"))).isEqualTo("adres.il");
         assertThat(SampleTemplate.match("yok", java.util.Set.of("adres.il"))).isNull();

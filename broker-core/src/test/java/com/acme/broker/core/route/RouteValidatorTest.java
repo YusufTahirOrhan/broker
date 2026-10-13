@@ -7,36 +7,14 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import com.acme.broker.core.json.Json;
+import com.acme.broker.core.testing.CoreFixtures;
 import com.acme.broker.core.validation.FieldError;
 
 import tools.jackson.databind.JsonNode;
 
 class RouteValidatorTest {
 
-    static final String ADD_ORDER_NOTE = """
-            {
-              "request": {
-                "fields": [
-                  { "name": "siparisNo", "type": "integer", "required": true },
-                  { "name": "notMetni", "type": "string", "required": true },
-                  { "name": "bildir", "type": "boolean", "default": false }
-                ],
-                "pathVariables": { "id": "${request.siparisNo}" },
-                "queryParams": { "notify": "${request.bildir}" },
-                "headers": { "X-Channel": "WEB", "Accept-Language": "${header.Accept-Language}" },
-                "body": {
-                  "mode": "TEMPLATE",
-                  "contentType": "application/json",
-                  "template": { "text": "${request.notMetni}", "authorId": "${user.id}", "source": "WEB" }
-                }
-              },
-              "response": { "type": "JSON" },
-              "timeoutMs": 5000,
-              "retry": { "maxAttempts": 1 },
-              "logging": { "logRequestBody": true, "logResponseBody": false,
-                           "maskFields": ["password", "cardNo", "tckn"], "maxBodyBytes": 65536 }
-            }
-            """;
+    private static final String ADD_ORDER_NOTE = CoreFixtures.ADD_ORDER_NOTE;
 
     private final RouteValidator.Context context = RouteValidator.Context.of(List.of("Accept-Language", "X-Clientip"));
 

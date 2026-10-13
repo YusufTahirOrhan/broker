@@ -17,7 +17,7 @@ import com.acme.broker.core.route.PathTemplate;
 import com.acme.broker.core.route.RouteDefinition;
 import com.acme.broker.core.route.RouteDefinitionParser;
 import com.acme.broker.core.route.RouteValidator;
-import com.acme.broker.core.route.RouteValidatorTest;
+import com.acme.broker.core.testing.CoreFixtures;
 import com.acme.broker.core.validation.FieldError;
 
 import tools.jackson.databind.JsonNode;
@@ -49,7 +49,7 @@ class BackendRequestBuilderTest {
 
     @Test
     void designDocumentExample() {
-        BackendRequest request = build("POST", "/orders/{id}/notes", RouteValidatorTest.ADD_ORDER_NOTE, """
+        BackendRequest request = build("POST", "/orders/{id}/notes", CoreFixtures.ADD_ORDER_NOTE, """
                 {"maintask": "order-service", "subtask": "add_order_note", "application": "web", "uid": "u12345",
                  "siparisNo": 981, "notMetni": "Kapıya bırakın"}
                 """, Map.of("accept-language", "tr-TR"), "u12345");
@@ -67,7 +67,7 @@ class BackendRequestBuilderTest {
 
     @Test
     void userComesFromTheSessionNotFromTheBody() {
-        BackendRequest request = build("POST", "/orders/{id}/notes", RouteValidatorTest.ADD_ORDER_NOTE, """
+        BackendRequest request = build("POST", "/orders/{id}/notes", CoreFixtures.ADD_ORDER_NOTE, """
                 {"uid": "someone-else", "siparisNo": 1, "notMetni": "x"}
                 """, Map.of(), "u12345");
         assertThat(request.headers().get("X-uid")).containsExactly("u12345");
@@ -111,7 +111,7 @@ class BackendRequestBuilderTest {
 
     @Test
     void defaultsAreAppliedBeforeMapping() {
-        BackendRequest request = build("POST", "/orders/{id}/notes", RouteValidatorTest.ADD_ORDER_NOTE, """
+        BackendRequest request = build("POST", "/orders/{id}/notes", CoreFixtures.ADD_ORDER_NOTE, """
                 {"siparisNo": 7, "notMetni": "n", "bildir": true}
                 """, Map.of(), "u");
         assertThat(request.uri().getQuery()).isEqualTo("notify=true");
@@ -138,7 +138,7 @@ class BackendRequestBuilderTest {
 
     @Test
     void bodyValidationReportsMissingAndWrongTypes() {
-        RouteDefinition definition = definition(RouteValidatorTest.ADD_ORDER_NOTE);
+        RouteDefinition definition = definition(CoreFixtures.ADD_ORDER_NOTE);
         RequestBodyValidator.Result result = RequestBodyValidator.validate(
                 (ObjectNode) Json.parse("{\"siparisNo\": \"981\"}"), definition.request().fields());
         assertThat(result.errors()).extracting(FieldError::field).containsExactly("siparisNo", "notMetni");

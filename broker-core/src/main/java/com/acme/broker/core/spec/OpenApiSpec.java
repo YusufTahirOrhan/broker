@@ -30,6 +30,7 @@ public final class OpenApiSpec {
 
     private static final Set<String> METHODS = Set.of("get", "post", "put", "patch", "delete");
     private static final int MAX_REF_DEPTH = 32;
+    private static final String UNRESOLVED = "x-unresolved";
 
     private OpenApiSpec() {
     }
@@ -168,11 +169,14 @@ public final class OpenApiSpec {
             }
             if (node.isObject()) {
                 String ref = Json.stringField(node, "$ref");
+                if (ref != null && node.has(UNRESOLVED)) {
+                    return node; // a cut cycle stays cut when an already resolved tree is resolved again
+                }
                 if (ref != null) {
                     if (!ref.startsWith("#/") || stack.contains(ref) || stack.size() >= MAX_REF_DEPTH) {
                         ObjectNode marker = Json.object();
                         marker.put("$ref", ref);
-                        marker.put("x-unresolved", true);
+                        marker.put(UNRESOLVED, true);
                         return marker;
                     }
                     JsonNode target = root.at(ref.substring(1));

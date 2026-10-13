@@ -45,6 +45,10 @@ public final class Json {
         return value == null ? NullNode.getInstance() : NODES.stringNode(value);
     }
 
+    public static JsonNode number(int value) {
+        return NODES.numberNode(value);
+    }
+
     public static JsonNode number(long value) {
         return NODES.numberNode(value);
     }

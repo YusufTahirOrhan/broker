@@ -2,34 +2,26 @@ package com.acme.broker.core.spec;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 
 import com.acme.broker.core.json.Json;
 import com.acme.broker.core.route.RouteValidator;
+import com.acme.broker.core.testing.CoreFixtures;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
 class OpenApiSpecTest {
 
-    static JsonNode sampleSpec() {
-        try (InputStream in = OpenApiSpecTest.class.getResourceAsStream("/openapi-sample.json")) {
-            return Json.parse(in.readAllBytes());
-        } catch (IOException e) {
-            throw new IllegalStateException(e);
-        }
+    private static JsonNode sampleSpec() {
+        return CoreFixtures.sampleSpec();
     }
 
-    static Map<String, OpenApiSpec.Operation> byKey(JsonNode spec) {
-        return OpenApiSpec.operations(spec).stream()
-                .collect(Collectors.toMap(OpenApiSpec.Operation::key, Function.identity()));
+    private static Map<String, OpenApiSpec.Operation> byKey(JsonNode spec) {
+        return CoreFixtures.operationsByKey(spec);
     }
 
     @Test
