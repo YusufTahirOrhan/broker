@@ -531,6 +531,6 @@ Backend geliştirildikçe bu tablo güncellenir; en yeni kayıt en üsttedir. Bi
 ### Netleşmemiş noktalar
 
 - [ ] **SSO:** Hangi OIDC sağlayıcısı kullanılıyor ve roller token'ın hangi claim'inde geliyor?
-- [ ] **Yetki projesi:** Projeler ve yetkiler aynı yetki projesinden geliyor. Arama, ID ile okuma, yetki listeleme, açma ve varlık kontrolü için varsayılan uçlar (`GET /projects?query=`, `GET /projects/{id}`, `GET /permissions?prefix=`) gerçek API netleşince uyarlanacak; ekranın gördüğü `/catalog/projects` ve `Yetkiler` sekmesinin yolları değişmez.
+- [ ] **Yetki projesi:** Projeler ve yetkiler aynı yetki projesinden, Koordinatör'den geliyor. Arama, ID ile okuma, yetki listeleme, açma ve varlık kontrolü için varsayılan uçlar (`GET /projects?query=`, `GET /projects/{id}`, `GET /permissions?prefix=`) gerçek API netleşince uyarlanacak; ekranın gördüğü `/catalog/projects` ve `Yetkiler` sekmesinin yolları değişmez.
 - [ ] **PROD base URL'i:** Şimdilik yalnızca `APPROVER` değiştirebiliyor; ileride onay akışına alınabilir.
 - [ ] **Acil durum:** PROD'da `DISABLE` ve `ROLLBACK` de onay istiyor; tasarım dokümanında açık bir karar.

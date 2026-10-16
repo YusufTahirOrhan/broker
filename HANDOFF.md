@@ -44,7 +44,7 @@ Subtask editöründeki "Yanıt verisi loglansın" seçeneği mevcut `logging.log
 - **Açık:** `data_response.data`, yanıttaki `data` değerinin maskelenmiş (`maskFields` + `password`) JSON metni olur. `maxBodyBytes`'ı aşarsa UTF-8 karakteri bölmeden kırpılır ve `broker.body_truncated: true` yazılır. Alan string kaldığı için Elastic'teki eşleme değişmez. ClickHouse'a bugünkü gibi gövde yazılır.
 - **Profilsiz JSON yanıt:** Kapalıyken bugünkü gibi `{"status": <kod>}`. Açıkken maskelenmiş gövdenin kendisi; üst seviyedeki `data` string değilse JSON metnine çevrilir; sınırı aşarsa `{"status": <kod>, "data": "<kırpılmış metin>"}`.
 - Değişiklik `EventFactory.clientResponse`'ta (route'un log politikasını alır); `LegacyDocuments` aynı kalır.
-- **Elastic aylık indeksi:** Eski kod `requests_yyyy-MM`'i saat dilimi vermeden (`new SimpleDateFormat("yyyy-MM")`), yani sunucunun saat diliminde hesaplıyor. `broker.sink.elastic.index-zone` varsayılanı `Europe/Istanbul` olur; sunucunun saat dilimi "Bilgi bekleyenler"de.
+- **Elastic aylık indeksi:** Eski kod `requests_yyyy-MM`'i saat dilimi vermeden (`new SimpleDateFormat("yyyy-MM")`), yani sunucunun saat diliminde hesaplıyor. `broker.sink.elastic.index-zone` varsayılanı `Europe/Istanbul` olur; kullanıcı eski sunucunun TSİ'de çalıştığını teyit etti.
 - **Eski sayaç:** `broker.gelen.istekler` tag'leri (`maintask`, `subtask`) ve "Bilinmeyen Proje"/"Bilinmeyen Endpoint" eski controller'la teyit edildi; ayardaki "teyit edilmeli" notları kalkar.
 - **Test:** core ve runtime birim testleri; `RealTargetsTest`'te 40 KB'lık `data` metni olan doküman varsayılan dinamik eşlemeyle kabul edilir.
 
@@ -69,7 +69,7 @@ Mevcut frontend'ler bunlara bağlı.
 1. Gövde büyük ya da JSON nesnesi değil → 400 `INVALID_REQUEST` (ortak format).
 2. `X-Token` yok → 400 `INVALID_REQUEST` (eski broker'da controller NPE ile 500 dönüyor; karar değişmedi).
 3. `application` izinli değil → 200 `{"response": false}`.
-4. Gövdedeki maintask `broker.session.public-maintasks` listesindeyse (varsayılan `refresh_permissions`, `giris_public`; eski broker bunlara login'den önce bakıyordu) normal route çözümlemesine geçilir; bu route'lar anonimdir. Değilse ve `X-Token` `login` ya da `logout` ise gövdedeki maintask/subtask'e bakılmadan ayardaki route'a gidilir (`broker.session.routes.login: giris/login`, `logout: giris/logout`). Route yoksa ya da anonim değilse 503 `TECHNICAL_ERROR` ve hata logu (yapılandırma hatası). Eski dokümana gövdedeki maintask ve subtask yazılır.
+4. Gövdedeki maintask `broker.session.public-maintasks` listesindeyse (varsayılan `refresh_permissions`, `giris_public`; eski broker bunlara login'den önce bakıyordu) normal route çözümlemesine geçilir; bu route'lar anonimdir. Bu iki maintask'in özel bir kodu yok: subtask'leri eski broker'da proje servislerine sabit yazılmıştı, diğer subtask'ler gibi route olarak tanımlanır. Değilse ve `X-Token` `login` ya da `logout` ise gövdedeki maintask/subtask'e bakılmadan ayardaki route'a gidilir (`broker.session.routes.login: giris/login`, `logout: giris/logout`). Route yoksa ya da anonim değilse 503 `TECHNICAL_ERROR` ve hata logu (yapılandırma hatası). Eski dokümana gövdedeki maintask ve subtask yazılır.
 5. Route aranır:
    - Yoksa önce oturum kontrol edilir: geçersizse 301 yanıtı, geçerliyse 404 `UNKNOWN_TASK`. Eski broker da önce token'a bakıyordu; böylece oturumsuz biri hangi route'ların var olduğunu göremez.
    - Anonimse bugünkü gibi: oturum geçerliyse kullanıcı çözülür, değilse kullanıcısız devam edilir.
@@ -88,19 +88,23 @@ Yeni modül, kök `pom.xml`'e eklenir; paket `com.acme.broker.login`, çalışt�
 
 - **`POST /login`**, gövde `{"uid", "password"}`, header'lar `X-Clientip` ve `X-User-Agent`. Her zaman HTTP 200:
   1. LDAP'ta bind ile doğrular → `ldap` (true/false). Boş şifre her zaman false; anonim bind'e düşmesin.
-  2. Kullanıcı yetkilerini yetki projesinden alır (`login.permissions.url`, `{uid}` ile; liste `login.permissions.pointer`, varsayılan `/yetkiler`); `ok` = HTTP 200. Eski kod bu çağrıyı LDAP sonucuna bakmadan da yapıyor.
+  2. LDAP başarılıysa kullanıcı yetkilerini Koordinatör'den alır (aşağıda); `ok` = HTTP 200. LDAP başarısızsa bu çağrı yapılmaz, yanıt yine 4. adımdakidir (eski kod iki çağrıyı da yapıyordu; dışarıdan fark görünmez).
   3. `ldap && ok` ise token = `UUID.randomUUID()`; kayıt `SET user:session:{uid}` 86400 sn ile yazılır, `EXISTS` ile doğrulanır.
      - Yazıldı: `{"response": true, "status": 200, "LDAP": true, "login": true, "X-Token": "<uuid>"}`
      - Yazılamadı: `{"status": 401, "Ldap": false, "login": false, "X-Token": "404"}`. `response` anahtarı yok; eski kod `Ldap`'ı burada false yapıyor.
   4. Değilse: `{"response": false, "status": 401, "Ldap": <ldap>, "login": false}`
   - Başarıda `LDAP`, hatada `Ldap` yazımı eskisi gibi farklı kalır.
-- **`POST /logout`**, gövde `{"uid"}`: kayıt varsa silinir → `{"response": true, "status": 200, "message": "logged out"}`; yoksa ya da hata olursa `{"response": false, "status": 301, "message": "something went wrong with logging out."}`. Eskisi gibi token kontrolü yok (bkz. Açık noktalar).
-- **Koordinatör çıkışı:** `login.koordinator-secret` ile sabit zamanlı karşılaştırır; doğruysa ve kayıt varsa siler (true), değilse false. Servis metodu yazılır; nasıl çağrıldığı ve yanıtı "Bilgi bekleyenler"de.
-- **Application listesi:** 5 dakikada bir yetki projesinin proje listesini alır (`login.applications.url`, listenin JSON pointer'ı ve ad alanı ayardan) ve boş değilse `broker:applications`'a süresiz yazar. Hata olursa eski değer kalır; metrik ve log.
+- **`POST /logout`**, gövde `{"uid"}`, header'lar `X-Clientip` ve `X-User-Agent`: kayıt varsa ve kayıttaki `X-Clientip` ile `X-User-Agent` istektekilerle aynıysa silinir → `{"response": true, "status": 200, "message": "logged out"}`; değilse ya da hata olursa `{"response": false, "status": 301, "message": "something went wrong with logging out."}`. Eski broker yalnızca `uid`'e bakıyordu, herkes herkesin oturumunu kapatabiliyordu. Header eşleşmesi frontend değişmeden çalışır (`login.logout.require-client-match`, varsayılan true).
+- **Koordinatör (yetki projesi):** Kullanıcı yetkileri, proje listesi ve zorla çıkış onunla. Gerçek API'ler sonra gelecek; şimdilik aşağıdaki varsayılan uçlar yazılır, yollar ve alan adları ayardan değişir. Tek base URL (`koordinator.url`), kimlik için ayardan sabit bir header.
+  - `GET /users/{uid}/permissions` → `{"yetkiler": ["LOGPROJECT_TEMEL", ...]}` (anahtar eski yanıttaki gibi `yetkiler`).
+  - `GET /projects` → `[{"id", "code", "name"}]`; application listesi `code` değerleri.
+  - Admin'in mevcut varsayımları (`HttpProjectCatalog`, `HttpAuthorizationService`) aynı base URL'e taşınır.
+- **Koordinatör çıkışı:** Koordinatör bir kullanıcının oturumunu kapatabilir (eski `expire_user_triggered_from_koordinator`). Giriş servisinde `POST /internal/v1/sessions/{uid}/logout`, header `X-Koordinator-Secret` (`login.koordinator-secret` ile sabit zamanlı karşılaştırma): silindiyse 204, oturum yoksa 404, gizli anahtar yanlışsa 403. Broker'dan geçmez; Koordinatör doğrudan çağırır.
+- **Application listesi:** 5 dakikada bir Koordinatör'ün proje listesini alır ve boş değilse `broker:applications`'a süresiz yazar. Hata olursa eski değer kalır; metrik ve log.
 - **LDAP:** Spring LDAP. Ayar: `login.ldap.urls`, `base`; ya doğrudan bind (`user-dn-pattern`, ör. `uid={0},ou=people`) ya da servis hesabıyla arayıp bind (`bind-dn`, `bind-password`, `search-base`, `search-filter`). Bağlantı 3 sn, okuma 5 sn. Gerçek ayar "Bilgi bekleyenler"de.
 - **Güvenlik:** Şifre hiçbir yerde loglanmaz. `login.user-context-secret` ayarlıysa broker'ın imzaladığı `X-User-Context` doğrulanır (`issuedAt` 60 sn içinde), imzasız çağrı 403. Servis yalnızca broker'ın ağından erişilebilir olmalı.
 - **Örnek tanımlar:** `giris/login` ve `giris/logout` route tanımları modülün README'sinde ve `broker-local.json` örneğinde: POST, `TEMPLATE` gövde `{"uid": "${request.uid}", "password": "${request.password}"}` (logout'ta yalnızca `uid`), header'lar `${header.X-Clientip}` ve `${header.X-User-Agent}`, anonim, profil yok.
-- **Test:** gömülü LDAP (UnboundID), yetki projesi için `FakeHttpServer`, Testcontainers Redis; yanıt gövdeleri birebir. Uçtan uca: login → token'la istek geçer → farklı `X-User-Agent` 301 alır → logout → aynı istek 301 alır.
+- **Test:** gömülü LDAP (UnboundID), Koordinatör için `FakeHttpServer`, Testcontainers Redis; yanıt gövdeleri birebir. Uçtan uca: login → token'la istek geçer → farklı `X-User-Agent` 301 alır → farklı `X-User-Agent`'la logout reddedilir → doğru header'larla logout → aynı istek 301 alır.
 
 ### 5. Yerel çalıştırma
 
@@ -130,17 +134,21 @@ Kullanıcının paylaştığı eski kod ekran görüntülerinden (2026-10-12 ve 
 - **`sorgu` yetkisi:** Kullanıcıda `SORGU_TEMEL` varsa `perm = "SORGU_TEMEL"`, yoksa `SORGU_ILERI` varsa o; ardından `sorguService.execute(params)`.
 - **Bilinmeyen subtask ve yetkisiz kullanıcı:** Proje sınıfları özel exception atıyordu; ortak bir gövde yok, yeni ortak format kalır.
 - **Application listesi:** Eski broker'da sabit kodlu; yeni düzende yetki projesinden gelir (projeler = application'lar).
+- **Koordinatör:** Yetki projesinin adı. Projeleri ve yetkileri yönetir, `koordinator.secret` ile kullanıcı oturumu kapatabilir. API'leri sonra gelecek.
+- **`PublicApisService`:** Broker'daki bütün proje servislerine referans tutuyor; `refresh_permissions` ve `giris_public` subtask'leri bu servislere sabit yazılmış. Yeni düzende özel bir karşılığı yok.
+- **Saat dilimi:** Eski broker sunucusu TSİ'de çalışıyor (kullanıcı teyidi).
 
 ## Bilgi bekleyenler
 
 Kullanıcıdan istendi; gelince ilgili madde güncellenir:
 
-1. Eski broker'ın `RedisTemplate` bean'i (key ve value serializer) ya da Redis'te bir `user:session:<uid>` kaydının ham hali (token gizlenerek) → `SessionRecordCodec`'in yazma biçimi (madde 3, 4).
+1. Eski broker'da `RedisTemplate` bean'ini tanımlayan sınıf (`setKeySerializer` / `setValueSerializer` satırları). `RedisService` yalnızca hazır template'i kullanıyor; kullanıcının Redis'e doğrudan erişimi yok. Bulunamazsa düz JSON değer ve düz string anahtar varsayılır, DEV'de bir kayıtla doğrulanır (madde 3, 4).
 2. `ldap.check_user` metodu → LDAP bağlantısı ve DN ya da arama biçimi (madde 4).
-3. Yetki projesinin uçları: kullanıcı yetkileri (eski `kuyuService.permissions`), proje listesi, yetki listeleme, açma ve varlık kontrolü → giriş servisi, application listesi, admin'in `HttpProjectCatalog`'u ve `HttpAuthorizationService`'i (madde 3, 4).
-4. `PublicApisService` (`refresh_permissions`, `giris_public`), dashboard yerleşimini ve hızlı bağlantıları kullanan sınıflar, koordinatör çıkışını çağıran yer → bunların yeni yeri (büyük olasılıkla giriş servisi).
-5. Eski broker sunucusunun saat dilimi (Elastic aylık indeksi). Kibana'da ay başına yakın bir dokümanın indeksi ile `request_date`'i karşılaştırarak da anlaşılır.
-6. Alarm: `alarmService.checkAlarm` ve `alarm_log` kodu, `alarm` indeksinden örnek bir doküman (madde 7).
+3. Koordinatör'ün gerçek uçları; şimdilik madde 4'teki varsayılanlar.
+4. Dashboard yerleşimini ve hızlı bağlantıları kullanan subtask'ler (maintask/subtask ve gövdeler) → yeni yerleri (sonraki tur).
+5. `X-Clientip` header'ını kimin koyduğu: frontend kodu mu, önündeki proxy mi. İstemci koyuyorsa oturumdaki IP kontrolü güvenlik sağlamaz (bkz. Açık noktalar).
+6. Logdaki `token`: olduğu gibi mi kalsın, özeti mi yazılsın (bkz. Açık noktalar).
+7. Alarm: `alarmService.checkAlarm` ve `alarm_log` kodu, `alarm` indeksinden örnek bir doküman (madde 7).
 
 ## Verilmiş kararlar
 
@@ -291,7 +299,7 @@ Derlemede doğrulandı (Boot 4.1.1, Spring Framework 7.0, Jackson 3.1, Kafka 4.2
 
 1. Dağıtım: dört uygulamanın ve giriş servisinin imajları ve ortam manifestleri (env-admin ve admin `mtls` profiliyle; broker'da kalıcı spool volume'u önerilir). Kafka topic'i ve DLQ tasarımdaki ayarlarla açılmalı; ClickHouse DDL'i ve Elastic bileşen şablonu `broker-log-sink/src/main/resources` altında.
 2. Geçiş planı adım 1–2 (tasarım "Geçiş planı"): DEV'de eski broker ile sink'in Elastic dokümanlarını alan alan karşılaştırma; statik subtask'leri `runtime_route`'a ve merkezi history'ye aktaran tek seferlik script.
-3. Eski broker'ın kendi özellikleri (dashboard yerleşimi, hızlı bağlantılar, `giris_public`, `refresh_permissions`, koordinatör çıkışı), "Bilgi bekleyenler" 4 gelince.
+3. Eski broker'ın Redis'te tuttuğu kullanıcı verileri (dashboard yerleşimi `user:layout:{sicil}`, hızlı bağlantılar `user:quick_link:{sicil}`), "Bilgi bekleyenler" 4 gelince.
 4. Alarm ("Sıradaki iş" 7).
 5. Frontend: sözleşme `docs/frontend-guide.md`'de; canlı sürüm (artifact) bu dosyadan eşitlenir.
 
@@ -304,8 +312,10 @@ Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya ya
 ## Açık noktalar
 
 - SSO sağlayıcısı ve rol claim'i.
-- Logout eskisi gibi yalnızca `uid` ile çalışıyor, başkasının oturumunu kapatmaya açık. Token ya da en azından `X-Clientip` ve `X-User-Agent` eşleşmesi istenebilir.
-- Kullanıcı başına tek oturum: yeni login eskisini ezer (eski davranış).
+- **Logdaki oturum bilgisi:** Elastic'e `token`, `client_ip` ve `user_agent` birlikte yazılıyor; login yanıtındaki yeni token da `data_response`'ta. Oturum kontrolü yalnızca bu üçüne baktığı için Kibana'ya erişen biri, açık bir oturumu 1 gün boyunca taklit edebilir. Öneri: `token` alanına token'ın özeti (SHA-256'nın ilk 16 karakteri) yazılsın, login yanıtındaki `X-Token` maskelensin; aynı oturumun kayıtları yine gruplanabilir. Eski log değerlerini değiştirdiği için karar kullanıcıda.
+- **`X-Clientip`:** İstemci koyuyorsa IP bağlaması güvenlik sağlamaz. Eski broker kapandıktan sonra broker IP'yi bağlantıdan ya da güvenilir proxy'nin header'ından almalı; geçişte iki broker aynı değeri karşılaştırdığı için şimdilik header kalır.
+- **Hata yanıtlarında HTTP 200:** Mevcut frontend'ler için korunuyor. Hepsi güncellenince `broker.compat.legacy-responses: false` ile ortak formata geçilir.
+- Kullanıcı başına tek oturum ve 1 günlük sabit süre (eski davranış): yeni login eskisini ezer, kullanılsa da oturum 1 günde biter.
 - PROD'da base URL değişikliğinin onay akışına alınması; PROD'da `DISABLE`/`ROLLBACK` için acil durum politikası (şimdilik onay istiyor).
 - Frontend gövdesinde üst seviyede `broker` adlı alan gönderen istek var mı (eski dokümanda ezilir).
 - Broker span'ının `maintask/subtask` diye adlandırılması için OTel agent API'si.
