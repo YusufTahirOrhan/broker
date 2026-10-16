@@ -37,7 +37,8 @@ class EventFactory {
     LogEvent request(Exchange x) {
         JsonNode body = null;
         if (x.body != null) {
-            if (x.route == null || x.route.definition().logging().logRequestBody()) {
+            // session operations are logged whole whatever the flag says; the password is always masked
+            if (x.route == null || x.sessionOperation != null || x.route.definition().logging().logRequestBody()) {
                 body = Masker.mask(x.body, maskFields(x));
             } else {
                 body = envelopeOnly(x.body);
@@ -144,17 +145,42 @@ class EventFactory {
         return new ClientLog(cut, true);
     }
 
+    /**
+     * {@code client_response} of a legacy body the broker returned itself, logged as the legacy broker logged every
+     * response ({@code log_response.putAll(body); put("data", "")}).
+     */
+    static ClientLog legacyLogged(JsonNode body) {
+        ObjectNode copy = (ObjectNode) body.deepCopy();
+        copy.put("data", "");
+        return ClientLog.of(copy);
+    }
+
+    /**
+     * {@code client_response} of a login or logout: the login service's body with {@code "data": ""}, whatever the
+     * route's log flag says; the {@code X-Token} of a login stays in it, as today.
+     */
+    static ClientLog sessionResponse(int status, JsonNode body) {
+        if (body != null && body.isObject()) {
+            return legacyLogged(body);
+        }
+        ObjectNode statusOnly = Json.object();
+        statusOnly.put("status", status);
+        return ClientLog.of(statusOnly);
+    }
+
     private LogEvent event(Exchange x, LogEvent.EventType type, Instant time, Integer statusCode, String outcome,
                            Long durationMs, JsonNode body, Integer bodySize, Boolean truncated,
                            JsonNode clientResponse, String errorMessage) {
         boolean known = x.route != null;
-        String maintask = known ? x.route.maintask() : x.knownProject != null ? x.knownProject : x.maintask;
+        // a session operation reaches the login service's route; the legacy document keeps the body's names
+        boolean bodyNames = !known || x.sessionOperation != null;
+        String maintask = !bodyNames ? x.route.maintask() : x.knownProject != null ? x.knownProject : x.maintask;
         String httpMethod = known ? x.route.method().name() : null;
         String path = x.targetPath != null ? x.targetPath : known ? x.route.pathTemplate().source() : null;
         Integer profileVersion = known && x.route.profile() != null ? x.route.profile().version() : null;
         String profile = known && x.route.profile() != null ? x.route.profile().name() : null;
         return new LogEvent(x.requestId, x.trace.traceId(), type, time, environment, maintask,
-                known ? x.route.subtask() : x.subtask, known ? x.route.version() : null, profile, profileVersion,
+                bodyNames ? x.subtask : x.route.subtask(), known ? x.route.version() : null, profile, profileVersion,
                 x.application, x.uid, x.session == null ? null : x.session.userId(), x.queryId,
                 x.session == null ? null : x.session.permissionList(), x.token, x.sessionOperation, x.clientIp,
                 x.userAgent, httpMethod, path, statusCode, outcome, durationMs, body, bodySize, truncated,

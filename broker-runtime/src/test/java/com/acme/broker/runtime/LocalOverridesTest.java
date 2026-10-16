@@ -22,6 +22,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
+import com.acme.broker.core.session.SessionRecord;
+import com.acme.broker.core.session.SessionRecordCodec;
 import com.acme.broker.core.testing.CoreFixtures;
 import com.acme.broker.core.testing.FakeHttpServer;
 import com.acme.broker.core.testing.JsonHttp;
@@ -76,8 +78,8 @@ class LocalOverridesTest {
         RuntimeFixture.route("order-service", "add_order_note", "POST", "/orders/{id}/notes", List.of("ORDER_WRITE"),
                 false, null, CoreFixtures.ADD_ORDER_NOTE);
         cache.reload();
-        redis.opsForValue().set("broker:session:local-token",
-                "{\"userId\": \"dev.ali\", \"permissions\": [\"ORDER_WRITE\", \"ORDER_CANCEL\"]}");
+        redis.opsForValue().set(SessionRecordCodec.DEFAULT.key("dev.ali"), SessionRecordCodec.DEFAULT.write(
+                new SessionRecord("dev.ali", "local-token", "127.0.0.1", "curl", List.of("ORDER_WRITE", "ORDER_CANCEL"))));
         laptop.json("POST", "/orders/3/notes", 201, "{\"where\": \"laptop\"}");
         laptop.json("POST", "/orders/3/cancel", 200, "{\"cancelled\": true}");
         dev.json("POST", "/orders/3/notes", 201, "{\"where\": \"dev\"}");
@@ -94,8 +96,9 @@ class LocalOverridesTest {
 
     private JsonHttp.Response call(String subtask, String fields) {
         JsonHttp.Response response = new JsonHttp("http://localhost:" + port).send("POST", "/broker",
-                "{\"maintask\": \"order-service\", \"subtask\": \"" + subtask + "\", " + fields + "}",
-                Map.of("X-Token", "local-token"));
+                "{\"maintask\": \"order-service\", \"subtask\": \"" + subtask + "\", \"uid\": \"dev.ali\", "
+                        + "\"application\": \"web\", " + fields + "}",
+                Map.of("X-Token", "local-token", "X-Clientip", "127.0.0.1", "X-User-Agent", "curl"));
         assertThat(response.status()).as(response.text()).isLessThan(300);
         return response;
     }

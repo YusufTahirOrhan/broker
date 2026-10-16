@@ -25,12 +25,21 @@ import tools.jackson.databind.JsonNode;
  */
 public final class RouteValidator {
 
-    /** Shown to users; {@code X-User-*} stands for every header starting with {@code X-User-}. */
+    /**
+     * Shown to users; {@code X-User-*} stands for every header starting with {@code X-User-} except those in
+     * {@link #FORBIDDEN_HEADER_EXCEPTIONS}.
+     */
     public static final List<String> FORBIDDEN_HEADERS =
             List.of("Authorization", "X-User-*", "X-uid", "Host", "Content-Length", "Connection", "Transfer-Encoding");
 
     private static final Set<String> FORBIDDEN_EXACT =
             Set.of("authorization", "x-uid", "host", "content-length", "connection", "transfer-encoding");
+    /**
+     * Client headers that only look like identity headers: {@code X-User-Agent} is the frontend's header, passed on
+     * as {@code ${header.X-User-Agent}} (the login service binds the session to it).
+     */
+    public static final List<String> FORBIDDEN_HEADER_EXCEPTIONS = List.of("X-User-Agent");
+    private static final Set<String> ALLOWED_USER_HEADERS = Set.of("x-user-agent");
     private static final Pattern HEADER_NAME = Pattern.compile("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$");
 
     private RouteValidator() {
@@ -60,7 +69,7 @@ public final class RouteValidator {
 
     public static boolean isForbiddenHeader(String name) {
         String key = name.toLowerCase(Locale.ROOT);
-        return FORBIDDEN_EXACT.contains(key) || key.startsWith("x-user-");
+        return FORBIDDEN_EXACT.contains(key) || key.startsWith("x-user-") && !ALLOWED_USER_HEADERS.contains(key);
     }
 
     public static List<FieldError> validate(String httpMethod, String pathTemplate, JsonNode definition, Context context) {
@@ -184,6 +193,14 @@ public final class RouteValidator {
         String reference = placeholder.path();
         if (reference.isEmpty()) {
             errors.add(new FieldError(path, "Alan adı eksik: " + placeholder));
+            return;
+        }
+        if (RouteDefinitionParser.ENVELOPE_FIELDS.contains(reference)) {
+            // envelope fields are read without a field definition; nothing guarantees they are sent
+            if (pathVariable) {
+                errors.add(new FieldError(path,
+                        "Path değişkeni yalnızca zorunlu ya da varsayılanı olan bir alana bağlanabilir: " + reference));
+            }
             return;
         }
         Optional<FieldSpec> exact = request.field(reference);

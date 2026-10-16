@@ -28,6 +28,8 @@ import org.springframework.test.context.DynamicPropertySource;
 import com.acme.broker.core.json.Json;
 import com.acme.broker.core.logging.LogEvent;
 import com.acme.broker.core.runtime.RuntimeSignals;
+import com.acme.broker.core.session.SessionRecord;
+import com.acme.broker.core.session.SessionRecordCodec;
 import com.acme.broker.core.testcall.TestCallRequest;
 import com.acme.broker.core.testing.CoreFixtures;
 import com.acme.broker.core.testing.FakeHttpServer;
@@ -45,7 +47,9 @@ import tools.jackson.databind.JsonNode;
         "broker.instance-id=broker-test-1",
         "broker.test.enabled=true",
         "broker.test.secret=s3cret",
-        "broker.forward.user-context-secret=k3y"
+        "broker.forward.user-context-secret=k3y",
+        "broker.applications.mode=static",
+        "broker.applications.list=web,Mobil"
 })
 @EmbeddedKafka(partitions = 1, topics = "broker.logs.v1", bootstrapServersProperty = "spring.kafka.bootstrap-servers",
         brokerProperties = "auto.create.topics.enable=false")
@@ -128,25 +132,65 @@ class BrokerFlowTest {
                  "logging": {"binaryInfo": "Excel raporu"}}
                 """);
         RuntimeFixture.route("down-service", "ping", "GET", "/ping", List.of(), true, null, "{}");
+        RuntimeFixture.project("giris", backend.baseUrl());
+        RuntimeFixture.route("giris", "login", "POST", "/login", List.of(), true, null, LOGIN);
+        RuntimeFixture.route("giris", "logout", "POST", "/logout", List.of(), true, null, LOGOUT);
+        RuntimeFixture.project("giris_public", backend.baseUrl());
+        RuntimeFixture.route("giris_public", "duyurular", "GET", "/announcements", List.of(), true, null, "{}");
         cache.reload();
+        UIDS.clear();
         session("tok-1", "u12345", "ORDER_WRITE", "ORDER_READ", "LOGPROJECT_TEMEL", "FILES_READ");
         session("tok-2", "u777", "OTHER_PERMISSION");
     }
 
-    private void session(String token, String userId, String... permissions) {
-        String permissionList = String.join("\", \"", permissions);
-        redis.opsForValue().set("broker:session:" + token,
-                "{\"userId\": \"" + userId + "\", \"permissions\": [\"" + permissionList + "\"]}");
+    static final String CLIENT_IP = "10.20.30.40";
+    static final String USER_AGENT = "agent-hash";
+    /** The login service's routes, as its README defines them. */
+    static final String LOGIN = """
+            {"request": {"fields": [{"name": "password", "type": "string", "required": true}],
+                         "headers": {"X-Clientip": "${header.X-Clientip}", "X-User-Agent": "${header.X-User-Agent}"},
+                         "body": {"mode": "TEMPLATE", "template": {"uid": "${request.uid}", "password": "${request.password}"}}}}
+            """;
+    static final String LOGOUT = """
+            {"request": {"headers": {"X-Clientip": "${header.X-Clientip}", "X-User-Agent": "${header.X-User-Agent}"},
+                         "body": {"mode": "TEMPLATE", "template": {"uid": "${request.uid}"}}}}
+            """;
+    /** Token → uid of the sessions a test opened; requests with the token carry the uid like frontends do. */
+    static final Map<String, String> UIDS = new java.util.HashMap<>();
+
+    /** Writes the record the login service writes ({@code user:session:{uid}}), for this test's client. */
+    private void session(String token, String uid, String... permissions) {
+        UIDS.put(token, uid);
+        redis.opsForValue().set(SessionRecordCodec.DEFAULT.key(uid), SessionRecordCodec.DEFAULT.write(
+                new SessionRecord(uid, token, CLIENT_IP, USER_AGENT, List.of(permissions))));
     }
 
     private JsonHttp.Response broker(String token, String body) {
         return broker(token, body, Map.of());
     }
 
+    /**
+     * A frontend's request: the session's uid and the application {@code web} are added to a JSON body that lacks
+     * them, and the client headers of the login unless {@code extra} gives others (a null value leaves one out).
+     */
     private JsonHttp.Response broker(String token, String body, Map<String, String> extra) {
-        Map<String, String> headers = new java.util.HashMap<>(extra);
+        Map<String, String> headers = new java.util.HashMap<>();
+        headers.put("X-Clientip", CLIENT_IP);
+        headers.put("X-User-Agent", USER_AGENT);
+        headers.putAll(extra);
+        headers.values().removeIf(java.util.Objects::isNull);
         if (token != null) {
             headers.put("X-Token", token);
+        }
+        JsonNode parsed = Json.tryParse(body);
+        if (parsed instanceof tools.jackson.databind.node.ObjectNode object) {
+            if (!object.has("uid") && UIDS.containsKey(token)) {
+                object.put("uid", UIDS.get(token));
+            }
+            if (!object.has("application")) {
+                object.put("application", "web");
+            }
+            body = Json.write(object);
         }
         return http.send("POST", "/broker", body, headers);
     }
@@ -215,7 +259,7 @@ class BrokerFlowTest {
         String traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
 
         JsonHttp.Response response = broker("tok-1", """
-                {"maintask": "order-service", "subtask": "add_order_note", "application": "web", "uid": "u-fake",
+                {"maintask": "order-service", "subtask": "add_order_note", "application": "web", "uid": "u12345",
                  "siparisNo": 981, "notMetni": "Kapıya bırakın", "password": "gizli"}
                 """, Map.of("X-Clientip", "10.20.30.40", "X-User-Agent", "agent-hash", "Accept-Language", "tr-TR",
                 "traceparent", "00-" + traceId + "-00f067aa0ba902b7-01"));
@@ -242,7 +286,7 @@ class BrokerFlowTest {
         assertThat(request.environment()).isEqualTo("TEST");
         assertThat(request.maintask()).isEqualTo("order-service");
         assertThat(request.routeVersion()).isEqualTo(3);
-        assertThat(request.uid()).isEqualTo("u-fake");
+        assertThat(request.uid()).isEqualTo("u12345");
         assertThat(request.userId()).isEqualTo("u12345");
         assertThat(request.permList()).containsExactly("ORDER_WRITE", "ORDER_READ", "LOGPROJECT_TEMEL", "FILES_READ");
         assertThat(request.token()).isEqualTo("tok-1");
@@ -332,7 +376,6 @@ class BrokerFlowTest {
                 "Bilinmeyen Endpoint").counter().count()).isPositive();
 
         String body = "{\"maintask\": \"order-service\", \"subtask\": \"add_order_note\", \"siparisNo\": 1, \"notMetni\": \"x\"}";
-        assertError(broker("missing-session", body), 401, "DENIED");
         assertError(broker("tok-2", body), 403, "DENIED");
 
         JsonHttp.Response invalid = broker("tok-1", """
@@ -360,28 +403,158 @@ class BrokerFlowTest {
     }
 
     @Test
-    void loginIsASessionOperation() {
-        backend.json("POST", "/auth/login", 200, "{\"token\": \"t-new\"}");
+    void loginAndLogoutGoToTheLoginServiceWhateverTheBodyNames() {
+        backend.json("POST", "/login", 200, """
+                {"response": true, "status": 200, "LDAP": true, "login": true, "X-Token": "9b1d2c3e-new"}
+                """);
+        backend.json("POST", "/logout", 200, "{\"response\": true, \"status\": 200, \"message\": \"logged out\"}");
         double counted = legacyCount("order-service", "login");
 
-        JsonHttp.Response response = broker("login", """
-                {"maintask": "order-service", "subtask": "login", "username": "ali", "password": "p4ss"}
+        JsonHttp.Response login = broker("login", """
+                {"maintask": "order-service", "subtask": "login", "uid": "u42", "password": "p4ss"}
                 """);
 
-        assertThat(response.status()).isEqualTo(200);
-        FakeHttpServer.Recorded sent = backend.requests("/auth/login").getFirst();
-        assertThat(Json.parse(sent.body())).isEqualTo(Json.parse("{\"username\": \"ali\", \"password\": \"p4ss\"}"));
+        assertThat(login.status()).isEqualTo(200);
+        assertThat(login.json().get("X-Token").stringValue()).isEqualTo("9b1d2c3e-new");
+        FakeHttpServer.Recorded sent = backend.requests("/login").getFirst();
+        assertThat(Json.parse(sent.body())).isEqualTo(Json.parse("{\"uid\": \"u42\", \"password\": \"p4ss\"}"));
+        assertThat(sent.header("X-Clientip")).isEqualTo(CLIENT_IP);
+        assertThat(sent.header("X-User-Agent")).isEqualTo(USER_AGENT);
         assertThat(sent.header("X-uid")).isNull();
-        LogEvent request = events.awaitType(response.header("X-Request-Id"), LogEvent.EventType.REQUEST);
+        assertThat(sent.header("X-User-Context")).startsWith("v1.");
+        JsonNode context = Json.parse(java.util.Base64.getUrlDecoder().decode(
+                sent.header("X-User-Context").split("\\.")[1]));
+        assertThat(context.get("userId").isNull()).isTrue();
+        LogEvent request = events.awaitType(login.header("X-Request-Id"), LogEvent.EventType.REQUEST);
         assertThat(request.sessionOperation()).isEqualTo("login");
+        assertThat(request.maintask()).isEqualTo("order-service");
+        assertThat(request.subtask()).isEqualTo("login");
         assertThat(request.userId()).isNull();
         assertThat(Json.text(request.body().get("password"))).isEqualTo("xxxx");
+        LogEvent response = events.awaitType(login.header("X-Request-Id"), LogEvent.EventType.RESPONSE);
+        assertThat(response.clientResponse()).isEqualTo(Json.parse("""
+                {"response": true, "status": 200, "LDAP": true, "login": true, "X-Token": "9b1d2c3e-new", "data": ""}
+                """));
+        assertThat(response.body()).isNull();
         assertThat(legacyCount("order-service", "login")).isEqualTo(counted);
 
-        JsonHttp.Response notAnonymous = broker("login", """
-                {"maintask": "order-service", "subtask": "add_order_note", "siparisNo": 1, "notMetni": "x"}
-                """);
-        assertError(notAnonymous, 403, "DENIED");
+        JsonHttp.Response logout = broker("logout", "{\"maintask\": \"anything\", \"uid\": \"u42\"}");
+        assertThat(logout.json()).isEqualTo(Json.parse("{\"response\": true, \"status\": 200, \"message\": \"logged out\"}"));
+        assertThat(Json.parse(backend.requests("/logout").getFirst().body())).isEqualTo(Json.parse("{\"uid\": \"u42\"}"));
+        assertThat(events.awaitType(logout.header("X-Request-Id"), LogEvent.EventType.REQUEST).sessionOperation())
+                .isEqualTo("logout");
+    }
+
+    @Test
+    void aSessionOperationWithoutAnAnonymousRouteIsAConfigurationError() {
+        RuntimeFixture.route("giris", "logout", "POST", "/logout", List.of("ORDER_WRITE"), false, null, LOGOUT);
+        cache.reload();
+
+        assertError(broker("logout", "{\"uid\": \"u42\"}"), 503, "TECHNICAL_ERROR");
+        assertThat(backend.requests()).isEmpty();
+    }
+
+    @Test
+    void publicMaintasksAreOrdinaryRoutesEvenWithALoginToken() {
+        backend.json("GET", "/announcements", 200, "{\"items\": []}");
+
+        JsonHttp.Response response = broker("login", "{\"maintask\": \"GIRIS_PUBLIC\", \"subtask\": \"duyurular\"}");
+
+        assertThat(response.status()).isEqualTo(200);
+        assertThat(backend.requests("/announcements")).hasSize(1);
+        assertThat(backend.requests("/login")).isEmpty();
+        assertThat(events.awaitType(response.header("X-Request-Id"), LogEvent.EventType.REQUEST).sessionOperation())
+                .isNull();
+    }
+
+    @Test
+    void anApplicationThatIsNotAllowedGetsTheLegacyAnswer() {
+        backend.json("GET", "/orders/1", 200, "{}");
+        String body = "{\"maintask\": \"order-service\", \"subtask\": \"get_order\", \"orderId\": 1, \"application\": %s}";
+
+        for (String application : List.of("\"kiosk\"", "null", "\"\"")) {
+            JsonHttp.Response refused = broker("tok-1", body.formatted(application));
+            assertThat(refused.status()).isEqualTo(200);
+            assertThat(refused.text()).isEqualTo("{\"response\":false}");
+            LogEvent response = events.awaitType(refused.header("X-Request-Id"), LogEvent.EventType.RESPONSE);
+            assertThat(response.outcome()).isEqualTo("DENIED");
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(response.clientResponse()).isEqualTo(Json.parse("{\"response\": false, \"data\": \"\"}"));
+        }
+        JsonHttp.Response noApplication = broker("tok-1", "{\"maintask\": \"order-service\", \"subtask\": \"get_order\", \"orderId\": 1}"
+                .replace("}", ", \"application\": null}"));
+        assertThat(noApplication.text()).isEqualTo("{\"response\":false}");
+        assertThat(broker("login", "{\"uid\": \"u42\", \"application\": \"kiosk\"}").text())
+                .isEqualTo("{\"response\":false}");
+        assertThat(broker("anything", "{\"maintask\": \"down-service\", \"subtask\": \"ping\", \"application\": \"kiosk\"}")
+                .text()).isEqualTo("{\"response\":false}");
+        assertThat(backend.requests()).isEmpty();
+
+        assertThat(broker("tok-1", body.formatted("\"MOBIL\"")).status()).isEqualTo(200);
+        assertThat(backend.requests("/orders/1")).hasSize(1);
+    }
+
+    @Test
+    void anInvalidSessionGetsTheLegacyAnswerWhetherTheRouteExistsOrNot() {
+        String known = "{\"maintask\": \"order-service\", \"subtask\": \"get_order\", \"orderId\": 1}";
+        String unknown = "{\"maintask\": \"order-service\", \"subtask\": \"nope\"}";
+
+        for (JsonHttp.Response refused : List.of(broker("missing-session", known), broker("missing-session", unknown))) {
+            assertThat(refused.status()).isEqualTo(200);
+            JsonNode body = refused.json();
+            assertThat(Json.fieldNames(body)).containsExactly("response", "status", "reason");
+            assertThat(body.get("response").isBoolean()).isTrue();
+            assertThat(body.get("response").booleanValue()).isFalse();
+            assertThat(body.get("status").isInt()).isTrue();
+            assertThat(body.get("status").intValue()).isEqualTo(301);
+            assertThat(body.get("reason").stringValue()).isEqualTo("check X-Token");
+            LogEvent response = events.awaitType(refused.header("X-Request-Id"), LogEvent.EventType.RESPONSE);
+            assertThat(response.outcome()).isEqualTo("DENIED");
+            assertThat(response.clientResponse()).isEqualTo(Json.parse("""
+                    {"response": false, "status": 301, "reason": "check X-Token", "data": ""}
+                    """));
+        }
+        assertError(broker("tok-1", unknown), 404, "UNKNOWN_TASK");
+        assertThat(backend.requests()).isEmpty();
+    }
+
+    @Test
+    void theSessionBelongsToTheBodysUidAndTheLoginsClientOnly() {
+        backend.json("GET", "/orders/1", 200, "{}");
+        String body = "{\"maintask\": \"order-service\", \"subtask\": \"get_order\", \"orderId\": 1}";
+        String otherUid = "{\"maintask\": \"order-service\", \"subtask\": \"get_order\", \"orderId\": 1, \"uid\": \"u777\"}";
+        String noUid = "{\"maintask\": \"order-service\", \"subtask\": \"get_order\", \"orderId\": 1, \"uid\": null}";
+
+        assertThat(broker("tok-1", body).status()).isEqualTo(200);
+        Map<String, Map<String, String>> refused = new java.util.LinkedHashMap<>();
+        refused.put("başka client IP", Map.of("X-Clientip", "10.20.30.41"));
+        refused.put("başka user agent", Map.of("X-User-Agent", "other-agent"));
+        refused.put("büyük harfli user agent", Map.of("X-User-Agent", "AGENT-HASH"));
+        refused.put("client IP yok", java.util.Collections.singletonMap("X-Clientip", null));
+        refused.put("user agent yok", java.util.Collections.singletonMap("X-User-Agent", null));
+        refused.forEach((name, headers) -> assertThat(broker("tok-1", body, headers).json().path("status").intValue())
+                .as(name).isEqualTo(301));
+        assertThat(broker("TOK-1", body.replace("}", ", \"uid\": \"u12345\"}")).json().path("status").intValue())
+                .as("büyük harfli token").isEqualTo(301);
+        assertThat(broker("tok-1", otherUid).json().path("status").intValue()).as("başkasının uid'i").isEqualTo(301);
+        assertThat(broker("tok-1", noUid).json().path("status").intValue()).as("uid yok").isEqualTo(301);
+        assertThat(backend.requests("/orders/1")).hasSize(1);
+        assertThat(backend.requests("/orders/1").getFirst().header("X-uid")).isEqualTo("u12345");
+    }
+
+    @Test
+    void anAnonymousRouteKnowsTheUserOnlyWithAValidSession() {
+        backend.json("GET", "/ping", 200, "{}");
+        RuntimeFixture.project("down-service", backend.baseUrl());
+        cache.reload();
+
+        broker("tok-1", "{\"maintask\": \"down-service\", \"subtask\": \"ping\"}");
+        broker("tok-1", "{\"maintask\": \"down-service\", \"subtask\": \"ping\"}", Map.of("X-User-Agent", "other"));
+
+        List<FakeHttpServer.Recorded> pings = backend.requests("/ping");
+        assertThat(pings).hasSize(2);
+        assertThat(pings.get(0).header("X-uid")).isEqualTo("u12345");
+        assertThat(pings.get(1).header("X-uid")).isNull();
     }
 
     private double legacyCount(String maintask, String subtask) {

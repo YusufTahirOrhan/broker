@@ -49,6 +49,14 @@ public class BrokerMetrics {
                 .increment();
     }
 
+    /** The application list could not be read from Redis; the last list read stays in use. */
+    public void applicationsRefreshFailed() {
+        Counter.builder("broker.applications.refresh.failed")
+                .description("Application listesinin okunamadığı yenilemeler")
+                .register(registry)
+                .increment();
+    }
+
     /** Time until Kafka acknowledged an event, or gave up. */
     public void logAck(String eventType, boolean acknowledged, Duration duration) {
         Timer.builder("broker.log.ack")

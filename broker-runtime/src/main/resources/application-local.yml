@@ -7,6 +7,10 @@ spring:
 
 broker:
   local-overrides: file:./broker-local.json
+  applications:
+    # giriş servisi yerelde çalışıyorsa redis de olur; varsayılan sabit liste
+    mode: ${BROKER_APPLICATIONS_MODE:static}
+    list: ${BROKER_LOCAL_APPLICATIONS:web}
   log-sink: console                        # Kafka'ya yazmaz, DEV loglarını kirletmez
   cache:
     verify-interval: 2s                    # override dosyası değişince restart gerekmesin

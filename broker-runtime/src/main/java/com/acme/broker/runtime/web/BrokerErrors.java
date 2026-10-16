@@ -31,6 +31,21 @@ final class BrokerErrors {
         return body;
     }
 
+    /** The legacy broker's answer to an application that is not allowed, with HTTP 200; frontends depend on it. */
+    static ObjectNode legacyRefused() {
+        ObjectNode body = Json.object();
+        body.put("response", false);
+        return body;
+    }
+
+    /** The legacy broker's answer to an invalid session ({@code token_check}), with HTTP 200. */
+    static ObjectNode legacySessionInvalid() {
+        ObjectNode body = legacyRefused();
+        body.put("status", 301);
+        body.put("reason", "check X-Token");
+        return body;
+    }
+
     /** What the frontend gets when the log could not be written, exactly as today. */
     static ObjectNode logUnavailableBody() {
         ObjectNode body = Json.object();

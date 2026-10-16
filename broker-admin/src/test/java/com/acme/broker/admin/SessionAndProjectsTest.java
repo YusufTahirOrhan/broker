@@ -30,6 +30,10 @@ class SessionAndProjectsTest extends AdminTestBase {
         JsonNode rules = get("viewer", "/meta/definition-rules").json();
         assertThat(rules.get("patterns").get("subtask").stringValue()).isEqualTo("^[a-z][a-z0-9]*(_[a-z0-9]+)*$");
         assertThat(rules.get("readableHeaders").size()).isEqualTo(3);
+        assertThat(rules.get("forbiddenHeaderExceptions").valueStream().map(JsonNode::stringValue))
+                .containsExactly("X-User-Agent");
+        assertThat(rules.get("placeholders").get("definition").valueStream().map(JsonNode::stringValue))
+                .contains("${request.uid}", "${request.application}", "${request.maintask}", "${request.subtask}");
     }
 
     @Test

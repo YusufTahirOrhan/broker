@@ -50,6 +50,10 @@ management:
     health:
       probes:
         enabled: true
+      group:
+        readiness:
+          # application listesi okunmadan trafik alınmaz
+          include: readinessState,applications
 
 broker:
   environment: ${BROKER_ENVIRONMENT:DEV}
@@ -62,10 +66,23 @@ broker:
   cache:
     verify-interval: 15s
   session:
-    # Gerçek anahtar ve format bugünkü broker kodundan teyit edilmeli
-    key-pattern: "broker:session:{token}"
-    user-id-field: userId
-    permissions-field: permissions
+    # Giriş servisinin yazdığı kayıt, eski broker'la aynı: anahtar düz string, değer tip bilgisi olmayan JSON
+    # {"uid", "X-Token", "X-Clientip", "X-User-Agent", "permissions"}; uid istek gövdesinden
+    key-pattern: "user:session:{uid}"
+    # Eski broker bunlara login'den önce bakıyordu; route'ları anonim tanımlanır
+    public-maintasks: [refresh_permissions, giris_public]
+    # X-Token değeri → giriş servisinin anonim route'u
+    routes:
+      login: giris/login
+      logout: giris/logout
+  applications:
+    # redis: giriş servisinin yazdığı liste; static: aşağıdaki liste (local ve testler); off: kontrol yok
+    mode: ${BROKER_APPLICATIONS_MODE:redis}
+    key: broker:applications
+    refresh-interval: 30s
+  compat:
+    # Eski broker'ın HTTP 200'lü gövdeleri (application ve oturum); frontend'ler güncellenince false
+    legacy-responses: ${BROKER_LEGACY_RESPONSES:true}
   kafka:
     topic: broker.logs.v1
     ack-timeout: 2500ms

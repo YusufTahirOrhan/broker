@@ -192,7 +192,7 @@ Tüm yollar `/api/v1` altındadır. Rol sütunu en az gereken roldür; şemalar�
 | GET | `/me` | VIEWER | Kullanıcı adı, görünen ad ve roller |
 | GET | `/environments` | VIEWER | Ortamlar, sıraları, onay ve test ayarları |
 | GET | `/environments/{env}/status` | VIEWER | Config versiyonu ve instance'ların yüklediği versiyonlar |
-| GET | `/meta/definition-rules` | VIEWER | Enum'lar, sınırlar, desenler, okunabilir ve yasak header'lar |
+| GET | `/meta/definition-rules` | VIEWER | Enum'lar, sınırlar, desenler, okunabilir ve yasak header'lar (`forbiddenHeaderExceptions` istisnalarıyla), yer tutucular |
 
 ### Projeler ve yetkiler
 
@@ -428,7 +428,7 @@ Ekran bu kuralları `GET /meta/definition-rules` yanıtından okur ve kendi içi
 | `request.fields[]` | `name`, `type`, `required`, `default` | `name` noktalı yoldur (`adres.il`). `type`: string, integer, number, boolean, object, array. Zarf alanları (`maintask`, `subtask`, `application`, `uid`) tanımlanmaz |
 | `request.pathVariables` | ad → değer | Şablondaki her `{ad}` tam bir kez eşlenir; değer zorunlu ya da varsayılanı olan alana bağlanır |
 | `request.queryParams` | ad → değer | Değeri olmayan parametre gönderilmez |
-| `request.headers` | ad → değer | `Authorization`, `X-User-*`, `X-uid`, `Host`, `Content-Length`, `Connection`, `Transfer-Encoding` tanımlanamaz |
+| `request.headers` | ad → değer | `Authorization`, `X-User-*`, `X-uid`, `Host`, `Content-Length`, `Connection`, `Transfer-Encoding` tanımlanamaz. `X-User-Agent` istisnadır: frontend'in header'ıdır, `${header.X-User-Agent}` ile iletilebilir (giriş servisi oturumu ona bağlar) |
 | `request.body.mode` | `NONE`, `PASS_THROUGH`, `TEMPLATE`, `MULTIPART` | GET ve DELETE'te yalnızca `NONE`. `PASS_THROUGH` zarf alanları dışındaki gövdeyi olduğu gibi gönderir |
 | `request.body.contentType` | Metin | `TEMPLATE`'te varsayılan `application/json` |
 | `request.body.template` | JSON | Yalnızca `TEMPLATE`'te; tek bir yer tutucu da olabilir: `"${request.payload}"` |
@@ -524,6 +524,7 @@ Backend geliştirildikçe bu tablo güncellenir; en yeni kayıt en üsttedir. Bi
 
 | Tarih | Değişiklik |
 | --- | --- |
+| 2026-10-16 | Broker'ın uygulamalara döndüğü yanıtlar, `application` kontrolü, oturum kaydı ve zarf alanlarının `${request.*}` ile okunması uygulandı. `X-User-Agent` route header'ı olarak tanımlanabilir; `X-User-*` yasağının tek istisnası. `GET /meta/definition-rules` yanıtına `forbiddenHeaderExceptions` eklendi, `placeholders.definition` zarf yer tutucularını (`${request.uid}`, `${request.application}`, `${request.maintask}`, `${request.subtask}`) da listeler |
 | 2026-10-16 | Sözleşme güncellendi; backend'de sıradaki geliştirme turunda uygulanacak. `logResponseBody` editörde "Yanıt verisi loglansın" seçeneği oldu; açıkken yanıt verisi Elastic'e de yazılır. Broker'ın uygulamalara döndüğü yanıtlar eski broker'la aynı: `application` kontrolü ve geçersiz oturum HTTP 200 ile eski gövdeleri döner, login ve logout giriş servisinden gelir. Zarf alanları `${request.*}` ile okunur, `${user.id}` oturum kaydıyla doğrulanır. Projeler ve yetkiler tek bir yetki projesinden gelir |
 | 2026-10-13 | Backend uygulandı ve testlerden geçti; henüz bir ortama kurulmadı, yerelde `local` profiliyle çalıştırılabilir. Netleşen gövde ve yanıtlar "Gövde ve yanıt ayrıntıları" bölümünde: yetki açmada `environments`, geri almada `restoreVersion`, spec karşılaştırmasında `items` ve `specOperation`, istekten şablon, yoklama, ortam durumu ve profil önizleme. Talep listesinde öğeler `diff` ve `affectedRoutes` taşımaz, `status` virgülle çoklu değer alır; `DISABLE`/`ENABLE`'da `version` isteğe bağlı. Ön kontrollerin aksiyona göre listesi eklendi. Yeni hata kodu: `INTERNAL_ERROR` (500) |
 | 2026-10-13 | İlk sürüm: ekranlar, API sözleşmesi, alan kuralları ve hata kodları |
