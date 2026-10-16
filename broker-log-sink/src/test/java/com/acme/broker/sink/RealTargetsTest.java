@@ -46,6 +46,9 @@ class RealTargetsTest {
             .withEnv("discovery.type", "single-node")
             .withEnv("xpack.security.enabled", "false")
             .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m")
+            // a build machine's disk is often over Elasticsearch's 90 % watermark (the Oracle test image alone is
+            // ~6 GB); above it new indices get no shard and every write times out
+            .withEnv("cluster.routing.allocation.disk.threshold_enabled", "false")
             .withExposedPorts(9200)
             .waitingFor(Wait.forHttp("/_cluster/health?wait_for_status=yellow").forPort(9200)
                     .withStartupTimeout(Duration.ofMinutes(3)));
