@@ -21,7 +21,6 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.GenericContainer;
 
 import com.acme.broker.core.context.UserContextToken;
 import com.acme.broker.core.json.Json;
@@ -31,6 +30,7 @@ import com.acme.broker.core.testing.FakeHttpServer;
 import com.acme.broker.core.testing.JsonHttp;
 import com.acme.broker.login.session.ApplicationSync;
 import com.acme.broker.login.support.EmbeddedLdap;
+import com.acme.broker.login.support.TestRedis;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.JsonNode;
@@ -46,20 +46,14 @@ import tools.jackson.databind.JsonNode;
 @ExtendWith(OutputCaptureExtension.class)
 class LoginApiTest {
 
-    static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
     static final EmbeddedLdap LDAP = EmbeddedLdap.start().user("ali", "s3cret-Parola").user("ayse", "diger");
     static final FakeHttpServer koordinator = FakeHttpServer.start();
     static final String IP = "10.20.30.40";
     static final String AGENT = "Mozilla/5.0 (Windows NT 10.0)";
 
-    static {
-        REDIS.start();
-    }
-
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
-        registry.add("spring.data.redis.host", REDIS::getHost);
-        registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
+        TestRedis.register(registry, 0);
         registry.add("login.ldap.urls", LDAP::url);
         registry.add("login.ldap.principal-pattern", EmbeddedLdap::principalPattern);
         registry.add("koordinator.url", koordinator::baseUrl);

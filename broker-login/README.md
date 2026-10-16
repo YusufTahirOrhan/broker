@@ -34,7 +34,8 @@ Broker `X-Token: login` ve `X-Token: logout` isteklerini gövdedeki maintask'a b
 | `login.ldap.urls` | — | `LOGIN_LDAP_URLS`, virgülle birden çok adres |
 | `login.ldap.principal-pattern` | `{uid}@test.com.tr` | Active Directory UPN ya da DN, ör. `uid={uid},ou=people,dc=test` |
 | `login.ldap.connect-timeout`, `read-timeout` | 3 sn, 5 sn | |
-| `login.session.key-pattern`, `ttl` | `user:session:{uid}`, 86400 sn | Alan adları da ayarlanabilir; broker'ınkilerle aynı olmalı |
+| `login.session.key-pattern`, `ttl` | `user:session:{uid}`, 86400 sn | Alan adları da ayarlanabilir; broker'ınkilerle aynı olmalı. `local` profilinde `local:user:session:{uid}` (DEV'in oturumlarına yazmaz) |
+| `login.applications.key`, `refresh-interval` | `broker:applications`, 5 dk | `local` profilinde `broker:applications:local` |
 | `login.koordinator-secret` | — | `LOGIN_KOORDINATOR_SECRET` |
 | `koordinator.url`, `auth-header`, `auth-value` | — | Tek base URL ve sabit kimlik header'ı; admin de aynılarını kullanır |
 | `koordinator.permissions-path`, `permissions-field` | `/users/{uid}/permissions`, `yetkiler` | Gerçek API gelince değişir |

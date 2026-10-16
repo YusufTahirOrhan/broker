@@ -43,7 +43,7 @@ scripts/local-run.sh admin --build    # kod değiştiyse yeniden derler (PowerSh
 | `admin` (merkezi admin API) | 8080 | DEV Oracle'daki yerel şema (`BROKER_ADMIN_DB_*`); projeler ve yetkiler bellekte; ortamların Admin API'si yerel env-admin (8081) | Hayır |
 | `env-admin` (ortam Admin API) | 8081, actuator 9091 | Yerel runtime şeması (`BROKER_RUNTIME_DB_*`); Redis sinyali ayrı kanalda (`broker:routes-changed:local`) | Hayır |
 | `broker` | 8083 | DEV runtime DB, salt okunur (`BROKER_DEV_RUNTIME_DB_*`); DEV Redis (oturumlar, route değişikliği sinyali); `broker-local.json` | Hayır; durumunu `broker:loaded-local:*`'a yazar, DEV'in cache durumu ekranında görünmez |
-| `login` (giriş servisi) | 8082 | Sabit kullanıcılar ve yetkiler; oturumu DEV Redis'e yazar | Evet: `user:session:{uid}`, DEV'deki giriş servisinin yazdığıyla aynı kayıt (aynı kullanıcının DEV oturumu ezilir) |
+| `login` (giriş servisi) | 8082 | Sabit kullanıcılar ve yetkiler; DEV Redis | Hayır; oturumları `local:user:session:{uid}`'e, application listesini `broker:applications:local`'a yazar, DEV'in `user:session:*` ve `broker:applications` anahtarlarına dokunmaz |
 
 ## Frontend geliştiricisi: merkezi admin API
 
@@ -77,7 +77,8 @@ restart gerektirmez.
 - `routes`: DEV'de henüz olmayan bir subtask'i yerelde tanımlar; biçim merkezi tanımla aynıdır.
 - Login: `X-Token: login` istekleri DEV runtime DB'deki `giris/login` route'una, yani DEV'deki giriş servisine gider;
   yerel broker oturumu DEV Redis'ten okur. Örnek dosyadaki `giris` route'ları ve `baseUrls`'teki `giris` yalnızca
-  giriş servisini yerelde geliştirirken gerekir (`scripts/local-run.sh login`); yoksa silin.
+  giriş servisini yerelde geliştirirken gerekir (`scripts/local-run.sh login`, broker'da
+  `BROKER_SESSION_KEY_PREFIX=local:`; aşağıda); yoksa silin.
 - `application`: yerel broker sabit listeyle çalışır (`BROKER_LOCAL_APPLICATIONS`, varsayılan `web`). DEV'de giriş
   servisi `broker:applications`'ı yazıyorsa `BROKER_APPLICATIONS_MODE=redis` ile DEV'in listesi kullanılır.
 
@@ -99,8 +100,17 @@ Oturum, login'deki `X-Clientip` ve `X-User-Agent` ile aynı header'ları taşıy
 
 `scripts/local-run.sh login`: LDAP yerine sabit kullanıcılar (`dev.ali`, `dev.ayse`; şifre kullanıcı adı), Koordinatör
 yerine sabit yetkiler. DEV'in LDAP'ı ya da Koordinatör'ü denenecekse `LOGIN_LDAP_MODE=bind`, `LOGIN_LDAP_URLS`,
-`LOGIN_LDAP_PRINCIPALPATTERN`; `KOORDINATOR_MODE=http`, `KOORDINATOR_URL`. Broker'ın yerel giriş servisine gitmesi için
-`broker-local.json`'a `giris` route'ları ve `"giris": "http://localhost:8082"` eklenir.
+`LOGIN_LDAP_PRINCIPALPATTERN`; `KOORDINATOR_MODE=http`, `KOORDINATOR_URL`.
+
+Yerel giriş servisi DEV Redis'e bağlanır ama DEV'in ortak anahtarlarına yazmaz: oturumlar `local:user:session:{uid}`,
+application listesi `broker:applications:local`. Bind modunda da gerçek kullanıcının DEV oturumu ezilmez; yerelde
+açılan oturum DEV'deki broker'larda geçmez.
+
+Broker'ın yerel giriş servisini kullanması için:
+
+- `broker-local.json`'a `giris` route'ları ve `"giris": "http://localhost:8082"` eklenir;
+- broker `BROKER_SESSION_KEY_PREFIX=local:` ile açılır (`local.env`'de ya da komut satırında); oturumları
+  `local:user:session:{uid}`'den okur. Değişken yokken DEV'deki giriş servisinin yazdığı `user:session:{uid}` okunur.
 
 ## Taşıma akışını yerelde denemek
 

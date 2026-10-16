@@ -18,6 +18,10 @@ broker:
     verify-interval: 2s                    # override dosyası değişince restart gerekmesin
     # yerel instance DEV'in cache durumu ekranında (broker:loaded:*) görünmesin
     loaded-key-prefix: "broker:loaded-local:"
+  session:
+    # Oturumlar DEV'deki giriş servisinin yazdığı kayıtlar. Giriş servisi yerelde çalışıyorsa (local:user:session:{uid}
+    # yazar) BROKER_SESSION_KEY_PREFIX=local: ile onunkiler okunur.
+    key-pattern: "${BROKER_SESSION_KEY_PREFIX:}user:session:{uid}"
   applications:
     # DEV'de giriş servisi listeyi yazıyorsa BROKER_APPLICATIONS_MODE=redis ile DEV'in listesi kullanılır
     mode: ${BROKER_APPLICATIONS_MODE:static}
