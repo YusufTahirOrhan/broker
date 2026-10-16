@@ -17,7 +17,10 @@ Broker `X-Token: login` ve `X-Token: logout` isteklerini gövdedeki maintask'a b
 | `POST /logout` | `{"uid"}`, `X-Clientip`, `X-User-Agent` | Kayıt var ve istemci aynı: `{"response": true, "status": 200, "message": "logged out"}`; değilse `{"response": false, "status": 301, "message": "something went wrong with logging out."}` |
 | `POST /internal/v1/sessions/{uid}/logout` | `X-Koordinator-Secret` | Koordinatör'ün zorla çıkışı, broker'dan geçmez: 204 kapatıldı, 404 oturum yok, 403 gizli anahtar yanlış ya da ayarlı değil |
 
-- Boş `uid` ya da şifre her zaman başarısızdır (anonim bind'e düşmez). LDAP başarısızsa Koordinatör'e sorulmaz.
+- Boş ya da yalnızca boşluktan oluşan `uid` veya şifre LDAP'a gitmeden başarısızdır (anonim bind'e düşmez, Active
+  Directory'de hatalı deneme sayılmaz). LDAP başarısızsa Koordinatör'e sorulmaz.
+- Koordinatör'ün yetki cevabı 200 ama `yetkiler` alanı yoksa ya da dizi değilse Koordinatör hatası sayılır: giriş
+  reddedilir, uyarı loglanır. Boş dizi geçerli cevaptır (yetkisiz giriş).
 - Logout kaydı yalnızca onu açan istemci kapatabilir (`login.logout.require-client-match`, varsayılan true).
 - `/actuator/` ve `/internal/` ile başlayanlar dışındaki her uç (yeni uçlar dahil) yalnızca broker'ın imzaladığı, en
   fazla 60 sn önce verilmiş `X-User-Context` ile kabul edilir; değilse 403. Yol, container'ın çözdüğü ve normalize

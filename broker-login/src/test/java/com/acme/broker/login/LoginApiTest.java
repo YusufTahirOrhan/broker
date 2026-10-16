@@ -164,12 +164,23 @@ class LoginApiTest {
 
     @Test
     void withoutPermissionsTheLoginFailsAfterAGoodPassword() {
-        koordinator.json("GET", "/users/ayse/permissions", 500, "{}");
+        for (String body : List.of("{}", "{\"ad\": \"Ayşe\"}", "{\"yetkiler\": \"SORGU_TEMEL\"}")) {
+            koordinator.json("GET", "/users/ayse/permissions", body.equals("{}") ? 500 : 200, body);
 
-        JsonHttp.Response response = login("ayse", "diger");
+            JsonHttp.Response response = login("ayse", "diger");
 
-        assertThat(response.text()).isEqualTo("{\"response\":false,\"status\":401,\"Ldap\":true,\"login\":false}");
-        assertThat(stored("ayse")).isNull();
+            assertThat(response.text()).as(body)
+                    .isEqualTo("{\"response\":false,\"status\":401,\"Ldap\":true,\"login\":false}");
+            assertThat(stored("ayse")).isNull();
+        }
+    }
+
+    @Test
+    void anEmptyPermissionListIsALoginWithoutPermissions() {
+        koordinator.json("GET", "/users/ayse/permissions", 200, "{\"yetkiler\": []}");
+
+        assertThat(login("ayse", "diger").json().get("login").booleanValue()).isTrue();
+        assertThat(stored("ayse").permissions()).isEmpty();
     }
 
     @Test

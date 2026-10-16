@@ -38,7 +38,9 @@ public class BindLdapAuthenticator implements LdapAuthenticator {
 
     @Override
     public boolean authenticate(String uid, String password) {
-        if (uid == null || uid.isBlank() || password == null || password.isEmpty()) {
+        // as the legacy check: a blank password never reaches the directory (Active Directory would count it as a
+        // failed attempt, and an empty one would be an anonymous bind)
+        if (uid == null || uid.isBlank() || password == null || password.isBlank()) {
             return false;
         }
         DirContext context = null;

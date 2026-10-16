@@ -43,7 +43,13 @@ public class HttpKoordinatorClient implements KoordinatorClient {
                 return Optional.empty();
             }
             JsonNode body = Json.tryParse(response.body());
-            return Optional.of(strings(body == null ? null : body.get(settings.permissionsField())));
+            JsonNode list = body == null || !body.isObject() ? null : body.get(settings.permissionsField());
+            if (list == null || !list.isArray()) {
+                // an empty array is an answer (no permissions); a missing list is the Koordinatör's error
+                log.warn("Koordinatör'ün yetki cevabında '{}' dizisi yok: uid={}", settings.permissionsField(), uid);
+                return Optional.empty();
+            }
+            return Optional.of(strings(list));
         } catch (IOException e) {
             log.warn("Koordinatör'e ulaşılamadı: uid={} ({})", uid, e.toString());
             return Optional.empty();
@@ -91,11 +97,9 @@ public class HttpKoordinatorClient implements KoordinatorClient {
 
     private static List<String> strings(JsonNode array) {
         List<String> values = new ArrayList<>();
-        if (array != null && array.isArray()) {
-            for (JsonNode value : array) {
-                if (Json.isString(value)) {
-                    values.add(value.stringValue());
-                }
+        for (JsonNode value : array) {
+            if (Json.isString(value)) {
+                values.add(value.stringValue());
             }
         }
         return values;
