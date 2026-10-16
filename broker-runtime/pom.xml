@@ -73,6 +73,12 @@
             <artifactId>flyway-database-oracle</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- uçtan uca test: giriş servisi aynı JVM'de ayrı bir uygulama olarak açılır -->
+        <dependency>
+            <groupId>com.acme.broker</groupId>
+            <artifactId>broker-login</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

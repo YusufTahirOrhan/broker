@@ -9,6 +9,6 @@ Frontend'lerin tek endpoint'e gönderdiği `maintask`/`subtask` isteklerini, Dev
 | `broker-env-admin` | Yazıldı | Ortam Admin API'si: runtime DB'ye uygulama, yoklama, spec, test |
 | `broker-admin` | Yazıldı | Merkezi admin API'si (`docs/frontend-guide.md`) |
 | `broker-log-sink` | Yazıldı | Kafka'dan Elastic (eski yapı) ve ClickHouse'a |
-| `broker-login` | Planlandı | Giriş servisi: LDAP doğrulaması, token, Redis'teki oturum kaydı, logout |
+| `broker-login` | Yazıldı | Giriş servisi: LDAP doğrulaması, token, Redis'teki oturum kaydı, logout (`broker-login/README.md`) |
 
 Derleme: Java 25 ve `mvn -B verify`. Ayrıntılar `HANDOFF.md`, `docs/design.md` ve `docs/frontend-guide.md`'de.

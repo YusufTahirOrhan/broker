@@ -1,0 +1,12 @@
+# Geliştiricinin makinesi: LDAP yerine sabit kullanıcılar (şifre = kullanıcı adı), Koordinatör yerine compose'daki
+# sahte Koordinatör (docs/local-run.md)
+login:
+  ldap:
+    mode: static
+    users:
+      dev.ali: dev.ali
+      dev.ayse: dev.ayse
+  koordinator-secret: local-koordinator-secret
+
+koordinator:
+  url: ${KOORDINATOR_URL:http://localhost:8095}

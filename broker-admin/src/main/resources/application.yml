@@ -63,16 +63,24 @@ broker:
       lag-warning: 1m
     catalog:
       mode: http
+      # boşsa koordinator.url
       url: ${BROKER_PROJECT_SERVICE_URL:}
       sync-cron: "0 7 * * * *"
     authorization:
       mode: http
+      # ortam başına ayrı adres gerekirse; boşsa koordinator.url
       urls:
         DEV: ${BROKER_DEV_AUTHORIZATION_URL:}
         TEST: ${BROKER_TEST_AUTHORIZATION_URL:}
         PROD: ${BROKER_PROD_AUTHORIZATION_URL:}
     drift:
       cron: "0 23 2 * * *"
+
+# Yetki projesi: projeler ve yetkiler buradan; giriş servisiyle aynı ayarlar
+koordinator:
+  url: ${KOORDINATOR_URL:}
+  auth-header: ${KOORDINATOR_AUTH_HEADER:Authorization}
+  auth-value: ${KOORDINATOR_AUTH_VALUE:}
 
 logging:
   structured:

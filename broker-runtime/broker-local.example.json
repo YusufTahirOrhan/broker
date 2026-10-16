@@ -1,0 +1,44 @@
+{
+  "baseUrls": {
+    "giris": "http://localhost:8082"
+  },
+  "routes": [
+    {
+      "maintask": "giris",
+      "subtask": "login",
+      "httpMethod": "POST",
+      "pathTemplate": "/login",
+      "anonymous": true,
+      "definition": {
+        "request": {
+          "fields": [{ "name": "password", "type": "string", "required": true }],
+          "headers": { "X-Clientip": "${header.X-Clientip}", "X-User-Agent": "${header.X-User-Agent}" },
+          "body": {
+            "mode": "TEMPLATE",
+            "contentType": "application/json",
+            "template": { "uid": "${request.uid}", "password": "${request.password}" }
+          }
+        },
+        "response": { "type": "JSON" }
+      }
+    },
+    {
+      "maintask": "giris",
+      "subtask": "logout",
+      "httpMethod": "POST",
+      "pathTemplate": "/logout",
+      "anonymous": true,
+      "definition": {
+        "request": {
+          "headers": { "X-Clientip": "${header.X-Clientip}", "X-User-Agent": "${header.X-User-Agent}" },
+          "body": {
+            "mode": "TEMPLATE",
+            "contentType": "application/json",
+            "template": { "uid": "${request.uid}" }
+          }
+        },
+        "response": { "type": "JSON" }
+      }
+    }
+  ]
+}

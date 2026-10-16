@@ -17,7 +17,7 @@ Son güncelleme: 2026-10-16.
 
 ## Sıradaki iş (2026-10-16)
 
-**Durum:** 1, 2 ve 3 bitti; 4–6 sırada.
+**Durum:** 1–4 bitti; 5 ve 6 sırada.
 
 Maddeler sırayla yapılır; her biri kendi commit'leriyle biter ve her push'tan önce `mvn -B verify` yeşildir. 7. madde bu turda yapılmaz. "Bilgi bekleyenler"deki konular işi durdurmaz: o parçalar arayüz arkasında, ayara bağlı ve aşağıdaki varsayılanlarla yazılır; bilgi gelince yalnızca o parça değişir. Eski broker'dan alınan gövdeler, anahtarlar ve alan adları birebir korunur ve testlerle sabitlenir. Bir madde bitince bu nottaki modül bölümleri de güncellenir.
 
@@ -131,6 +131,13 @@ Yeni modül, kök `pom.xml`'e eklenir; paket `com.acme.broker.login`, çalışt�
 - **Güvenlik:** Şifre hiçbir yerde loglanmaz. `login.user-context-secret` ayarlıysa broker'ın imzaladığı `X-User-Context` doğrulanır (`issuedAt` 60 sn içinde), imzasız çağrı 403. Servis yalnızca broker'ın ağından erişilebilir olmalı.
 - **Örnek tanımlar:** `giris/login` ve `giris/logout` route tanımları modülün README'sinde ve `broker-local.json` örneğinde: POST, `TEMPLATE` gövde `{"uid": "${request.uid}", "password": "${request.password}"}` (logout'ta yalnızca `uid`), header'lar `${header.X-Clientip}` ve `${header.X-User-Agent}`, anonim, profil yok.
 - **Test:** gömülü LDAP (UnboundID), Koordinatör için `FakeHttpServer`, Testcontainers Redis; yanıt gövdeleri birebir. Uçtan uca: login → token'la istek geçer → farklı `X-User-Agent` 301 alır → farklı `X-User-Agent`'la logout reddedilir → doğru header'larla logout → aynı istek 301 alır.
+- **Yapıldı (2026-10-16):** Modül `broker-login` (README'de uçlar, ayarlar ve route tanımları; örnek `broker-runtime/broker-local.example.json`). Uygulanırken netleşenler:
+  - **İmza:** `X-User-Context`'in biçimi core'a taşındı (`UserContextToken.sign/verify`); broker imzalar, giriş servisi doğrular. İmzasız ya da eski çağrıya 403 `{"response": false, "status": 403, "message": "..."}`. Koordinatör'ün iç ucu imzaya tabi değil, kendi gizli anahtarıyla.
+  - **Koordinatör:** `KoordinatorClient` (giriş servisi) ve admin'de `KoordinatorProperties`: `koordinator.url`, `auth-header` (varsayılan `Authorization`), `auth-value` (boşsa header yok). Admin'in `HttpProjectCatalog` ve `HttpAuthorizationService`'i bu adrese gider; `broker.admin.catalog.url` ve `broker.admin.authorization.urls.<ENV>` doluysa onları kullanır. Yetki cevabı 200 ama `yetkiler` yoksa boş liste sayılır (giriş başarılı, yetkisiz).
+  - **Redis:** Kayıt `SET` + süre, ardından `EXISTS`; herhangi bir Redis hatası "yazılamadı" gövdesini verir. Logout'ta Redis hatası da reddetme gövdesidir.
+  - **LDAP:** `LdapContextSource` havuzsuz, `com.sun.jndi.ldap.connect/read.timeout` ile; başarısız bind `info` loglanır (uid ve hata türü, şifre yok). `static` mod `local` dışında açılırsa servis başlamaz (`LoginConfiguration`).
+  - **Local profili:** sabit kullanıcılar `dev.ali`, `dev.ayse` (şifre = kullanıcı adı), Koordinatör `http://localhost:8095` (madde 5'teki sahte Koordinatör), `login.koordinator-secret: local-koordinator-secret`.
+  - **Uçtan uca test** broker-runtime'da (`LoginEndToEndTest`): giriş servisi aynı JVM'de ikinci bir Spring uygulaması olarak (`local` profili, kendi yapılandırma klasörü `login-e2e/`, broker'ın `application.yml`'ı ona karışmaz). broker-runtime'ın test bağımlılığı `broker-login`.
 
 ### 5. Yerel çalıştırma
 
@@ -189,7 +196,7 @@ Tasarım dokümanındakilere ek olarak netleşenler:
 - **Profilsiz yanıt:** Gövde olduğu gibi döner. RESPONSE olayındaki `client_response` bu durumda yalnızca `{"status": <kod>}` olur, böylece loglanmamış veri `data_response`'a sızmaz; `logResponseBody` açıksa "Sıradaki iş" 2'deki kural geçerlidir.
 - **Dosya yanıtı** (`BINARY` route ya da servis `Content-Disposition` döndürdü): `client_response` = `{"info": <route'un binaryInfo'su ya da "Dosya yanıtı: <dosya adı>">}`; gövde loglanmaz, onaydan sonra stream edilir.
 - **Timeout ve bağlantı hatası, profil yoksa:** ortak formatta 504 `TIMEOUT` ve 502 `TECHNICAL_ERROR`.
-- **Oturum:** Eski broker'dan teyit edildi: kayıt `user:session:{uid}`, geçerlilik token, `X-Clientip` ve `X-User-Agent` eşleşmesiyle; login ve logout ayrı bir giriş servisinde. Oturum işlemleri parametre logu ve `broker.gelen.istekler` sayacı dışında kalır. Broker tarafı uygulandı ("Sıradaki iş" 3); giriş servisi 4.
+- **Oturum:** Eski broker'dan teyit edildi: kayıt `user:session:{uid}`, geçerlilik token, `X-Clientip` ve `X-User-Agent` eşleşmesiyle; login ve logout ayrı bir giriş servisinde. Oturum işlemleri parametre logu ve `broker.gelen.istekler` sayacı dışında kalır. Broker tarafı ("Sıradaki iş" 3) ve giriş servisi (`broker-login`, 4) uygulandı.
 - **Anonim route + oturum:** Token geçerliyse kullanıcı yine çözülür (`X-uid`, `perm_list`); geçersizse anonim route yine çalışır.
 - **Servise giden header'lar:** `X-uid` (oturumdaki kullanıcı), `X-Request-Id`, `traceparent`; gizli anahtar ayarlıysa HMAC imzalı `X-User-Context`.
 - **Test çağrıları** Kafka'ya log yazmaz; merkezi admin bunları kendisi audit eder.
@@ -301,6 +308,19 @@ Paket `com.acme.broker.admin`. Sözleşme `docs/frontend-guide.md`; uygulama sı
 - **Ayar:** SSO issuer'ı `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUERURI` ile verilir (boş varsayılan yok; boş issuer her token'ı reddeder). mTLS istemci sertifikası `mtls` profilinde (`application-mtls.yml`, bundle `env-client`).
 - **Testler:** Testcontainers Oracle XE (`CentralDatabase`: uygulama `broker_admin_app` ile, temizlik şema sahibiyle; history trigger'ları temizlik sırasında kapatılır), `local` profili ve bellek içi `FakeEnvironments` (üç ortamın Admin API'si; promotion ID idempotency'si, eski talebin reddi, proje/profil yokluğu, sessiz kalma). SSO testi gerçek imzalı JWT ile; ortam istemcisinin mTLS'i istemci sertifikası isteyen bir `HttpsServer`'a karşı.
 
+### broker-login (yeşil)
+
+Paket `com.acme.broker.login`; çalıştırılabilir jar `-exec` ekiyle. Ayrıntılar `broker-login/README.md`'de.
+
+| Paket | İçerik |
+| --- | --- |
+| `web` | `LoginController` (`/login`, `/logout`, `/internal/v1/sessions/{uid}/logout`), `LegacyBodies` (eski gövdeler birebir), `UserContextFilter` |
+| `session` | `LoginService` (LDAP → Koordinatör → kayıt), `SessionStore` (core'daki `SessionRecordCodec` ile), `ApplicationSync` (5 dk'da bir `broker:applications`) |
+| `ldap` | `BindLdapAuthenticator` (Spring LDAP doğrudan bind), `StaticLdapAuthenticator` (yalnızca `local`) |
+| `koordinator` | `KoordinatorClient`: kullanıcı yetkileri ve proje kodları (varsayılan uçlar ayardan) |
+
+- **Testler:** `LoginApiTest` (UnboundID gömülü LDAP, Testcontainers Redis, sahte Koordinatör; gövdelerin anahtar sırası ve tipleri, kayıt biçimi ve süresi, şifrenin loglarda olmaması, logout matrisi, Koordinatör çıkışı, imza, application senkronu), `LoginUnitTest` (yazılamayan kayıt), `LoginConfigurationTest` (static mod yalnızca local). Uçtan uca senaryo broker-runtime'da.
+
 ### broker-log-sink (yeşil)
 
 Paket `com.acme.broker.sink`. İki `@KafkaListener` (toplu), her biri kendi consumer group'unda; `broker.sink.elastic.enabled` ve `broker.sink.clickhouse.enabled` ile ayrı ayrı açılır (aynı imaj iki deployment olarak da çalışabilir).
@@ -344,6 +364,7 @@ Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya ya
 - **Tanımda `X-User-Agent`:** `request.headers` kuralında (`X-User-*` tanımlanamaz) `X-User-Agent` istisna; giriş servisinin route'u onu iletir.
 - **`legacy-responses: false`:** application izinli değilse 403 `DENIED`, oturum geçersizse 401 `DENIED` (ortak format).
 - **Readiness:** Broker, application listesi Redis'ten bir kez okunmadan hazır görünmez; sonra okunamazsa son liste kullanılır.
+- **Giriş servisi:** İmzasız ya da geçersiz imzalı çağrıya 403 `{"response": false, "status": 403, "message": ...}`; Koordinatör'ün iç ucu (`/internal/v1/sessions/{uid}/logout`) imzadan bağımsız. Admin'in proje ve yetki çağrıları Koordinatör'ün tek base URL'ine gider (ortam başına adres isteğe bağlı).
 - **Oturum işlemlerinin logu:** `client_response` giriş servisinin gövdesi + `"data": ""`; servisin gövdesi ClickHouse'a yalnızca route'un `logResponseBody`'si açıksa yazılır (token ClickHouse'a girmez). Olayın maintask/subtask'i gövdeden.
 - **`logResponseBody` açıkken `client_response` (log hattı):** profil zarfının tamamı maskelenir, `data` JSON metni olur (string ise olduğu gibi). Profilsiz yanıtta maskeli gövde yazılır; gövde JSON nesnesi değilse `{"status": <kod>, "data": "<metin>"}`. `maxBodyBytes` aşılırsa metin UTF-8'i bölmeden kırpılır ve `broker.body_truncated: true`.
 

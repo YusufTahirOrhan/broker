@@ -10,27 +10,28 @@ import com.acme.broker.admin.catalog.HttpProjectCatalog;
 import com.acme.broker.admin.catalog.MemoryProjectCatalog;
 import com.acme.broker.admin.catalog.ProjectCatalog;
 
-/** The project service and the authorization services: HTTP in environments, in memory locally. */
+/** Projects and permissions: from the Koordinatör over HTTP in environments, in memory locally. */
 @Configuration(proxyBeanMethods = false)
 public class ClientConfiguration {
 
     @Bean
-    ProjectCatalog projectCatalog(AdminProperties properties) {
+    ProjectCatalog projectCatalog(AdminProperties properties, KoordinatorProperties koordinator) {
         AdminProperties.Catalog catalog = properties.catalog();
         if ("memory".equals(catalog.mode())) {
             return new MemoryProjectCatalog(catalog.projects());
         }
-        if (catalog.url() == null || catalog.url().isBlank()) {
-            throw new IllegalStateException("broker.admin.catalog.url zorunlu (ya da mode: memory)");
+        String url = koordinator.urlOr(catalog.url());
+        if (url == null || url.isBlank()) {
+            throw new IllegalStateException("koordinator.url zorunlu (ya da broker.admin.catalog.mode: memory)");
         }
-        return new HttpProjectCatalog(catalog.url());
+        return new HttpProjectCatalog(url, koordinator);
     }
 
     @Bean
-    AuthorizationService authorizationService(AdminProperties properties) {
+    AuthorizationService authorizationService(AdminProperties properties, KoordinatorProperties koordinator) {
         AdminProperties.Authorization authorization = properties.authorization();
         return "memory".equals(authorization.mode())
                 ? new MemoryAuthorizationService(authorization.permissions())
-                : new HttpAuthorizationService(authorization.urls());
+                : new HttpAuthorizationService(authorization.urls(), koordinator);
     }
 }
