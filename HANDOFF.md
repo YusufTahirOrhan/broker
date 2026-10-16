@@ -1,6 +1,6 @@
 # Devir notu
 
-Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; çekirdek ve beş modül (giriş servisi dahil) yazıldı, `mvn -B verify` yeşil. 2026-10-16 turunda "Sıradaki iş"in 1–6. maddeleri yapıldı: Oracle 19c, yanıt verisinin loglanması, eski broker'la aynı oturum ve yanıtlar, giriş servisi, DEV'e bağlı yerel çalıştırma, `${user.permission}`; alarm (7) sonraki tur. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
+Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; çekirdek ve beş modül (giriş servisi dahil) yazıldı, `mvn -B verify` yeşil. 2026-10-16 turunda "Sıradaki iş"in 1–6. maddeleri yapıldı: Oracle 19c, yanıt verisinin loglanması, eski broker'la aynı oturum ve yanıtlar, giriş servisi, DEV'e bağlı yerel çalıştırma, `${user.permission}`; alarm (7) sonraki tur. Aynı dalda PR #1 incelemesinin düzeltmeleri yapıldı: yerel giriş servisi DEV'in ortak Redis anahtarlarına yazmaz (madde 5), giriş servisinin imza kontrolü `/actuator/` ve `/internal/` dışındaki her yolda ve imza anahtarı `local` dışında zorunlu, boşluklu şifre LDAP'a gitmez, yetki listesiz Koordinatör cevabı hata (madde 4). `mvn -B verify`: 203 test. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
 
 Son güncelleme: 2026-10-16.
 
@@ -156,7 +156,7 @@ Yeni modül, kök `pom.xml`'e eklenir; paket `com.acme.broker.login`, çalışt�
   - **Tohum verisi:** admin'de `LocalSeed` (`local` profili, `broker.admin.local.seed`, varsayılan açık): boş merkezi şemaya `local-seed.json`'daki 3 proje, 5 subtask ve 1 profil, API'nin servisleri üzerinden (history'ler gerçek); ortamlara çağrı yapılmaz.
   - **Giriş servisi local'de** sabit kullanıcılar ve sabit yetkilerle (`koordinator.mode: static`, yalnızca `local`); `KoordinatorClient` arayüz oldu (`HttpKoordinatorClient`, `StaticKoordinatorClient`).
   - **Springdoc:** admin'de `springdoc.api-docs.enabled` ve `swagger-ui.enabled` varsayılan kapalı; `application-local.yml` ve yeni `application-dev.yml` açar. Diğer modüllerde springdoc yok.
-  - **Docker'sız derleme:** Testcontainers kullanan test sınıfları `@Tag("docker")`; `mvn -B verify -Pno-docker` yalnızca birim testlerini çalıştırır (99 test, container yok). CI hepsini çalıştırır.
+  - **Docker'sız derleme:** Testcontainers kullanan test sınıfları `@Tag("docker")`; `mvn -B verify -Pno-docker` yalnızca birim testlerini çalıştırır (106 test, container yok). CI hepsini çalıştırır.
   - **Doğrulama:** Betiklerle dört uygulama, DEV'i taklit eden bir Oracle ve şifreli Redis'e karşı açıldı: admin'den `giris` route'ları DEV'e (yerel env-admin) taşındı, broker üzerinden login, eski gövdeler, başka `X-User-Agent`'la logout reddi, logout ve 301 denendi.
 
 ### 6. `${user.permission}` yer tutucusu
