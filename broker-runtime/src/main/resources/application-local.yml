@@ -1,19 +1,27 @@
-# Geliştiricinin makinesi: route'lar DEV runtime DB'sinden salt okunur kullanıcıyla, üstüne broker-local.json
+# Geliştiricinin makinesi, DEV'e bağlı (docs/local-run.md): route'lar DEV runtime DB'sinden salt okunur kullanıcıyla,
+# üstüne broker-local.json; oturumlar ve route değişikliği sinyali DEV Redis'inden. DEV'e hiçbir şey yazmaz.
 spring:
   datasource:
     url: ${BROKER_DEV_RUNTIME_DB_URL:jdbc:oracle:thin:@//localhost:1521/XEPDB1}
     username: ${BROKER_DEV_RUNTIME_DB_USER:broker_runtime_reader}
     password: ${BROKER_DEV_RUNTIME_DB_PASSWORD:}
+    hikari:
+      schema: ${BROKER_DEV_RUNTIME_DB_SCHEMA:BROKER_RUNTIME}
+
+server:
+  port: ${BROKER_PORT:8083}               # admin yerelde 8080'de
 
 broker:
   local-overrides: file:./broker-local.json
-  applications:
-    # giriş servisi yerelde çalışıyorsa redis de olur; varsayılan sabit liste
-    mode: ${BROKER_APPLICATIONS_MODE:static}
-    list: ${BROKER_LOCAL_APPLICATIONS:web}
   log-sink: console                        # Kafka'ya yazmaz, DEV loglarını kirletmez
   cache:
     verify-interval: 2s                    # override dosyası değişince restart gerekmesin
+    # yerel instance DEV'in cache durumu ekranında (broker:loaded:*) görünmesin
+    loaded-key-prefix: "broker:loaded-local:"
+  applications:
+    # DEV'de giriş servisi listeyi yazıyorsa BROKER_APPLICATIONS_MODE=redis ile DEV'in listesi kullanılır
+    mode: ${BROKER_APPLICATIONS_MODE:static}
+    list: ${BROKER_LOCAL_APPLICATIONS:web}
   spool:
     directory: ./var/log-spool
   local:

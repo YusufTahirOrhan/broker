@@ -14,6 +14,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -34,6 +35,7 @@ import tools.jackson.databind.node.ObjectNode;
  * The writers against real servers: the design document's ClickHouse DDL, and Elasticsearch with the
  * {@code broker-fields} component template composed into a {@code requests_*} template as in production.
  */
+@Tag("docker")
 class RealTargetsTest {
 
     static final GenericContainer<?> clickhouse = new GenericContainer<>("clickhouse/clickhouse-server:24.8-alpine")

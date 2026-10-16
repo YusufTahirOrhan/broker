@@ -8,6 +8,7 @@ spring:
     redis:
       host: ${BROKER_REDIS_HOST:localhost}
       port: ${BROKER_REDIS_PORT:6379}
+      password: ${BROKER_REDIS_PASSWORD:}
       timeout: 2s
 
 server:
@@ -49,6 +50,8 @@ login:
 
 # Yetki projesi; gerçek uçlar gelince yalnızca bu ayarlar değişir
 koordinator:
+  # http; static yalnızca local profilinde (sabit yetkiler)
+  mode: http
   url: ${KOORDINATOR_URL:}
   auth-header: ${KOORDINATOR_AUTH_HEADER:Authorization}
   auth-value: ${KOORDINATOR_AUTH_VALUE:}

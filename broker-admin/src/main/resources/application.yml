@@ -30,10 +30,13 @@ spring:
 server:
   port: ${BROKER_ADMIN_PORT:8080}
 
+# OpenAPI ve Swagger yalnızca local ve dev profillerinde açık (application-local.yml, application-dev.yml)
 springdoc:
   api-docs:
+    enabled: false
     path: /v3/api-docs
   swagger-ui:
+    enabled: false
     path: /swagger-ui.html
 
 management:

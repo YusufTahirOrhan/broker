@@ -5,6 +5,7 @@ import java.util.Base64;
 import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -18,6 +19,7 @@ import com.acme.broker.core.testing.JsonHttp;
  * The central admin with the {@code local} profile (HTTP Basic, in-memory project and authorization services),
  * Oracle in a container ({@link CentralDatabase}) and the environments faked by {@link FakeEnvironments}.
  */
+@Tag("docker")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "broker.admin.catalog.projects.P-100=Sipariş Servisi",
         "broker.admin.catalog.projects.P-200=Log Projesi",
@@ -25,7 +27,8 @@ import com.acme.broker.core.testing.JsonHttp;
         "broker.admin.catalog.projects.P-400=İnsan Kaynakları",
         "broker.admin.authorization.permissions.DEV=ORDER_READ,ORDER_WRITE,LOGPROJECT_TEMEL,CRM_AGENT",
         "broker.admin.authorization.permissions.TEST=ORDER_READ,ORDER_WRITE,LOGPROJECT_TEMEL,CRM_AGENT",
-        "broker.admin.authorization.permissions.PROD=ORDER_READ,ORDER_WRITE,CRM_AGENT"
+        "broker.admin.authorization.permissions.PROD=ORDER_READ,ORDER_WRITE,CRM_AGENT",
+        "broker.admin.local.seed=false"
 })
 @ActiveProfiles("local")
 public abstract class AdminTestBase {

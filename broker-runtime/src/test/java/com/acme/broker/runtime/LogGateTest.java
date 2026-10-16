@@ -15,6 +15,7 @@ import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -42,6 +43,7 @@ import com.acme.broker.runtime.support.RuntimeFixture;
  * The log gate with a Kafka that does not acknowledge: the topic does not exist and cannot be auto-created, so every
  * send fails within {@code max.block.ms}.
  */
+@Tag("docker")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "broker.kafka.topic=broker.logs.gate",
         "broker.kafka.warmup=false",

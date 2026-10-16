@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -31,6 +32,7 @@ import com.acme.broker.runtime.route.RouteCache;
 import com.acme.broker.runtime.support.RuntimeFixture;
 
 /** The {@code local} profile: DEV's routes plus {@code broker-local.json}, console log sink, no Kafka. */
+@Tag("docker")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("local")
 class LocalOverridesTest {

@@ -23,6 +23,7 @@ spring:
     redis:
       host: ${BROKER_REDIS_HOST:localhost}
       port: ${BROKER_REDIS_PORT:6379}
+      password: ${BROKER_REDIS_PASSWORD:}
 
 server:
   port: ${BROKER_ENV_ADMIN_PORT:8443}

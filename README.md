@@ -11,4 +11,4 @@ Frontend'lerin tek endpoint'e gönderdiği `maintask`/`subtask` isteklerini, Dev
 | `broker-log-sink` | Yazıldı | Kafka'dan Elastic (eski yapı) ve ClickHouse'a |
 | `broker-login` | Yazıldı | Giriş servisi: LDAP doğrulaması, token, Redis'teki oturum kaydı, logout (`broker-login/README.md`) |
 
-Derleme: Java 25 ve `mvn -B verify`. Ayrıntılar `HANDOFF.md`, `docs/design.md` ve `docs/frontend-guide.md`'de.
+Derleme: Java 25 ve `mvn -B verify` (veritabanı testleri Docker ister; Docker'sız makinede `mvn -B verify -Pno-docker`). Yerelde çalıştırma: `docs/local-run.md`. Ayrıntılar `HANDOFF.md`, `docs/design.md` ve `docs/frontend-guide.md`'de.

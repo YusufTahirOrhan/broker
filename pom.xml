@@ -71,6 +71,27 @@
         </dependencies>
     </dependencyManagement>
 
+    <profiles>
+        <!-- Docker'ın olmadığı makinelerde (intranet): Testcontainers isteyen testler (@Tag("docker")) atlanır,
+             birim testleri çalışır. CI hepsini çalıştırır. Kullanım: mvn -B verify -Pno-docker -->
+        <profile>
+            <id>no-docker</id>
+            <build>
+                <pluginManagement>
+                    <plugins>
+                        <plugin>
+                            <groupId>org.apache.maven.plugins</groupId>
+                            <artifactId>maven-surefire-plugin</artifactId>
+                            <configuration>
+                                <excludedGroups>docker</excludedGroups>
+                            </configuration>
+                        </plugin>
+                    </plugins>
+                </pluginManagement>
+            </build>
+        </profile>
+    </profiles>
+
     <build>
         <pluginManagement>
             <plugins>

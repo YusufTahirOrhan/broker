@@ -10,6 +10,7 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,6 +36,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.JsonNode;
 
 /** The login service against a real directory (UnboundID), Redis and a fake Koordinatör; bodies key for key. */
+@Tag("docker")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "koordinator.auth-value=Bearer koordinator-token",
         "login.koordinator-secret=k-secret",

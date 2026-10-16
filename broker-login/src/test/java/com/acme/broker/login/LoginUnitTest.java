@@ -10,7 +10,6 @@ import static org.mockito.Mockito.when;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.RedisConnectionFailureException;
@@ -18,9 +17,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import com.acme.broker.core.json.Json;
-import com.acme.broker.login.config.KoordinatorProperties;
 import com.acme.broker.login.config.LoginProperties;
 import com.acme.broker.login.koordinator.KoordinatorClient;
+import com.acme.broker.login.koordinator.StaticKoordinatorClient;
 import com.acme.broker.login.ldap.StaticLdapAuthenticator;
 import com.acme.broker.login.session.LoginService;
 import com.acme.broker.login.session.SessionStore;
@@ -33,13 +32,7 @@ class LoginUnitTest {
 
     @SuppressWarnings("unchecked")
     private static LoginController controller(StringRedisTemplate redis) {
-        KoordinatorClient koordinator = new KoordinatorClient(new KoordinatorProperties(null, null, null, null, null,
-                null, null, null)) {
-            @Override
-            public Optional<List<String>> permissions(String uid) {
-                return Optional.of(List.of("LOGPROJECT_TEMEL"));
-            }
-        };
+        KoordinatorClient koordinator = new StaticKoordinatorClient(List.of("LOGPROJECT_TEMEL"), List.of());
         LoginService service = new LoginService(new StaticLdapAuthenticator(Map.of("ali", "p")), koordinator,
                 new SessionStore(redis, PROPERTIES), PROPERTIES);
         return new LoginController(service, PROPERTIES);

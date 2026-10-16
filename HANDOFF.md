@@ -17,7 +17,7 @@ Son güncelleme: 2026-10-16.
 
 ## Sıradaki iş (2026-10-16)
 
-**Durum:** 1–4 bitti; 5 ve 6 sırada.
+**Durum:** 1–5 bitti; 6 sırada.
 
 Maddeler sırayla yapılır; her biri kendi commit'leriyle biter ve her push'tan önce `mvn -B verify` yeşildir. 7. madde bu turda yapılmaz. "Bilgi bekleyenler"deki konular işi durdurmaz: o parçalar arayüz arkasında, ayara bağlı ve aşağıdaki varsayılanlarla yazılır; bilgi gelince yalnızca o parça değişir. Eski broker'dan alınan gövdeler, anahtarlar ve alan adları birebir korunur ve testlerle sabitlenir. Bir madde bitince bu nottaki modül bölümleri de güncellenir.
 
@@ -100,7 +100,8 @@ Mevcut frontend'ler bunlara bağlı.
 - **Test:** yanıt gövdelerinin anahtar kümesi ve tipleri; header eşleşme matrisi; application listesi kaynakları ve readiness; public maintask'ler; bilinmeyen route + geçersiz oturum → 301; login ve logout route eşlemesi.
 - **Yapıldı (2026-10-16):** `SessionRecord` + `SessionRecordCodec` core'da (`com.acme.broker.core.session`); broker `SessionStore.find(uid, token, clientIp, userAgent)`, `ApplicationList` (+ `ApplicationsHealthIndicator`) ve `BrokerHandler`'daki yeni sıra. Uygulanırken netleşenler:
   - **Sayaç:** `broker.gelen.istekler`, eski controller'daki gibi `X-Token` kontrolünden sonra ve application kontrolünden önce artar (`X-Token` login/logout değilse).
-  - **`legacy-responses: false`:** application izinli değilse 403 `DENIED`, oturum geçersizse (route yoksa da) 401 `DENIED`, ortak formatta.
+  - **Yerel geliştirme bölümü:** Yerel uygulamalar DEV'e bağlanır, Docker kullanılmaz (`docs/local-run.md`). Yerel broker 8083'te, durumunu `broker:loaded-local:*`'a yazar; yerel env-admin ve admin DEV Oracle'daki ayrı şemalarla çalışır. Admin `local` profilinde boş şemaya örnek veri yazar. OpenAPI ve Swagger yalnızca `local` ve `dev` profillerinde.
+- **`legacy-responses: false`:** application izinli değilse 403 `DENIED`, oturum geçersizse (route yoksa da) 401 `DENIED`, ortak formatta.
   - **Route yok + Redis okunamadı:** 503 `TECHNICAL_ERROR` (oturum bilinmeden 301 ya da 404 verilmez).
   - **Oturum işlemleri:** Olaya gövdedeki maintask/subtask yazılır (route'unki değil); REQUEST gövdesi bayraktan bağımsız maskeli yazılır; `client_response` = giriş servisinin gövdesi + `"data": ""` (X-Token açık). Servisin gövdesi RESPONSE olayına (ClickHouse) yalnızca route'un `logResponseBody`'si açıksa yazılır; böylece token ClickHouse'a girmez. `X-User-Context` `userId: null` ile imzalanır. Public maintask'lerde `X-Token` login olsa da istek oturum işlemi sayılmaz.
   - **Application listesi:** Redis'teki değer JSON dizisi değilse, boşsa ya da anahtar yoksa eski liste kalır; `broker.applications.refresh.failed` sayacı ve log (liste hiç yüklenmediyse hata, sonra uyarı). Readiness grubu `readinessState,applications`. `local` profilinde `static`, liste `BROKER_LOCAL_APPLICATIONS` (varsayılan `web`).
@@ -143,6 +144,16 @@ Yeni modül, kök `pom.xml`'e eklenir; paket `com.acme.broker.login`, çalışt�
 
 - `docker compose` (Oracle XE, Redis, Kafka; Elastic ve ClickHouse ayrı bir profilde) ve `docs/local-run.md`. Frontend geliştiricisi admin API'yi `local` profili ve tohum verisiyle tek komutla ayağa kaldırabilmeli; broker ve giriş servisi de aynı compose'la denenebilmeli.
 - OpenAPI ve Swagger yalnızca `local` ve `dev` profillerinde açık; diğerlerinde `springdoc.api-docs.enabled=false`.
+- **Kullanıcı kararı (2026-10-16), compose yerine:** Intranette Docker çalışmıyor; local'den DEV projelerine ve DB'lerine erişim var. `docker compose` yazılmadı; `local` profilleri DEV'e bağlanır.
+- **Yapıldı (2026-10-16):** `docs/local-run.md`, `scripts/local-run.sh` ve `scripts/local-run.ps1` (`admin|broker|env-admin|login`, jar yoksa derler), `local.env.example` (`local.env` git'e girmez). Uygulanırken netleşenler:
+  - **Portlar:** admin 8080, env-admin 8081 (actuator 9091), giriş servisi 8082, broker 8083 (admin'le çakışmasın diye; env-admin'in yerel test çağrısı da 8083'e).
+  - **DEV'i kirletmeme:** Yerel broker `broker:loaded-local:` önekine yazar (DEV env-admin'in `broker:loaded:*` taraması görmez), Kafka'ya yazmaz. Yerel env-admin DEV Oracle'da ayrı bir runtime şemasına yazar ve sinyali `broker:routes-changed:local` kanalına yollar. Yerel admin ayrı bir merkezi şema kullanır. Yalnızca yerel giriş servisi DEV Redis'e oturum yazar (DEV'deki giriş servisiyle aynı kayıt).
+  - **Redis şifresi:** `BROKER_REDIS_PASSWORD` (broker, env-admin, giriş servisi).
+  - **Tohum verisi:** admin'de `LocalSeed` (`local` profili, `broker.admin.local.seed`, varsayılan açık): boş merkezi şemaya `local-seed.json`'daki 3 proje, 5 subtask ve 1 profil, API'nin servisleri üzerinden (history'ler gerçek); ortamlara çağrı yapılmaz.
+  - **Giriş servisi local'de** sabit kullanıcılar ve sabit yetkilerle (`koordinator.mode: static`, yalnızca `local`); `KoordinatorClient` arayüz oldu (`HttpKoordinatorClient`, `StaticKoordinatorClient`).
+  - **Springdoc:** admin'de `springdoc.api-docs.enabled` ve `swagger-ui.enabled` varsayılan kapalı; `application-local.yml` ve yeni `application-dev.yml` açar. Diğer modüllerde springdoc yok.
+  - **Docker'sız derleme:** Testcontainers kullanan test sınıfları `@Tag("docker")`; `mvn -B verify -Pno-docker` yalnızca birim testlerini çalıştırır (99 test, container yok). CI hepsini çalıştırır.
+  - **Doğrulama:** Betiklerle dört uygulama, DEV'i taklit eden bir Oracle ve şifreli Redis'e karşı açıldı: admin'den `giris` route'ları DEV'e (yerel env-admin) taşındı, broker üzerinden login, eski gövdeler, başka `X-User-Agent`'la logout reddi, logout ve 301 denendi.
 
 ### 6. `${user.permission}` yer tutucusu
 
@@ -344,6 +355,9 @@ Derlemede doğrulandı (Boot 4.1.1, Spring Framework 7.0, Jackson 3.1, Kafka 4.2
 - JKS SSL bundle'ları açılışta yüklenir; dosyası olmayan bundle `server.ssl.enabled=false` olsa da uygulamayı düşürür. Bundle tanımları bu yüzden `mtls` profilinde.
 - Flyway auto-config, test sınıf yolunda Flyway olan her modülde çalışır; broker-runtime'da `spring.flyway.enabled=false`.
 - `jwt.issuer-uri` boş string verilirse Boot `iss` doğrulayıcısını boş değerle kurar.
+- Jackson 3'te `MissingNode.booleanValue()` (ve diğer `xxxValue()`) istisna atar; olmayabilecek alan `has(...)` ile kontrol edilir.
+- Boot 4'te sağlık göstergeleri `org.springframework.boot.health.contributor` paketinde (`spring-boot-health`).
+- Bir Spring Boot uygulaması başka birinin test sınıf yolunda açılırken (`SpringApplicationBuilder`) `spring.config.location` verilmezse classpath'teki ilk `application.yml`'ı (öbür uygulamanınkini) okur.
 
 ## Sonraki turlar
 

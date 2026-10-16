@@ -133,7 +133,7 @@ Ortam başına config versiyonu ve her broker instance'ının yüklediği versiy
 
 ## API'nin genel kuralları
 
-Backend REST ve JSON konuşur; bütün yollar `/api/v1` altındadır ve alan adları camelCase'tir. Swagger arayüzü `/swagger-ui.html`, OpenAPI tanımı `/v3/api-docs` adresindedir.
+Backend REST ve JSON konuşur; bütün yollar `/api/v1` altındadır ve alan adları camelCase'tir. Swagger arayüzü `/swagger-ui.html`, OpenAPI tanımı `/v3/api-docs` adresindedir; ikisi yalnızca `local` ve `dev` profillerinde açıktır. API'yi yerelde örnek veriyle tek komutla açmak için `docs/local-run.md`.
 
 - **Kimlik:** Her istek `Authorization: Bearer <SSO access token>` taşır. Token yoksa ya da geçersizse 401, rol yetmiyorsa 403 döner. `ROUTE_EDITOR` ve `APPROVER` rolleri okuma iznini de kapsar.
 - **Yerel geliştirme:** Backend `local` profiliyle çalışınca SSO yerine HTTP Basic kabul eder. Hazır kullanıcılar `viewer`, `editor`, `approver` ve üç role birden sahip `lead`'dir; şifre kullanıcı adıyla aynıdır. Dört göz kuralı `lead` ile talep açıp `approver` ile onaylayarak denenir.
@@ -524,6 +524,7 @@ Backend geliştirildikçe bu tablo güncellenir; en yeni kayıt en üsttedir. Bi
 
 | Tarih | Değişiklik |
 | --- | --- |
+| 2026-10-16 | Swagger ve OpenAPI yalnızca `local` ve `dev` profillerinde açık. Yerel çalıştırma `docs/local-run.md`'de: admin API `local` profilinde DEV Oracle'daki yerel bir şemaya bağlanır ve boş şemayı örnek veriyle doldurur |
 | 2026-10-16 | Broker'ın uygulamalara döndüğü yanıtlar, `application` kontrolü, oturum kaydı ve zarf alanlarının `${request.*}` ile okunması uygulandı. `X-User-Agent` route header'ı olarak tanımlanabilir; `X-User-*` yasağının tek istisnası. `GET /meta/definition-rules` yanıtına `forbiddenHeaderExceptions` eklendi, `placeholders.definition` zarf yer tutucularını (`${request.uid}`, `${request.application}`, `${request.maintask}`, `${request.subtask}`) da listeler |
 | 2026-10-16 | Sözleşme güncellendi; backend'de sıradaki geliştirme turunda uygulanacak. `logResponseBody` editörde "Yanıt verisi loglansın" seçeneği oldu; açıkken yanıt verisi Elastic'e de yazılır. Broker'ın uygulamalara döndüğü yanıtlar eski broker'la aynı: `application` kontrolü ve geçersiz oturum HTTP 200 ile eski gövdeleri döner, login ve logout giriş servisinden gelir. Zarf alanları `${request.*}` ile okunur, `${user.id}` oturum kaydıyla doğrulanır. Projeler ve yetkiler tek bir yetki projesinden gelir |
 | 2026-10-13 | Backend uygulandı ve testlerden geçti; henüz bir ortama kurulmadı, yerelde `local` profiliyle çalıştırılabilir. Netleşen gövde ve yanıtlar "Gövde ve yanıt ayrıntıları" bölümünde: yetki açmada `environments`, geri almada `restoreVersion`, spec karşılaştırmasında `items` ve `specOperation`, istekten şablon, yoklama, ortam durumu ve profil önizleme. Talep listesinde öğeler `diff` ve `affectedRoutes` taşımaz, `status` virgülle çoklu değer alır; `DISABLE`/`ENABLE`'da `version` isteğe bağlı. Ön kontrollerin aksiyona göre listesi eklendi. Yeni hata kodu: `INTERNAL_ERROR` (500) |

@@ -12,6 +12,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -34,6 +35,7 @@ import com.acme.broker.envadmin.testing.RuntimeContainers;
 
 import tools.jackson.databind.JsonNode;
 
+@Tag("docker")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "server.ssl.enabled=false",
         "management.server.port=0",

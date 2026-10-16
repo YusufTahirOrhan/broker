@@ -20,6 +20,7 @@ spring:
     redis:
       host: ${BROKER_REDIS_HOST:localhost}
       port: ${BROKER_REDIS_PORT:6379}
+      password: ${BROKER_REDIS_PASSWORD:}
       timeout: 500ms
   kafka:
     bootstrap-servers: ${BROKER_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}

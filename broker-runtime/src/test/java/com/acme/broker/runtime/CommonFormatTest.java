@@ -10,6 +10,7 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,6 +35,7 @@ import tools.jackson.databind.JsonNode;
  * The application list from Redis, with readiness, and the common error format instead of the legacy bodies
  * ({@code broker.compat.legacy-responses: false}). Logs go to the console; Kafka is not needed.
  */
+@Tag("docker")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "broker.log-sink=console",
         "broker.kafka.warmup=false",

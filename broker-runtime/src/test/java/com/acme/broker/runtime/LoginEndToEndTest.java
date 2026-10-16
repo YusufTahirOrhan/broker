@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.builder.SpringApplicationBuilder;
@@ -34,6 +35,7 @@ import tools.jackson.databind.JsonNode;
  * the token, the session bound to the client, logout. The login service runs in this JVM as a second application
  * with static users (its {@code local} mode) and a fake Koordinatör; logs go to the console.
  */
+@Tag("docker")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "broker.log-sink=console",
         "broker.kafka.warmup=false",

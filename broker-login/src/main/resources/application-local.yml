@@ -1,5 +1,6 @@
-# Geliştiricinin makinesi: LDAP yerine sabit kullanıcılar (şifre = kullanıcı adı), Koordinatör yerine compose'daki
-# sahte Koordinatör (docs/local-run.md)
+# Geliştiricinin makinesi: LDAP ve Koordinatör yerine sabit kullanıcılar (şifre = kullanıcı adı) ve sabit yetkiler;
+# oturumlar BROKER_REDIS_* ile verilen Redis'e (DEV) yazılır. DEV'in LDAP'ı ya da Koordinatör'ü denenecekse:
+# LOGIN_LDAP_MODE=bind + LOGIN_LDAP_URLS, KOORDINATOR_MODE=http + KOORDINATOR_URL
 login:
   ldap:
     mode: static
@@ -9,4 +10,6 @@ login:
   koordinator-secret: local-koordinator-secret
 
 koordinator:
-  url: ${KOORDINATOR_URL:http://localhost:8095}
+  mode: ${KOORDINATOR_MODE:static}
+  static-permissions: [ORDER_READ, ORDER_WRITE, LOGPROJECT_TEMEL]
+  static-projects: [web, mobil]
