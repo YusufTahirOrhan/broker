@@ -69,7 +69,7 @@ Yeni ve mevcut subtask aynı formu kullanır (`POST /projects/{id}/routes`, `PUT
 3. **Alanlar:** `fields` tablosu: ad (noktalı yol), tip, zorunlu, varsayılan.
 4. **Eşleme:** Path şablonundaki her `{değişken}` için bir satır kendiliğinden açılır. Query, header ve body için anahtar-değer satırları vardır; değer alanına `${` yazılınca alanlar ve diğer yer tutucular önerilir. Body modu `NONE`, `PASS_THROUGH`, `TEMPLATE` ya da `MULTIPART`'tır; `TEMPLATE`'te JSON editörü açılır.
 5. **Yanıt:** Tip (`JSON`, `TEXT`, `BINARY`) ve yanıt profili; profil boş bırakılabilir.
-6. **Çalışma ve log:** Timeout, retry, log bayrakları, maskelenecek alanlar, en fazla body boyutu ve dosya yanıtları için `binaryInfo` metni.
+6. **Çalışma ve log:** Timeout, retry, istek gövdesinin loglanması, "Yanıt verisi loglansın" seçeneği (`logResponseBody`, varsayılan kapalı), maskelenecek alanlar, en fazla body boyutu ve dosya yanıtları için `binaryInfo` metni. "Yanıt verisi loglansın" açılınca editör, yanıttaki kişisel verilerin maskelenecek alanlara eklenmesini hatırlatır.
 7. **Değişiklik notu:** Kayıtla birlikte geçmişe yazılır.
 
 - **Anlık doğrulama:** Form değiştikçe (yaklaşık 500 ms bekleyerek) `POST /routes/validate` çağrılır. Dönen `errors[].field` yolu forma eşlenir, örneğin `definition.request.pathVariables.id`. Aynı doğrulama kayıtta da çalışır.
@@ -117,7 +117,7 @@ Ham metin backend'de saklanmaz; ekran da onu tarayıcı deposuna (localStorage) 
 
 - **Talep:** Subtask ya da profil ekranındaki "Taşı" penceresi hedef ortamı (yalnızca bir sonraki ortam), versiyonu (kaynak ortamda aktif olan) ve aksiyonu sorar (`POST /promotions`). Subtask'te `DEPLOY`, `DISABLE`, `ENABLE`, `ROLLBACK`; profilde `DEPLOY` ve `ROLLBACK` vardır. Onay isteyen taleplerde gerekçe ya da değişiklik kaydı numarası zorunludur.
 - **Ön kontrol:** Başarısız olursa talep açılmaz. 422 `PRECHECK_FAILED` yanıtındaki `checks` listesi madde madde gösterilir, örneğin "yetki hedef ortamda yok".
-- **Sonuç:** Onay gerekmiyorsa yanıt talebin son durumunu taşır: `APPLIED` ya da `FAILED`; ortamdan yanıt alınamadıysa `APPLYING` (bkz. `RETRY`). Onay gerekiyorsa talep `PENDING_APPROVAL` olur.
+- **Sonuç:** Onay gerekmiyorsa yanıt talebin son durumunu taşır: `APPLIED` ya da `FAILED`. Ortamdan yanıt alınamadıysa talep `APPLYING`'de kalır ve `RETRY` ile tamamlanır. Onay gerekiyorsa talep `PENDING_APPROVAL` olur.
 - **Talepler listesi:** Durum, hedef ortam, proje ve "benim taleplerim" filtreleri (`GET /promotions`). Onaylayanın varsayılan görünümü onay bekleyenlerdir.
 - **Talep detayı:** Hedef ortamdaki mevcut versiyonla fark, yoklama sonucu ve profilde onu kullanan route'lar. Başka projeden eklenen yetkiler ve anonim erişim ayrı bir uyarı kutusunda gösterilir.
 - **Düğmeler:** Yanıttaki `allowedActions` listesine göre gösterilir: `APPROVE`, `REJECT`, `CANCEL`, `RETRY`. Talep eden kendi talebinde onay düğmesini görmez; backend de 403 `FOUR_EYES` döner.
@@ -177,9 +177,9 @@ Hatalar RFC 9457 problem detail olarak (`application/problem+json`) döner. `cod
 | `INVALID_STATE` | 409 | İşlem kaydın durumuna uymuyor, örneğin uygulanmış talebi iptal etmek |
 | `ROUTE_DEPLOYED` | 409 | Bir ortamda aktif olan subtask arşivlenmek istendi |
 | `PRECHECK_FAILED` | 422 | Taşıma ön kontrolü geçmedi; `checks` listesi döner |
+| `INTERNAL_ERROR` | 500 | Beklenmeyen sunucu hatası; ayrıntı backend logundadır |
 | `ENV_UNREACHABLE` | 502 | Ortamın Admin API'sine ulaşılamadı |
 | `UPSTREAM_ERROR` | 502 | Proje servisi, yetkilendirme servisi ya da servisin spec'i hata verdi |
-| `INTERNAL_ERROR` | 500 | Beklenmeyen sunucu hatası; ayrıntı backend logundadır |
 
 ## Uç noktalar
 
@@ -436,7 +436,7 @@ Ekran bu kuralları `GET /meta/definition-rules` yanıtından okur ve kendi içi
 | `response.type` | `JSON`, `TEXT`, `BINARY` | `BINARY` stream edilir; body loglanmaz, profil uygulanmaz |
 | `timeoutMs` | 100–60000 | Varsayılan 5000 |
 | `retry.maxAttempts` | 1–3 | 1'den büyükse method GET olmalı |
-| `logging.logRequestBody`, `logResponseBody` | true, false | Varsayılan sırasıyla true ve false |
+| `logging.logRequestBody`, `logResponseBody` | true, false | Varsayılan sırasıyla true ve false. `logResponseBody` editördeki "Yanıt verisi loglansın" seçeneğidir: açıkken yanıtın `data`'sı maskelenip `maxBodyBytes`'a kadar Elastic'teki `data_response.data`'ya JSON metni olarak, ClickHouse'a gövde olarak yazılır; kapalıyken bugünkü gibi `data` boş string |
 | `logging.maskFields` | Alan adları | `password` her zaman maskelenir; listedekiler ona eklenir |
 | `logging.maxBodyBytes` | 1–262144 | Varsayılan 65536; yalnızca yanıt body'si için |
 | `logging.binaryInfo` | Metin | Dosya yanıtında Elastic'e yazılan `info` mesajı |
@@ -447,9 +447,9 @@ Değeri yalnızca bir yer tutucudan oluşan alan değerin tipini korur: `"${requ
 
 | Yer tutucu | Nerede | Değer |
 | --- | --- | --- |
-| `${request.<yol>}` | Tanım | Frontend gövdesindeki alan; `fields`'ta tanımlı olmalı |
+| `${request.<yol>}` | Tanım | Frontend gövdesindeki alan; `fields`'ta tanımlı olmalı. Zarf alanları (`uid`, `application`, `maintask`, `subtask`) tanımlanmadan okunur; anonim route'ta `uid` doğrulanmamıştır |
 | `${header.<ad>}` | Tanım | Frontend isteğinin header'ı; yalnızca `readableHeaders` listesindekiler |
-| `${user.id}` | Tanım | Broker'ın oturumdan doğruladığı kullanıcı; gövdedeki `uid` değil |
+| `${user.id}` | Tanım | Oturum kaydıyla doğrulanan kullanıcı: kayıt gövdedeki `uid` ile bulunur, token, `X-Clientip` ve `X-User-Agent` eşleşmelidir. Oturum yoksa boş |
 | `${requestId}` | Tanım, profil | İsteğin ID'si |
 | `${backend.status}` | Profil | Servisin HTTP status kodu; timeout'ta null |
 | `${backend.body}` | Profil | Servisin yanıt gövdesi; `error` şablonunda yalnızca 4xx'te dolu |
@@ -488,12 +488,12 @@ Aksiyona göre çalışan kontroller: `DEPLOY`'da `SUBJECT_ACTIVE`, `NEXT_ENVIRO
 
 ### Broker'ın uygulamalara döndüğü yanıtlar
 
-Test panelindeki `clientResponse` bu kurallarla üretilir; uygulama frontend'leri de aynısını alır.
+Test panelindeki `clientResponse` bu kurallarla üretilir; uygulama frontend'leri de aynısını alır. Test çağrısı application ve oturum kontrollerinden geçmez; tablodaki HTTP 200'lü eski gövdeler yalnızca uygulamalara döner.
 
 - **İz:** Her yanıtta `X-Request-Id` header'ı vardır; Elastic'teki ana dokümanın `_id`'si de budur.
 - **Log yazılamazsa:** Servis yanıt vermiş olsa bile `500` ve `{"result": false}` döner.
 - **Dosya yanıtı:** Servis `Content-Disposition` döndürürse dosya olduğu gibi stream edilir, profil uygulanmaz.
-- **Broker hataları:** Servise gitmeden verilen hatalar ortak formattadır:
+- **Broker hataları:** Servise gitmeden verilen hatalar aşağıdaki ortak formattadır. Eski broker'da karşılığı olan iki durum (`application` ve oturum) tablodaki gibi bugünkü gövdeleriyle HTTP 200 döner.
 
 ```json
 {
@@ -506,13 +506,17 @@ Test panelindeki `clientResponse` bu kurallarla üretilir; uygulama frontend'ler
 }
 ```
 
-| Durum | HTTP | outcome |
+| Durum | HTTP | Gövde ve outcome |
 | --- | --- | --- |
-| `X-Token` header'ı yok | 400 | `INVALID_REQUEST` |
-| Oturum bulunamadı | 401 | `DENIED` |
-| Kullanıcıda route'un yetkilerinden hiçbiri yok | 403 | `DENIED` |
-| maintask/subtask kayıtlı değil | 404 | `UNKNOWN_TASK` |
-| Gövde `fields` tanımına uymuyor | 400 | `INVALID_REQUEST`; `errors` alan bazında |
+| `X-Token` header'ı yok | 400 | Ortak format, `INVALID_REQUEST` |
+| `application` yok ya da izinli listede değil | 200 | `{"response": false}`, `DENIED` |
+| Oturum geçersiz: `user:session:{uid}` kaydı yok ya da `X-Token`, `X-Clientip`, `X-User-Agent` kayıttakiyle aynı değil | 200 | `{"response": false, "status": 301, "reason": "check X-Token"}`, `DENIED` |
+| Kullanıcıda route'un yetkilerinden hiçbiri yok | 403 | Ortak format, `DENIED` |
+| maintask/subtask kayıtlı değil (oturum geçersizse yukarıdaki 301 yanıtı döner) | 404 | Ortak format, `UNKNOWN_TASK` |
+| Gövde `fields` tanımına uymuyor | 400 | Ortak format, `INVALID_REQUEST`; `errors` alan bazında |
+| Oturum okunamadı (Redis) | 503 | Ortak format, `TECHNICAL_ERROR` |
+
+`X-Token: login` ve `logout` istekleri gövdedeki maintask'a bakılmadan giriş servisinin route'larına gider; yanıtları eski broker'la birebir aynıdır (tasarım dokümanında "Giriş ve oturum").
 
 ## Değişiklik kaydı
 
@@ -520,13 +524,13 @@ Backend geliştirildikçe bu tablo güncellenir; en yeni kayıt en üsttedir. Bi
 
 | Tarih | Değişiklik |
 | --- | --- |
-| 2026-10-13 | Backend uygulandı (`broker-admin`); uç noktalar çalışan bir sunucuda. Netleşen gövde ve yanıtlar "Gövde ve yanıt ayrıntıları" bölümünde: yetki açmada `environments`, geri almada `restoreVersion`, spec karşılaştırmasında `items` ve `specOperation`, istekten şablon, yoklama, ortam durumu ve profil önizleme. Talep listesinde öğeler `diff` ve `affectedRoutes` taşımaz, `status` virgülle çoklu değer alır; `DISABLE`/`ENABLE`'da `version` isteğe bağlı. Ön kontrollerin aksiyona göre listesi eklendi. Yeni hata kodu: `INTERNAL_ERROR` (500) |
-| 2026-10-13 | İlk sürüm: ekranlar, API sözleşmesi, alan kuralları ve hata kodları. Backend geliştirme aşamasında; uç noktalar henüz çalışan bir sunucuda yok |
+| 2026-10-16 | Sözleşme güncellendi; backend'de sıradaki geliştirme turunda uygulanacak. `logResponseBody` editörde "Yanıt verisi loglansın" seçeneği oldu; açıkken yanıt verisi Elastic'e de yazılır. Broker'ın uygulamalara döndüğü yanıtlar eski broker'la aynı: `application` kontrolü ve geçersiz oturum HTTP 200 ile eski gövdeleri döner, login ve logout giriş servisinden gelir. Zarf alanları `${request.*}` ile okunur, `${user.id}` oturum kaydıyla doğrulanır. Projeler ve yetkiler tek bir yetki projesinden gelir |
+| 2026-10-13 | Backend uygulandı ve testlerden geçti; henüz bir ortama kurulmadı, yerelde `local` profiliyle çalıştırılabilir. Netleşen gövde ve yanıtlar "Gövde ve yanıt ayrıntıları" bölümünde: yetki açmada `environments`, geri almada `restoreVersion`, spec karşılaştırmasında `items` ve `specOperation`, istekten şablon, yoklama, ortam durumu ve profil önizleme. Talep listesinde öğeler `diff` ve `affectedRoutes` taşımaz, `status` virgülle çoklu değer alır; `DISABLE`/`ENABLE`'da `version` isteğe bağlı. Ön kontrollerin aksiyona göre listesi eklendi. Yeni hata kodu: `INTERNAL_ERROR` (500) |
+| 2026-10-13 | İlk sürüm: ekranlar, API sözleşmesi, alan kuralları ve hata kodları |
 
 ### Netleşmemiş noktalar
 
 - [ ] **SSO:** Hangi OIDC sağlayıcısı kullanılıyor ve roller token'ın hangi claim'inde geliyor?
-- [ ] **Proje servisi:** Arama ve ID ile okuma için varsayılan uçlar (`GET /projects?query=`, `GET /projects/{id}`) gerçek API netleşince uyarlanacak; ekranın gördüğü `/catalog/projects` değişmez.
-- [ ] **Yetkilendirme servisi:** Yetki listeleme, açma ve varlık kontrolü için gerçek uçlar netleşince `Yetkiler` sekmesi ona göre doğrulanacak.
+- [ ] **Yetki projesi:** Projeler ve yetkiler aynı yetki projesinden geliyor. Arama, ID ile okuma, yetki listeleme, açma ve varlık kontrolü için varsayılan uçlar (`GET /projects?query=`, `GET /projects/{id}`, `GET /permissions?prefix=`) gerçek API netleşince uyarlanacak; ekranın gördüğü `/catalog/projects` ve `Yetkiler` sekmesinin yolları değişmez.
 - [ ] **PROD base URL'i:** Şimdilik yalnızca `APPROVER` değiştirebiliyor; ileride onay akışına alınabilir.
 - [ ] **Acil durum:** PROD'da `DISABLE` ve `ROLLBACK` de onay istiyor; tasarım dokümanında açık bir karar.

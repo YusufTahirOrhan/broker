@@ -23,34 +23,34 @@ Trafik hiçbir zaman merkezden geçmez: broker'lar kendi ortamlarının runtime 
 
 &#91;embedded content: Bileşenler ve çağrı yönleri · 3 bölge\]
 
-Oklar çağrıyı başlatanı gösterir. Runtime DB ve Redis, Admin API'nin yazdığı ve broker'ların okuduğu buluşma noktalarıdır.
+Oklar çağrıyı başlatanı gösterir. Runtime DB'ye yalnızca Admin API yazar. Redis'e Admin API değişiklik sinyalini, giriş servisi oturumları ve application listesini yazar; broker ikisini de yalnızca okur.
 
 | Bileşen | Nerede | Sorumluluk |
 | --- | --- | --- |
-| Merkezi Admin | Yönetim bölgesi | Ekranlar, tanım ve versiyonlar, onay ve promote; projeleri proje servisinden listeler, projenin yetkilerini yetkilendirme servisinde açar |
+| Merkezi Admin | Yönetim bölgesi | Ekranlar, tanım ve versiyonlar, onay ve promote; projeleri ve yetkileri yetki projesinden okur, projenin yetkilerini orada açar |
 | Merkezi DB | Yönetim bölgesi | Route ve profil tanımları, history, ortam durumu, taşıma talepleri |
 | Ortam Admin API | Her ortam | Runtime DB'ye yazar, Redis'e sinyal verir; spec çeker, yoklar, test eder |
 | Runtime DB | Her ortam | O ortamda aktif route'lar, yanıt profilleri ve config versiyonu |
-| Redis | Her ortam | Kullanıcı yetkileri, değişiklik sinyalleri |
-| Broker | Her ortam | Route'u bellekten çözer, yetkiyi kontrol eder, logu Kafka'ya yazıp onayını bekler, isteği iletir, yanıtı profile göre zarflar |
+| Redis | Her ortam | Kullanıcı oturumları, izinli application listesi, değişiklik sinyalleri |
+| Broker | Her ortam | Route'u bellekten çözer; application'ı, oturumu ve yetkiyi kontrol eder, logu Kafka'ya yazıp onayını bekler, isteği iletir, yanıtı profile göre zarflar |
+| Giriş servisi | Her ortam | LDAP'ta doğrular, token üretir, oturumu Redis'e yazar ve logout'ta siler; kullanıcı yetkilerini ve application listesini yetki projesinden alır |
 | Kafka, Elastic, ClickHouse | Log hattı | Log olaylarını taşır; aranabilir ve analiz edilebilir şekilde saklar |
-| Yetkilendirme servisi | Mevcut | Projeye özel yetkiler ve kullanıcılara atanmaları; kullanıcı yetkilerini Redis'e yazar |
-| Proje servisi | Mevcut | Projelerin adı ve ID'si; admin ekranındaki proje listesi buradan gelir |
+| Yetki projesi | Mevcut | Projeler (application'lar), yetkiler ve kullanıcılara atanmaları |
 
 ## Broker'da istek işleme
 
 Broker, route'u bellekten bulur ve yetkiyi Redis'ten kontrol eder; istek yolunda veritabanına hiç gitmez.
 
-1. **Karşılama:** Frontend `POST /broker` ile düz bir JSON gönderir: `maintask`, `subtask`, `application` ve `uid` zarf alanlarıdır, geri kalan alanlar subtask'in verisidir. Oturum token'ı `X-Token`, istemci bilgileri `X-Clientip` ve `X-User-Agent` header'larındadır. Broker bir request ID (UUIDv7) üretir ve trace'i başlatır.
-2. **Route çözümleme:** `(maintask, subtask)` bellekteki snapshot'ta büyük/küçük harf fark etmeden aranır. Bulunamazsa `404` döner, outcome `UNKNOWN_TASK` olur.
-3. **Yetki:** Kullanıcının yetkileri Redis'ten okunur. Route anonim değilse ve kullanıcıda route'un yetkilerinden hiçbiri yoksa `403` döner. Log için `perm_list` de bu okumadan çıkar.
+1. **Karşılama:** Frontend `POST /broker` ile düz bir JSON gönderir: `maintask`, `subtask`, `application` ve `uid` zarf alanlarıdır, geri kalan alanlar subtask'in verisidir. Oturum token'ı `X-Token`, istemci bilgileri `X-Clientip` ve `X-User-Agent` header'larındadır. Broker bir request ID (UUIDv7) üretir ve trace'i başlatır. `application` izinli listede değilse istek burada biter: bugünkü gibi HTTP 200 ve `{"response": false}`.
+2. **Route çözümleme:** `(maintask, subtask)` bellekteki snapshot'ta büyük/küçük harf fark etmeden aranır. `X-Token` değeri `login` ya da `logout` ise gövdedeki maintask'a bakılmaz, giriş servisinin route'u seçilir. Route yoksa ve oturum geçerliyse `404` döner, outcome `UNKNOWN_TASK` olur; oturum geçersizse 3. adımdaki yanıt döner.
+3. **Oturum ve yetki:** Oturum kaydı Redis'ten gövdedeki `uid` ile okunur; kayıttaki token, `X-Clientip` ve `X-User-Agent` istektekilerle aynı olmalıdır. Değilse bugünkü gibi HTTP 200 ve `{"response": false, "status": 301, "reason": "check X-Token"}` döner. Route anonim değilse ve kullanıcıda route'un yetkilerinden hiçbiri yoksa `403` döner. Log için `perm_list` de bu okumadan çıkar.
 4. **REQUEST olayı:** Body route'un log politikasına göre maskelenir, olay Kafka'ya yazılır ve broker onayı bekler. Onay gelmezse servis çağrılmaz; `500` ve `{"result": false}` döner, outcome `LOG_UNAVAILABLE` olur.
 5. **Doğrulama ve istek üretimi:** Gövde, route'un `fields` tanımına göre denetlenir; eksik zorunlu alan ya da yanlış tip `400` döner, outcome `INVALID_REQUEST` olur. Ardından path variable, query param, header ve body tanımdaki yer tutucularla üretilir. Host her zaman ortamın kayıtlı base URL'idir.
 6. **Forward:** İstek route'un timeout'uyla gönderilir; `traceparent`, imzalı kullanıcı bağlamı ve servislerin bugün beklediği `X-uid` header'ı oturumdaki kullanıcıyla eklenir. Dosya yanıtları belleğe alınmadan stream edilir: route'ta `BINARY` işaretli olanlar ve servisin `Content-Disposition` header'ı döndürdüğü her yanıt.
 7. **RESPONSE olayı:** Servisin status'u, outcome, süre, maskelenmiş body ve yanıt profili Kafka'ya yazılır; broker onayı bekler. Onay gelmezse servisin yanıtı dönmez, `500` ve `{"result": false}` döner, outcome `LOG_UNAVAILABLE` olur. Diğer durumlarda outcome, zarftan önce servisin gerçek status'una göre hesaplanır. Dosya yanıtında olay status ve header'lar gelince yazılır, gövde loglanmaz; dosya onaydan sonra stream edilir.
-8. **Yanıt:** Route'un yanıt profili varsa servisin yanıtı ya da hatası profilin şablonuyla zarflanır; profil yoksa ya da yanıt dosyaysa olduğu gibi döner. Broker'ın 2, 3 ve 5. adımlarda verdiği hatalar ortak formatta döner; bunlar da log olayları onaylanmadan dönmez. Her yanıta `X-Request-Id` header'ı eklenir.
+8. **Yanıt:** Route'un yanıt profili varsa servisin yanıtı ya da hatası profilin şablonuyla zarflanır; profil yoksa ya da yanıt dosyaysa olduğu gibi döner. Broker'ın verdiği hatalar ortak formattadır; eski broker'da karşılığı olan iki durum (1. adımdaki application ve 3. adımdaki oturum) bugünkü gövdelerle döner. Hiçbiri log olayları onaylanmadan dönmez. Her yanıta `X-Request-Id` header'ı eklenir.
 
-`X-Token` değeri `login` ya da `logout` olan istekler oturum işlemleridir ve bugünkü davranışlarıyla taşınır: parametre logu ve `broker.gelen.istekler` sayacı dışında tutulur, şifre maskelenir. `X-Token` hiç yoksa istek `400` ile reddedilir; bugün bu durumda controller NullPointerException ile 500 dönüyor.
+`X-Token` değeri `login` ya da `logout` olan istekler oturum işlemleridir. Broker bunları giriş servisinin anonim route'larına iletir (aşağıda "Giriş ve oturum"); parametre logu ve `broker.gelen.istekler` sayacı dışında tutulur, şifre maskelenir. `X-Token` hiç yoksa istek `400` ile reddedilir; bugün bu durumda controller NullPointerException ile 500 dönüyor.
 
 &#91;embedded content: Bir isteğin broker'dan geçişi · 8 adım\]
 
@@ -73,6 +73,28 @@ Outcome değeri her yerde aynıdır: metrik tag'i, log olayı ve ClickHouse kolo
 
 Controller durum tutmaz, yalnızca sırayı yönetir. Route tablosu ve derlenmiş yanıt profilleri bellektedir ve değişiklik sinyalleriyle yenilenir. Kullanıcının yetkileri her istekte Redis'ten okunur; iki log olayı da onay beklenerek yazılır.
 
+### Giriş ve oturum
+
+Login eskisi gibi broker üzerinden yapılır, ama işi ayrı bir giriş servisi yapar; broker yalnızca yönlendirir ve oturumu okur. Gövdeler ve Redis kaydı eski broker'la birebir aynıdır, böylece frontend'ler değişmez ve geçişte iki broker aynı oturumları kullanabilir.
+
+- **Login:** `X-Token: login` isteği giriş servisine gider. Servis kullanıcıyı LDAP'ta doğrular, yetkilerini yetki projesinden alır, düz bir UUID token üretir ve kaydı Redis'e yazar.
+- **Oturum kaydı:** Anahtar `user:session:{uid}`, değer `{"uid", "X-Token", "X-Clientip", "X-User-Agent", "permissions"}`, süre 1 gün; broker süreyi uzatmaz. Yeni login aynı kullanıcının eski oturumunu ezer.
+- **Kontrol:** Kayıt gövdedeki `uid` ile okunur; token ve iki header kayıttakiyle aynıysa oturum geçerlidir. Servislere giden `X-uid` ve `${user.id}` bu doğrulanmış `uid`'dir.
+- **Logout:** `X-Token: logout` isteği kaydı siler. Eskisi gibi yalnızca `uid`'e bakar; token istemediği için başkasının oturumunu kapatmaya açıktır (açık karar).
+- **Application listesi:** Giriş servisi izinli application'ları yetki projesinden 5 dakikada bir alıp Redis'e yazar; broker listeyi oradan okur ve liste yüklenmeden trafik almaz.
+
+| Durum | HTTP | Gövde |
+| --- | --- | --- |
+| Login başarılı | 200 | `{"response": true, "status": 200, "LDAP": true, "login": true, "X-Token": "<uuid>"}` |
+| LDAP ya da yetki çağrısı başarısız | 200 | `{"response": false, "status": 401, "Ldap": <LDAP sonucu>, "login": false}` |
+| Oturum Redis'e yazılamadı | 200 | `{"status": 401, "Ldap": false, "login": false, "X-Token": "404"}` |
+| Logout başarılı | 200 | `{"response": true, "status": 200, "message": "logged out"}` |
+| Logout, kayıt yok | 200 | `{"response": false, "status": 301, "message": "something went wrong with logging out."}` |
+| `application` izinli değil | 200 | `{"response": false}` |
+| Oturum geçersiz | 200 | `{"response": false, "status": 301, "reason": "check X-Token"}` |
+
+Başarıda `LDAP`, hatada `Ldap` yazılır; eski kod böyle olduğu için korunur. Bilinmeyen subtask ve yetkisiz kullanıcı için eski projelerde ortak bir gövde yoktu (özel exception), bu yüzden bu ikisinde yeni ortak format kalır.
+
 ## Proje kaydı
 
 Projelerin listesi ve kimliği proje servisinden gelir; broker yalnızca yönlendirme için gereken ayarları tutar.
@@ -83,7 +105,7 @@ Projelerin listesi ve kimliği proje servisinden gelir; broker yalnızca yönlen
 
 - **Yetkiler:** Proje ekranı projenin yetkilerini yetkilendirme servisinden listeler ve yenisini o servisin API'siyle açar; yeni yetkinin yalnızca son eki girilir. Kullanıcıya atama yetkilendirme servisinde kalır. Kurallar Yetkilendirme bölümündedir.
 - **Senkronizasyon:** Görünen ad proje servisinden periyodik olarak yenilenir; ad değişse de `maintask` değişmez. Proje serviste artık yoksa broker'daki kayıt silinmez, `MISSING` olarak işaretlenir.
-- **Geçiş:** Mevcut projeler proje servisindeki ID'leriyle eşleştirilir. Eşleşmeyenler `UNLINKED` olarak kalır ve ekranda ayrıca gösterilir; sonradan bağlanabilir.
+- **Geçiş:** Mevcut projeler yetki projesindeki ID'leriyle eşleştirilir. Eşleşmeyenler `UNLINKED` olarak kalır ve ekranda ayrıca gösterilir; sonradan bağlanabilir.
 
 ## Route tanımı
 
@@ -171,7 +193,7 @@ Kurallar kayıt anında doğrulanır; tanımsız bir alana ya da bilinmeyen bir 
 | response.type | JSON, TEXT, BINARY | BINARY stream edilir, body'si loglanmaz ve yanıt profili uygulanmaz. Servis `Content-Disposition` header'ı döndürürse route'un yanıt tipi ne olursa olsun aynısı yapılır |
 | timeoutMs | 100–60000 | Varsayılan 5000 |
 | retry.maxAttempts | 1–3 | 1'den büyükse method GET olmalı |
-| logging.logRequestBody, logResponseBody | true, false | Varsayılan istekte true, yanıtta false; bugünkü gibi yanıtın `data` alanı loglanmaz |
+| logging.logRequestBody, logResponseBody | true, false | Varsayılan istekte true, yanıtta false. `logResponseBody` editördeki "Yanıt verisi loglansın" seçeneğidir: kapalıyken bugünkü gibi yanıtın `data` alanı loglanmaz; açıkken maskelenmiş `data` Elastic'teki `data_response.data`'ya JSON metni olarak, ClickHouse'a gövde olarak yazılır |
 | logging.binaryInfo | Metin | Binary yanıtta Elastic'e yazılan `info` mesajı; bugün fotoğraf ve excel için sabit metinler |
 | logging.maskFields | Alan adları | Her derinlikte `xxxx` ile maskelenir; varsayılan liste bugünkü gibi yalnızca `password`, route bazında alan eklenir |
 | logging.maxBodyBytes | En fazla 262144 | Yanıt body'si için; aşan kısım kırpılır, `body_truncated = true` olur. İstek body'si eski Elastic yapısı için kırpılmadan taşınır |
@@ -251,13 +273,13 @@ Yetkiler projeye özeldir: her yetki projenin önekiyle başlar (`LOGPROJECT_TEM
 - **Önek:** Projenin yetki öneki kayıtta belirlenir (`project.permission_prefix`) ve değiştirilemez. Proje ekranında yeni yetkinin yalnızca son eki girilir: `MODERATOR` yazılınca `LOGPROJECT_MODERATOR` açılır. Bir önek başka bir önekin başı olamaz (`HR` ile `HR_PORTAL` gibi); olursa iki projenin yetkileri karışır.
 - **Proje yetkileri:** Subtask formu varsayılan olarak yalnızca o projenin yetkilerini listeler (`permissions`). Bu listeye başka projenin yetkisi giremez; DB'de bir trigger da korur.
 - **Başka projeden yetki:** Bazı subtask'lere başka projelerin yetkileriyle de erişilir. Formdaki "Başka projeden yetki ekle" seçeneği önce projeyi, sonra o projenin yetkisini seçtirir; bu yetkiler ayrı bir alanda durur (`foreign_permissions`). Ekranda ve onay farkında ayrıca işaretlenir, böylece bir subtask'in başka projenin kullanıcılarına açıldığı gözden kaçmaz. Seçilen proje broker'a kayıtlı olmalıdır, çünkü öneki oradan bilinir.
-- **Katalog:** Yetkilerin sahibi yetkilendirme servisidir; yetki onun API'siyle açılır, kullanıcıya da orada atanır. Kayıtta ve promote öncesinde her yetkinin hedef ortamda tanımlı olduğu kontrol edilir.
+- **Katalog:** Yetkilerin ve projelerin sahibi yetki projesidir; yetki onun API'siyle açılır, kullanıcıya da orada atanır. Kayıtta ve promote öncesinde her yetkinin hedef ortamda tanımlı olduğu kontrol edilir.
 - **Varsayılan olarak reddet:** Kimseye atanmamış bir yetki, kimsenin çağıramadığı bir subtask demektir. Yeni subtask'ler böylece kapalı doğar.
 - **Anonim erişim:** `anonymous = true` yalnızca onaylı bir değişiklikle açılır. Anonim olmayan her route için en az bir yetki DB seviyesinde zorunludur (`ck_route_permission`).
 - **perm\_list:** Bugün broker'daki projeye özel sınıflar subtask yetkisini bu listeyle kontrol ediyor. Yeni düzende kontrolü route'taki yetkilerle genel motor yapar; projeye ya da subtask'e özel kod kalmaz. Liste servise iletilmez, log dokümanına bugünkü gibi kullanıcının tüm yetkileriyle yazılır.
 - **Kontrolün yeri:** Endpoint seviyesindeki kontrol broker'da, veri seviyesindeki kontrol servistedir. Broker kullanıcı bağlamını imzalı bir header ile iletir; servisler dışarıdan doğrudan erişilemez.
 
-Broker kullanıcının yetkilerini bugünkü gibi Redis'ten, login'de kullanıcı kimliğinin karşısına yazılan kayıttan okur; istek başına tek bir Redis okumasıdır. Route kontrolü de loga yazılan `perm_list` de bu okumadan çıkar.
+Broker kullanıcının yetkilerini bugünkü gibi Redis'ten, giriş servisinin login'de kullanıcı kimliğinin karşısına yazdığı kayıttan okur; istek başına tek bir Redis okumasıdır. Route kontrolü de loga yazılan `perm_list` de bu okumadan çıkar.
 
 ## Merkezi veri modeli
 
@@ -293,7 +315,7 @@ Kısıtlar, kuralları uygulama hatalarına karşı DB seviyesinde de korur:
 - **`uq_promotion_open`, `uq_promotion_open_profile`:** Aynı route ya da profil ve hedef ortam için aynı anda tek açık talep olabilir.
 - **`ck_four_eyes`:** Talep eden kendi talebini onaylayamaz.
 
-DDL PostgreSQL 16'da çalıştırıldı; bu kısıtlar ve trigger'lar örnek verilerle denendi.
+**Oracle 19c kararı (2026-10-16):** Merkezi DB ve ortam runtime DB'leri Oracle 19c olacak. Aşağıdaki DDL PostgreSQL 16'da çalıştırılıp örnek verilerle denendi ve mantıksal modeli gösterir; geçerli şema repodaki Oracle migration'larıdır. Dönüşümde `JSONB` → `CLOB` + `IS JSON`, `BOOLEAN` → `NUMBER(1)`, diziler → ayrı tablo ya da JSON dizisi, kısmi unique index → `CASE`'li fonksiyon tabanlı index, `ON CONFLICT` → `MERGE` ve PL/pgSQL trigger'ları → PL/SQL olur. Oracle `REPEATABLE READ` desteklemediği için snapshot okuması `SET TRANSACTION READ ONLY` ile yapılır.
 
 ```sql
 -- Merkezi yönetim veritabanı (control plane), PostgreSQL 14+
@@ -591,6 +613,8 @@ COMMIT;
 ## Ortam runtime DB'si ve cache senkronizasyonu
 
 Her ortamın kendi runtime DB'si vardır. Bu DB'yi broker'lar yalnızca okur, yalnızca ortamın Admin API'si yazar. Merkez çökse bile routing çalışmaya devam eder, yalnızca değişiklik yapılamaz.
+
+Buradaki DDL de PostgreSQL sözdizimiyle yazıldı; Oracle 19c karşılıkları "Merkezi veri modeli"ndeki notta.
 
 ```sql
 -- Ortam runtime veritabanı: her ortamda ayrı, PostgreSQL 14+
@@ -958,10 +982,10 @@ Bugünkü "yanıt logu yazılamazsa yanıt dönmez" kuralı böylece korunur ve 
 - **request\_id:** UUIDv7; zaman sıralı olduğu için Elastic ve ClickHouse'ta verimlidir. Frontend'e `X-Request-Id` header'ıyla döner; Elastic'teki ana dokümanın `_id`'si de budur.
 - **maintask, subtask:** Route'un kayıtlı yazımıdır; metrikler ve ClickHouse bunu kullanır. Frontend'in gönderdiği yazım `body`'de kalır ve eski dokümana o yazılır.
 - **route\_version, response\_profile, response\_profile\_version:** İsteği işleyen tanım ve zarf. Bir promote'tan sonra davranış değiştiyse hangi versiyonların çalıştığı buradan görülür. Profil yoksa iki alan boş kalır.
-- **uid, user\_id:** `uid` frontend'in gövdede gönderdiği, `user_id` oturumdaki kullanıcıdır. Eski yapıda yalnızca `uid` vardı; ikisinin farklı olması kimlik taklidi denemesine işaret eder.
+- **uid, user\_id:** `uid` frontend'in gövdede gönderdiği, `user_id` oturumdaki kullanıcıdır. Oturum kaydı gövdedeki `uid` ile bulunduğu için doğrulanmış isteklerde ikisi aynıdır; anonim route'ta oturum yoksa `user_id` boş kalır.
 - **query\_id, perm\_list, token:** Eski dokümanlara bugünkü gibi yazılır. `query_id` broker'ın her istekte ürettiği rastgele UUID'dir ve yalnızca parametre dokümanlarına gider; `perm_list` kullanıcının tüm yetkileridir; `token`, `X-Token`'ın kendisidir.
 - **body:** REQUEST olayında frontend'in gövdesi, maskelenmiş ve kırpılmamış olarak; eski Elastic dokümanları bundan üretilir. RESPONSE olayında yalnızca `logResponseBody` açıksa servisin yanıtı.
-- **client\_response:** Frontend'e dönen gövde; `data` alanı bugünkü gibi boş string'e çevrilir. Elastic'teki `data_response` bundan yazılır; log yazılamadıysa `data_response` bugünkü gibi yazılmaz.
+- **client\_response:** Frontend'e dönen gövde; `data` alanı bugünkü gibi boş string'e çevrilir. Route'ta `logResponseBody` açıksa `data` boşaltılmaz, maskelenip `maxBodyBytes`'a kadar kırpılan JSON metni olarak yazılır; alan string kaldığı için Elastic'teki eşleme değişmez. Eski broker'ın gövdeleriyle dönen yanıtlara (login, logout, `{"response": false}`) eskisi gibi `"data": ""` eklenir. Elastic'teki `data_response` bundan yazılır; log yazılamadıysa `data_response` bugünkü gibi yazılmaz.
 - **Maskeleme:** Broker'da, Kafka'dan önce yapılır. Şifre ve route'ta tanımlanan alanlar `xxxx` olur; dosya yanıtlarında gövde yerine yalnızca boyut yazılır. `X-Token` eski loglarla aynı kalsın diye maskelenmez.
 
 ### Kafka
@@ -1118,7 +1142,7 @@ Elastic'teki dokümanlar alanları ve değerleriyle bugünkü gibi kalır, çün
 | --- | --- | --- |
 | Ana doküman | Her istek | `_id` = `request_id`. Frontend gövdesi olduğu gibi (`password` değeri `xxxx`), `log_request` alanları, `perm_list` ve yanıt gelince `data_response` |
 | Parametre dokümanı | Login ve logout dışında, Map ya da Map listesi olan her üst seviye alan için | Zarf alanları, `log_request` alanları, `query_id` ve `<alan>: {parameter_name, parameter_value}`; parametre başına bir doküman |
-| `data_response` | RESPONSE olayıyla | Frontend'e dönen gövde, `data` alanı boş string: `{"BACKEND_STATUS": 200, "status": 200, "data": ""}`. Binary yanıtta `info` mesajı; log yazılamadıysa bugünkü gibi yazılmaz |
+| `data_response` | RESPONSE olayıyla | Frontend'e dönen gövde, `data` alanı boş string: `{"BACKEND_STATUS": 200, "status": 200, "data": ""}`. Route'ta "Yanıt verisi loglansın" açıksa `data` yanıt verisinin JSON metnidir. Binary yanıtta `info` mesajı; log yazılamadıysa bugünkü gibi yazılmaz |
 
 `log_request`'in eklediği alanlar ve örnek dokümanlarda görülenler:
 
@@ -1172,7 +1196,7 @@ Log yazılamadığında servisin yanıtı yerine `500` ve `{"result": false}` d�
 - Liste dalında değeri null olan bir parametre `toString()`'de hata veriyor ve istek düşüyor; sink bu parametrede `parameter_value` yazmaz.
 - `uid` gövdeden okunup `X-uid` header'ı olarak servise gidiyor; yeni düzende `X-uid` oturumdaki kullanıcıyla doldurulur.
 
-Alan listesi `log_request` koduna ve iki örnek dokümana göre çıkarıldı: bir ana doküman ve bir parametre dokümanı. `alarm` indeksinin örneği yok; kullanılıyorsa o da aynı şekilde taşınır.
+Alan listesi `log_request` koduna ve iki örnek dokümana göre çıkarıldı: bir ana doküman ve bir parametre dokümanı. Eski broker `sorgu` isteklerindeki alarm kayıtlarını `alarm` indeksine yazıyor; bu iş diğerleri bittikten sonra eski kod ve bir örnek dokümanla taşınacak.
 
 ## Güvenlik ve yönetişim
 
@@ -1277,8 +1301,8 @@ Override dosyası bugünkü alışkanlığın birebir karşılığı ve riski en
 Geçiş altı adımda yapılır. Her adım tek başına değer üretir ve frontend'i etkilemez.
 
 1. **Log hattı:** Kafka topic'i, broker producer'ı, maskeleme ve Elastic sink kurulur. Broker olayların onayını ilk günden bekler; "log yazılamazsa yanıt dönmez" kuralı geçişin hiçbir adımında gevşemez. Elastic sink eski doküman yapısını üretir; DEV'de aynı istekler için eski broker'ın ve sink'in yazdığı dokümanlar alan alan karşılaştırılır. Fark kalmayınca senkron Elastic yazımı kaldırılır; Kibana'daki mevcut kullanım ve loglardan beslenen projeler aynı alanlarla sürer. ClickHouse sink paralel eklenir ve Kafka'daki geçmişle doldurulur.
-2. **Runtime DB ve broker cache:** Broker'daki statik subtask'ler tek seferlik bir script'le `runtime_route`'a aktarılır; projeye özel sınıflardaki yetki kontrolleri de route'ların yetki listelerine taşınır. Önce Elastic'teki son ayların maintask ve subtask değerleri gruplanır; artık çağrılmayan subtask'ler ve yalnızca harf farkıyla ayrışan adlar böylece görülür. Broker route'ları koddan değil tablodan okur; yeni bir subtask artık bir tablo kaydıdır. Projeye özel response sınıfları yanıt profillerine çevrilir; DEV'de aynı istekleri eski ve yeni broker'a gönderip yanıtları karşılaştıran bir test seti farkları yakalar.
-3. **Merkezi admin, salt okunur:** DEV'de Admin API ve merkezi admin kurulur; projeler proje servisindeki ID'leriyle eşleştirilir ve yetki önekleri girilir. Mevcut route'lar ilk versiyon olarak history'ye ve `route_deployment`'a alınır. Yetkiler öneklerine göre ayrılır: projenin kendi yetkileri `permissions`'a, başka projelerinkiler `foreign_permissions`'a gider; hiçbir kayıtlı projeye uymayanlar raporlanır. Spec karşılaştırması görüntülenir.
+2. **Runtime DB ve broker cache:** Broker'daki statik subtask'ler tek seferlik bir script'le `runtime_route`'a aktarılır; projeye özel sınıflardaki yetki kontrolleri de route'ların yetki listelerine taşınır. Önce Elastic'teki son ayların maintask ve subtask değerleri gruplanır; artık çağrılmayan subtask'ler ve yalnızca harf farkıyla ayrışan adlar böylece görülür. Broker route'ları koddan değil tablodan okur; yeni bir subtask artık bir tablo kaydıdır. Projeye özel response sınıfları yanıt profillerine çevrilir; DEV'de aynı istekleri eski ve yeni broker'a gönderip yanıtları karşılaştıran bir test seti farkları yakalar. Giriş servisi de bu adımda devreye girer; oturum kaydı eski broker'ınkiyle aynı anahtar ve biçimde olduğundan iki broker bir süre aynı Redis'i paylaşabilir.
+3. **Merkezi admin, salt okunur:** DEV'de Admin API ve merkezi admin kurulur; projeler yetki projesindeki ID'leriyle eşleştirilir ve yetki önekleri girilir. Mevcut route'lar ilk versiyon olarak history'ye ve `route_deployment`'a alınır. Yetkiler öneklerine göre ayrılır: projenin kendi yetkileri `permissions`'a, başka projelerinkiler `foreign_permissions`'a gider; hiçbir kayıtlı projeye uymayanlar raporlanır. Spec karşılaştırması görüntülenir.
 4. **Tanımlama ve DEV:** Yeni subtask'ler ekrandan tanımlanır, test edilir ve DEV'e uygulanır. Mevcut subtask'lerin alan tanımları yapıştırılan ya da Elastic'ten çekilen örnek isteklerle tamamlanır.
 5. **TEST ve PROD:** TEST ve PROD Admin API'leri kurulur; promote, onay ve yoklama akışı açılır.
 6. **Sıkılaştırma:** Gece drift kontrolü ve alarmlar açılır; log onay süresi ve spool alarmlarının eşikleri canlı trafikle ayarlanır.
@@ -1287,7 +1311,7 @@ Path tabanlı bir sözleşme (`POST /api/{maintask}/{subtask}`) ileride hazır g
 
 ## Açık kararlar ve varsayımlar
 
-- [ ] **İlişkisel DB:** DDL'ler PostgreSQL varsayımıyla yazıldı. Oracle ya da MSSQL kullanılıyorsa JSONB, kısmi unique index ve trigger karşılıkları değişir.
+- [x] **İlişkisel DB:** DDL'ler PostgreSQL varsayımıyla yazıldı; karar Oracle 19c, merkezi DB ve ortam runtime DB'leri için (2026-10-16). Dönüşüm kuralları "Merkezi veri modeli"ndeki notta.
 - [ ] **Kafka:** Kurumda hazır bir Kafka cluster'ı var mı? Yoksa işletim yükü (en az 3 broker, izleme) plana eklenmeli. Kafka artık her isteğin yolunda; erişilebilirliği broker'ınkiyle aynı seviyede olmalı.
 - [ ] **Senkron Elastic yazımı (askıda):** Kafka onayı logun kalıcı yazıldığını garanti ediyor; senkron yazım buna yalnızca dokümanın Elastic'te anında görünmesini ekler. Karşılığında Elastic'in gecikmesi ve kesintisi yine istek yolunu etkiler. Gerekirse broker, sink'in ürettiği dokümanları istek yolunda kendisi yazar; olay şeması ve doküman yapısı değişmez.
 - [ ] **Saklama süreleri:** ClickHouse TTL'i, Elastic ILM ve Kafka retention'ı KVKK'ya ve iç politikaya göre belirlenmeli.
@@ -1297,5 +1321,10 @@ Path tabanlı bir sözleşme (`POST /api/{maintask}/{subtask}`) ileride hazır g
 - [x] **ClickHouse DDL'i:** ClickHouse 24.8'de çalıştırıldı ve sink'in satırlarıyla doğrulandı (`broker-log-sink`, `RealTargetsTest`).
 - [x] **Spring Boot sürümü:** Java 25 ve Spring Boot 4.1.1. ECS formatında loglama Spring Boot'un yapılandırılmış loglamasıyla (`logging.structured.format.console=ecs`) gelir; OTel Java agent'ı bundan bağımsız eklenir.
 - [x] **`perm_list`:** Bugünkü gibi kullanıcının tüm yetkileri yazılır. Yalnızca erişimi sağlayan yetkilerle süzmek şimdilik yapılmayacak; ileride eklenebilir.
-- [ ] **`alarm` indeksi:** Örneği yok; kullanılıyorsa bir örnek dokümanla aynı şekilde taşınacak.
-- [ ] **Yetkilendirme servisi:** Yetki açmak için bir API'si olduğu ve her ortamda ayrı çalıştığı varsayıldı; promote ön kontrolü yetkiyi hedef ortamda arar.
+- [ ] **Sorgu alarmı ve `alarm` indeksi:** Eski broker `sorgu` isteklerinde alarm kontrolü yapıp sonucu `alarm` indeksine yazıyor. Diğer işler bittikten sonra eski kod ve bir örnek dokümanla taşınacak.
+- [ ] **Yetki projesi:** Projeler ve yetkiler aynı mevcut projede yönetiliyor; admin, giriş servisi ve application listesi onu kullanır. Gerçek API'ler (proje listesi, kullanıcı yetkileri, yetki açma) bekleniyor; her ortamda ayrı çalıştığı varsayıldı.
+- [x] **Giriş:** Ayrı bir giriş servisi LDAP'ta doğrular, UUID token üretir ve oturumu Redis'e 1 günlüğüne yazar; broker `login` ve `logout` isteklerini ona yönlendirir. Yanıtlar eski broker'la aynı.
+- [x] **Yanıt verisinin loglanması:** Subtask başına "Yanıt verisi loglansın" seçeneği (`logResponseBody`), varsayılan kapalı.
+- [ ] **Oturum kaydının biçimi:** Eski broker'ın `RedisTemplate` serileştirmesi teyit edilecek; iki broker aynı anda çalışacaksa değer birebir aynı olmalı.
+- [ ] **Eski broker'ın kendi özellikleri:** Dashboard yerleşimi ve hızlı bağlantılar (Redis'te `user:layout:*`, `user:quick_link:*`), `giris_public`, `refresh_permissions` ve koordinatör çıkışı yeni düzende bir servise taşınmalı; nasıl çağrıldıkları bekleniyor.
+- [ ] **Logout'un güvenliği:** Bugün yalnızca `uid` ile çalışıyor; token ya da en azından `X-Clientip` ve `X-User-Agent` eşleşmesi istenebilir.

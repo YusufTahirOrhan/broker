@@ -4,7 +4,7 @@ Kurum içi istek broker'ının yeni backend'i: subtask'leri koddan değil versiy
 
 ## Belgeler
 
-- `docs/design.md`: tasarım dokümanı (mimari, istek akışı, şemalar, log hattı, eski Elastic uyumu).
+- `docs/design.md`: tasarım dokümanı (mimari, istek akışı, şemalar, log hattı, eski Elastic uyumu). Canlı dokümandan aktarılır, burada değiştirilmez; gereken değişiklik `HANDOFF.md`'deki "Tasarıma yansıtılacaklar"a yazılır.
 - `docs/frontend-guide.md`: merkezi admin API sözleşmesi. Yollar, gövdeler ve hata kodları buna birebir uyar.
 
 ## Derleme

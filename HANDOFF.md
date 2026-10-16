@@ -1,8 +1,8 @@
 # Devir notu
 
-Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; çekirdek ve dört modül yazıldı, `mvn -B verify` yeşil. Kalan iş "Sıradaki adımlar" ve "Açık noktalar"da. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
+Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; çekirdek ve dört modül yazıldı, `mvn -B verify` yeşil. Bu turun işi "Sıradaki iş" bölümünde: Oracle 19c, yanıt verisinin loglanması, eski broker'la aynı oturum ve yanıtlar, giriş servisi. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
 
-Son güncelleme: 2026-10-13.
+Son güncelleme: 2026-10-16.
 
 ## Kaynaklar
 
@@ -13,24 +13,153 @@ Son güncelleme: 2026-10-13.
 
 `docs/frontend-guide.md` merkezi admin API'sinin sözleşmesidir: yollar, gövdeler, hata kodları ve kurallar oradan birebir uygulanır. Sözleşme değişirse aynı commit'te bu dosya ve sonundaki "Değişiklik kaydı" tablosu güncellenir, commit mesajına "Frontend rehberi değişti" yazılır. Canlı sürüm oradan eşitlenir.
 
+`docs/design.md` bu repoda değiştirilmez; canlı doküman güncellenip buraya aktarılır. Tasarıma yansıması gereken bir şey çıkarsa "Tasarıma yansıtılacaklar" başlığına yazılır.
+
+## Sıradaki iş (2026-10-16)
+
+Maddeler sırayla yapılır; her biri kendi commit'leriyle biter ve her push'tan önce `mvn -B verify` yeşildir. 7. madde bu turda yapılmaz. "Bilgi bekleyenler"deki konular işi durdurmaz: o parçalar arayüz arkasında, ayara bağlı ve aşağıdaki varsayılanlarla yazılır; bilgi gelince yalnızca o parça değişir. Eski broker'dan alınan gövdeler, anahtarlar ve alan adları birebir korunur ve testlerle sabitlenir. Bir madde bitince bu nottaki modül bölümleri de güncellenir.
+
+### 1. Oracle 19c
+
+İki veritabanı da (merkezi DB ve her ortamın runtime DB'si) Oracle 19c olacak. PostgreSQL bağımlılıkları, migration'ları ve testleri tamamen kalkar.
+
+- **Testler:** 19c'nin serbest imajı yok; Testcontainers'ın Oracle XE modülüyle `gvenzl/oracle-xe:21-slim-faststart`. 19c'de olmayan özellikler kullanılmaz: `JSON` veri tipi, SQL `BOOLEAN`, `IF [NOT] EXISTS`, `JSON_TRANSFORM`. İmaj büyük; modül başına tek container kullanılır ve CI süresi izlenir.
+- **Sürücü ve migration:** Boot'un yönettiği ojdbc; Flyway için `flyway-database-oracle` (Flyway 10'dan beri 19c için lisans gerekmiyor). PL/SQL bloklarından sonra `/` gelir.
+- **Tipler:** `JSONB` → `CLOB` + `CHECK (x IS JSON)`; `BOOLEAN` → `NUMBER(1)` + `CHECK (x IN (0, 1))`; `TIMESTAMPTZ` → `TIMESTAMP(6) WITH TIME ZONE DEFAULT SYSTIMESTAMP`; `TEXT` → `VARCHAR2(4000 CHAR)` ya da `CLOB`. `GENERATED ALWAYS AS IDENTITY` aynı kalır.
+- **Diziler (`TEXT[]`):** Merkezde `permissions` ve `foreign_permissions` yetki koduna indeksli ayrı bir tabloya taşınır (`GET /permissions/{code}/routes` ve önek trigger'ı bunu kullanır). Runtime'da `permissions` JSON dizisi olur; snapshot zaten bütün okunur.
+- **SQL karşılıkları:** `ON CONFLICT` → `MERGE` (eşzamanlı eklemede ORA-00001 gelirse bir kez tekrar); `RETURNING` → kolon adıyla `KeyHolder`; `ANY(?)`, `unnest`, `jsonb_array_elements_text` → `IN (:liste)` ya da `JSON_TABLE`; `to_jsonb(satır)` ile yazılan history → snapshot Java'da `Json` ile kurulur; `ILIKE` → `LOWER(..) LIKE .. ESCAPE`; `LIMIT/OFFSET` → `OFFSET .. ROWS FETCH NEXT .. ROWS ONLY`.
+- **Kısıtlar ve indeksler:** Kısmi unique index'ler (`uq_promotion_open*`) → `CASE` ile fonksiyon tabanlı unique index (kapalı taleplerde bütün anahtarlar NULL); `lower(x COLLATE "C")` → `LOWER(x)`; `~` → `REGEXP_LIKE`; `(a IS NULL) = (b = 'X')` gibi boolean eşitlikler açık yazılır.
+- **Trigger'lar:** `forbid_history_change`, `forbid_column_change` ve `check_route_permissions` tablo başına PL/SQL trigger olur (`RAISE_APPLICATION_ERROR`); `TG_ARGV` ve `to_jsonb` yerine kolonlar açıkça karşılaştırılır.
+- **Adlar ve boş string:** `comment` Oracle'da ayrılmış kelime; kolon yeniden adlandırılır, API alan adları değişmez. Diğer kolonlar `V$RESERVED_WORDS`'e karşı kontrol edilir. Oracle boş string'i NULL sayar; NOT NULL metin kolonlarına ve `''` ile karşılaştıran koda bakılır.
+- **Şema ve yetkiler:** Şema = Oracle kullanıcısı, DBA açar (`create-schemas=false`). Flyway şema sahibiyle çalışır; uygulamalar kendi kullanıcılarıyla bağlanır, `search_path`'in yerine Hikari `schema` ile `CURRENT_SCHEMA` verilir. `pg_roles` bloğu → rol yoksa ORA-01917'yi yutan `EXECUTE IMMEDIATE 'GRANT ...'` bloğu.
+- **Snapshot okuması:** Oracle `REPEATABLE READ` desteklemez (yalnızca READ COMMITTED ve SERIALIZABLE). `RouteRepository.loadSnapshot()` `SET TRANSACTION READ ONLY` ile okur; Oracle'da bu, işlem boyunca tutarlı okuma verir. Örneğin `DataSourceTransactionManager#setEnforceReadOnly(true)` ve izolasyon seviyesi vermeden `readOnly = true`.
+- **CLOB:** 32 KB'tan büyük bir tanımla yazma ve okuma test edilir.
+- **Bitti sayılır:** Bütün DB testleri Oracle XE'de geçer; `local` profili ve CI Oracle ile çalışır; bu nottaki PostgreSQL anlatımları güncellenir.
+
+### 2. Yanıt verisinin loglanması ve küçük log düzeltmeleri
+
+Subtask editöründeki "Yanıt verisi loglansın" seçeneği mevcut `logging.logResponseBody` bayrağıdır (varsayılan kapalı). API'nin biçimi değişmez, anlamı genişler (rehberde güncellendi):
+
+- **Kapalı:** Bugünkü gibi; eski Elastic dokümanında `data_response.data` boş string, ClickHouse'ta yanıt gövdesi yok.
+- **Açık:** `data_response.data`, yanıttaki `data` değerinin maskelenmiş (`maskFields` + `password`) JSON metni olur. `maxBodyBytes`'ı aşarsa UTF-8 karakteri bölmeden kırpılır ve `broker.body_truncated: true` yazılır. Alan string kaldığı için Elastic'teki eşleme değişmez. ClickHouse'a bugünkü gibi gövde yazılır.
+- **Profilsiz JSON yanıt:** Kapalıyken bugünkü gibi `{"status": <kod>}`. Açıkken maskelenmiş gövdenin kendisi; üst seviyedeki `data` string değilse JSON metnine çevrilir; sınırı aşarsa `{"status": <kod>, "data": "<kırpılmış metin>"}`.
+- Değişiklik `EventFactory.clientResponse`'ta (route'un log politikasını alır); `LegacyDocuments` aynı kalır.
+- **Elastic aylık indeksi:** Eski kod `requests_yyyy-MM`'i saat dilimi vermeden (`new SimpleDateFormat("yyyy-MM")`), yani sunucunun saat diliminde hesaplıyor. `broker.sink.elastic.index-zone` varsayılanı `Europe/Istanbul` olur; sunucunun saat dilimi "Bilgi bekleyenler"de.
+- **Eski sayaç:** `broker.gelen.istekler` tag'leri (`maintask`, `subtask`) ve "Bilinmeyen Proje"/"Bilinmeyen Endpoint" eski controller'la teyit edildi; ayardaki "teyit edilmeli" notları kalkar.
+- **Test:** core ve runtime birim testleri; `RealTargetsTest`'te 40 KB'lık `data` metni olan doküman varsayılan dinamik eşlemeyle kabul edilir.
+
+### 3. Broker: eski broker'la aynı oturum, application kontrolü ve yanıtlar
+
+Mevcut frontend'ler bunlara bağlı.
+
+**Oturum kaydı.** Redis anahtarı `user:session:{uid}` (`uid` gövdeden); değer `{"uid", "X-Token", "X-Clientip", "X-User-Agent", "permissions": [...]}`; süre 86400 sn, login'de verilir, broker uzatmaz. Kullanıcı başına tek oturum vardır, yeni login eskisini ezer.
+
+- Oturum geçerli = kayıt var **ve** `X-Token`, `X-User-Agent`, `X-Clientip` header'ları kayıttakiyle birebir aynı (büyük/küçük harf duyarlı; eksik header eşleşmez).
+- `${user.id}` ve `X-uid` = kayıttaki `uid` (doğrulanmış gövde `uid`'i). `perm_list` = kayıttaki `permissions`, sırasıyla.
+- Kayıt broker-core'da `SessionRecord` + `SessionRecordCodec`; broker ve giriş servisi aynısını kullanır. Okuma esnektir: düz JSON ve Jackson default typing izleri (`"@class"` alanı, `["java.util.ArrayList", [...]]` dizileri) okunur. Yazma biçimi ayardan gelir (`plain` varsayılan); kesin biçim "Bilgi bekleyenler"de.
+- Anahtar deseni ve alan adları ayardan; varsayılanlar yukarıdakiler (`broker.session.key-pattern: "user:session:{uid}"`).
+
+**Application kontrolü.** Gövdedeki `application` izinli listede olmalı (harf duyarsız, `Names.key`); değilse ya da yoksa HTTP 200 `{"response": false}`, outcome `DENIED`. Login, logout ve anonim route'lar dahil her istekte uygulanır.
+
+- Liste Redis'te `broker:applications` anahtarında bir JSON dizisidir; giriş servisi yazar (madde 4). Broker açılışta ve 30 sn'de bir okur, son başarılı listeyi bellekte tutar; liste hiç yüklenmediyse readiness'te hazır görünmez.
+- `broker.applications.mode`: `redis` (varsayılan), `static` (ayardaki liste; local ve testler), `off`.
+
+**Sıra** (`broker.compat.legacy-responses: true`, varsayılan):
+
+1. Gövde büyük ya da JSON nesnesi değil → 400 `INVALID_REQUEST` (ortak format).
+2. `X-Token` yok → 400 `INVALID_REQUEST` (eski broker'da controller NPE ile 500 dönüyor; karar değişmedi).
+3. `application` izinli değil → 200 `{"response": false}`.
+4. Gövdedeki maintask `broker.session.public-maintasks` listesindeyse (varsayılan `refresh_permissions`, `giris_public`; eski broker bunlara login'den önce bakıyordu) normal route çözümlemesine geçilir; bu route'lar anonimdir. Değilse ve `X-Token` `login` ya da `logout` ise gövdedeki maintask/subtask'e bakılmadan ayardaki route'a gidilir (`broker.session.routes.login: giris/login`, `logout: giris/logout`). Route yoksa ya da anonim değilse 503 `TECHNICAL_ERROR` ve hata logu (yapılandırma hatası). Eski dokümana gövdedeki maintask ve subtask yazılır.
+5. Route aranır:
+   - Yoksa önce oturum kontrol edilir: geçersizse 301 yanıtı, geçerliyse 404 `UNKNOWN_TASK`. Eski broker da önce token'a bakıyordu; böylece oturumsuz biri hangi route'ların var olduğunu göremez.
+   - Anonimse bugünkü gibi: oturum geçerliyse kullanıcı çözülür, değilse kullanıcısız devam edilir.
+   - Anonim değilse: oturum geçersiz → 200 `{"response": false, "status": 301, "reason": "check X-Token"}` (outcome `DENIED`); Redis okunamadı → 503 `TECHNICAL_ERROR`; yetki yok → 403 `DENIED` (ortak format).
+
+- `legacy-responses: false` iken bugünkü 400 ve 401'li ortak format kalır.
+- **Loglama:** Eski broker her yanıtı `data: ""` ekleyerek logluyordu (`log_response.putAll(body); put("data", "")`). Broker'ın eski biçimli yanıtları (`{"response": false}`, 301) ve oturum işlemlerinin yanıtları `client_response`'a `"data": ""` eklenerek yazılır. Oturum işlemlerinde log bayrağına bakılmaz; login yanıtındaki `X-Token` bugünkü gibi açık yazılır.
+- **Zarf alanları yer tutucuda:** `${request.uid}`, `${request.application}`, `${request.maintask}`, `${request.subtask}` `fields`'ta tanımlanmadan okunur (doğrulayıcı, önizleme, `DefinitionRules`). Login route'u `uid`'i böyle iletir. Anonim route'ta `uid` doğrulanmamıştır.
+- **İmzalı bağlam:** `user-context-secret` ayarlıysa oturum işlemlerinde de `X-User-Context` imzalanır (`userId` null); giriş servisi imzasız çağrıyı reddeder.
+- **Rehber:** `docs/frontend-guide.md` bu hedefe göre güncellendi ("Broker'ın uygulamalara döndüğü yanıtlar", `${request.*}` ve `${user.id}` satırları, 2026-10-16 kaydı). Uygulama farklı çıkarsa rehber ve "Değişiklik kaydı" aynı commit'te düzeltilir.
+- **Test:** yanıt gövdelerinin anahtar kümesi ve tipleri; header eşleşme matrisi; application listesi kaynakları ve readiness; public maintask'ler; bilinmeyen route + geçersiz oturum → 301; login ve logout route eşlemesi.
+
+### 4. Giriş servisi (`broker-login`)
+
+Yeni modül, kök `pom.xml`'e eklenir; paket `com.acme.broker.login`, çalıştırılabilir jar `-exec` ekiyle. Yalnızca broker çağırır: admin'de `giris` projesi olarak kaydedilir, `login` ve `logout` onun anonim route'larıdır.
+
+- **`POST /login`**, gövde `{"uid", "password"}`, header'lar `X-Clientip` ve `X-User-Agent`. Her zaman HTTP 200:
+  1. LDAP'ta bind ile doğrular → `ldap` (true/false). Boş şifre her zaman false; anonim bind'e düşmesin.
+  2. Kullanıcı yetkilerini yetki projesinden alır (`login.permissions.url`, `{uid}` ile; liste `login.permissions.pointer`, varsayılan `/yetkiler`); `ok` = HTTP 200. Eski kod bu çağrıyı LDAP sonucuna bakmadan da yapıyor.
+  3. `ldap && ok` ise token = `UUID.randomUUID()`; kayıt `SET user:session:{uid}` 86400 sn ile yazılır, `EXISTS` ile doğrulanır.
+     - Yazıldı: `{"response": true, "status": 200, "LDAP": true, "login": true, "X-Token": "<uuid>"}`
+     - Yazılamadı: `{"status": 401, "Ldap": false, "login": false, "X-Token": "404"}`. `response` anahtarı yok; eski kod `Ldap`'ı burada false yapıyor.
+  4. Değilse: `{"response": false, "status": 401, "Ldap": <ldap>, "login": false}`
+  - Başarıda `LDAP`, hatada `Ldap` yazımı eskisi gibi farklı kalır.
+- **`POST /logout`**, gövde `{"uid"}`: kayıt varsa silinir → `{"response": true, "status": 200, "message": "logged out"}`; yoksa ya da hata olursa `{"response": false, "status": 301, "message": "something went wrong with logging out."}`. Eskisi gibi token kontrolü yok (bkz. Açık noktalar).
+- **Koordinatör çıkışı:** `login.koordinator-secret` ile sabit zamanlı karşılaştırır; doğruysa ve kayıt varsa siler (true), değilse false. Servis metodu yazılır; nasıl çağrıldığı ve yanıtı "Bilgi bekleyenler"de.
+- **Application listesi:** 5 dakikada bir yetki projesinin proje listesini alır (`login.applications.url`, listenin JSON pointer'ı ve ad alanı ayardan) ve boş değilse `broker:applications`'a süresiz yazar. Hata olursa eski değer kalır; metrik ve log.
+- **LDAP:** Spring LDAP. Ayar: `login.ldap.urls`, `base`; ya doğrudan bind (`user-dn-pattern`, ör. `uid={0},ou=people`) ya da servis hesabıyla arayıp bind (`bind-dn`, `bind-password`, `search-base`, `search-filter`). Bağlantı 3 sn, okuma 5 sn. Gerçek ayar "Bilgi bekleyenler"de.
+- **Güvenlik:** Şifre hiçbir yerde loglanmaz. `login.user-context-secret` ayarlıysa broker'ın imzaladığı `X-User-Context` doğrulanır (`issuedAt` 60 sn içinde), imzasız çağrı 403. Servis yalnızca broker'ın ağından erişilebilir olmalı.
+- **Örnek tanımlar:** `giris/login` ve `giris/logout` route tanımları modülün README'sinde ve `broker-local.json` örneğinde: POST, `TEMPLATE` gövde `{"uid": "${request.uid}", "password": "${request.password}"}` (logout'ta yalnızca `uid`), header'lar `${header.X-Clientip}` ve `${header.X-User-Agent}`, anonim, profil yok.
+- **Test:** gömülü LDAP (UnboundID), yetki projesi için `FakeHttpServer`, Testcontainers Redis; yanıt gövdeleri birebir. Uçtan uca: login → token'la istek geçer → farklı `X-User-Agent` 301 alır → logout → aynı istek 301 alır.
+
+### 5. Yerel çalıştırma
+
+- `docker compose` (Oracle XE, Redis, Kafka; Elastic ve ClickHouse ayrı bir profilde) ve `docs/local-run.md`. Frontend geliştiricisi admin API'yi `local` profili ve tohum verisiyle tek komutla ayağa kaldırabilmeli; broker ve giriş servisi de aynı compose'la denenebilmeli.
+- OpenAPI ve Swagger yalnızca `local` ve `dev` profillerinde açık; diğerlerinde `springdoc.api-docs.enabled=false`.
+
+### 6. `${user.permission}` yer tutucusu
+
+Kullanıcıda olan ilk route yetkisi: önce `permissions`, sonra `foreignPermissions`, tanımdaki sırayla. Oturum yoksa değeri yoktur, alan yazılmaz. Eski broker `sorgu` isteklerinde `perm`'i böyle seçiyordu (önce `SORGU_TEMEL`, sonra `SORGU_ILERI`); `sorgu` route'ları bu sırayla tanımlanınca aynı davranış elde edilir. Doğrulayıcı, önizleme, rehberin yer tutucu tablosu ve "Değişiklik kaydı" güncellenir.
+
+### 7. Alarm (bu turda yok)
+
+Her şey bittikten sonra yapılacak. Eski akış: `maintask = sorgu` ve `reason` 5 karakterden uzunsa `alarmService.checkAlarm(params, client_ip, query_id)`; `isAlarmQuery` true ise HTTP 200 `{"response": false, "badprocess": true, "status": 500}`, değilse gövdeye `alarm_list` eklenir. Alarm logu Elastic'te `alarm` indeksine yazılıyor. Ayrıntılar `alarmService` koduyla gelecek.
+
+## Eski broker'dan teyit edilenler
+
+Kullanıcının paylaştığı eski kod ekran görüntülerinden (2026-10-12 ve 2026-10-16):
+
+- **Controller:** `X-Token` `login`/`logout` değilse `broker.gelen.istekler` (tag `maintask`, `subtask`; yoksa "Bilinmeyen Proje"/"Bilinmeyen Endpoint") artar. `X-Token` yoksa `equals` çağrısı NPE ile 500 verir.
+- **İstek hazırlığı (`task_check`):** `X-Token`, `X-Clientip` ve `X-User-Agent` header'ları okunur. Gövdedeki `uid` `X-uid` olur; `password` logda `xxxx`. Login ve logout dışında parametre dokümanları yazılır.
+- **`do_process` sırası:** application kontrolü → `refresh_permissions` → `giris_public` → login → logout → token kontrolü → `sorgu` alarmı → proje servisleri. Yanıt `{"response": false}` ile başlar, hata yanıtları onun üstüne kurulur.
+- **`token_check`:** Kayıt yoksa ya da `X-Token`, `X-User-Agent`, `X-Clientip` değerlerinden biri `equals` değilse geçersiz.
+- **Yanıt logu:** `log_response` = Map gövdenin tamamı + `"data": ""`. Resource ise `info: "Fotoğraf başarıyla çekilmiştir."`, byte[] ise `info: "excel başarıyla oluşturuldu."`. Gövde null ya da log yazılamazsa 500 `{"result": false}`.
+- **Elastic:** İndeks `"requests_" + new SimpleDateFormat("yyyy-MM").format(new Date())`, saat dilimi verilmemiş; `request_date` GMT.
+- **RedisService:** `user:session:{uid}` (86400 sn, login'de), `user:layout:{sicil}` (dashboard yerleşimi, süresiz), `user:quick_link:{sicil}` (hızlı bağlantılar, süresiz). `expire_user(uid)` kayıt varsa siler; `expire_user_triggered_from_koordinator(uid, secret)` `koordinator.secret` eşitse aynısını yapar. Değerler ham `RedisTemplate` ile yazılıyor. Kayıt anonim bir `HashMap` alt sınıfı olduğu için JDK serileştirmesiyle yazılamaz; serializer JSON tabanlı olmalı (teyit bekleniyor).
+- **Login, logout ve alarm yanıtları:** "Sıradaki iş" 3, 4 ve 7'deki gövdeler eski koddan birebir alındı.
+- **`sorgu` yetkisi:** Kullanıcıda `SORGU_TEMEL` varsa `perm = "SORGU_TEMEL"`, yoksa `SORGU_ILERI` varsa o; ardından `sorguService.execute(params)`.
+- **Bilinmeyen subtask ve yetkisiz kullanıcı:** Proje sınıfları özel exception atıyordu; ortak bir gövde yok, yeni ortak format kalır.
+- **Application listesi:** Eski broker'da sabit kodlu; yeni düzende yetki projesinden gelir (projeler = application'lar).
+
+## Bilgi bekleyenler
+
+Kullanıcıdan istendi; gelince ilgili madde güncellenir:
+
+1. Eski broker'ın `RedisTemplate` bean'i (key ve value serializer) ya da Redis'te bir `user:session:<uid>` kaydının ham hali (token gizlenerek) → `SessionRecordCodec`'in yazma biçimi (madde 3, 4).
+2. `ldap.check_user` metodu → LDAP bağlantısı ve DN ya da arama biçimi (madde 4).
+3. Yetki projesinin uçları: kullanıcı yetkileri (eski `kuyuService.permissions`), proje listesi, yetki listeleme, açma ve varlık kontrolü → giriş servisi, application listesi, admin'in `HttpProjectCatalog`'u ve `HttpAuthorizationService`'i (madde 3, 4).
+4. `PublicApisService` (`refresh_permissions`, `giris_public`), dashboard yerleşimini ve hızlı bağlantıları kullanan sınıflar, koordinatör çıkışını çağıran yer → bunların yeni yeri (büyük olasılıkla giriş servisi).
+5. Eski broker sunucusunun saat dilimi (Elastic aylık indeksi). Kibana'da ay başına yakın bir dokümanın indeksi ile `request_date`'i karşılaştırarak da anlaşılır.
+6. Alarm: `alarmService.checkAlarm` ve `alarm_log` kodu, `alarm` indeksinden örnek bir doküman (madde 7).
+
 ## Verilmiş kararlar
 
-Tasarım dokümanındakilere ek olarak bu oturumda netleşenler:
+Tasarım dokümanındakilere ek olarak netleşenler:
 
 - **Platform:** Java 25, Spring Boot 4.1.1, Maven çok modüllü proje. Paket kökü `com.acme.broker` (şirket adına göre toplu değiştirilebilir).
 - **JSON:** Jackson 3 (`tools.jackson.*`; anotasyonlar `com.fasterxml.jackson.annotation.*`). Ağaç API'si yalnızca `broker-core/.../json/Json.java` içinden kullanılır; Jackson metot adı hatası çıkarsa tek yerde düzeltilir.
-- **Veri erişimi:** JPA yok; `JdbcClient` ve tasarımdaki SQL. Şemalar Flyway ile, tasarımdaki DDL'den.
-- **Broker'ın ortak hata formatı:** `{"result": false, "status": 403, "outcome": "DENIED", "message": "...", "requestId": "...", "errors": []}`. Durumlar: `X-Token` yok 400 `INVALID_REQUEST`, oturum yok 401 `DENIED`, yetki yok 403 `DENIED`, route yok 404 `UNKNOWN_TASK`, gövde `fields`'a uymuyor 400 `INVALID_REQUEST` (alan bazında `errors`).
+- **Veri erişimi:** JPA yok; `JdbcClient` ve SQL, şemalar Flyway ile. Veritabanı Oracle 19c (merkezi ve runtime); kod şu an PostgreSQL'de, geçiş "Sıradaki iş" 1.
+- **Broker'ın ortak hata formatı:** `{"result": false, "status": 403, "outcome": "DENIED", "message": "...", "requestId": "...", "errors": []}`. Durumlar: `X-Token` yok 400 `INVALID_REQUEST`, oturum yok 401 `DENIED`, yetki yok 403 `DENIED`, route yok 404 `UNKNOWN_TASK`, gövde `fields`'a uymuyor 400 `INVALID_REQUEST` (alan bazında `errors`). Eski broker'ın gövdeleriyle dönecek durumlar (application, oturum, login, logout) "Sıradaki iş" 3 ve 4'te.
 - **Log yazılamazsa:** `500` ve `{"result": false}`, outcome `LOG_UNAVAILABLE`; olaylar spool'a yazılır. Profil uygulanmaz.
-- **Profilsiz yanıt:** Gövde olduğu gibi döner. RESPONSE olayındaki `client_response` bu durumda yalnızca `{"status": <kod>}` olur, böylece loglanmamış veri `data_response`'a sızmaz (kullanıcıya teyit ettirilecek).
+- **Profilsiz yanıt:** Gövde olduğu gibi döner. RESPONSE olayındaki `client_response` bu durumda yalnızca `{"status": <kod>}` olur, böylece loglanmamış veri `data_response`'a sızmaz; `logResponseBody` açıksa "Sıradaki iş" 2'deki kural geçerlidir.
 - **Dosya yanıtı** (`BINARY` route ya da servis `Content-Disposition` döndürdü): `client_response` = `{"info": <route'un binaryInfo'su ya da "Dosya yanıtı: <dosya adı>">}`; gövde loglanmaz, onaydan sonra stream edilir.
 - **Timeout ve bağlantı hatası, profil yoksa:** ortak formatta 504 `TIMEOUT` ve 502 `TECHNICAL_ERROR`.
-- **Oturum:** `X-Token` değeri `login` ya da `logout` ise oturum işlemidir: oturum okunmaz, route anonim olmalıdır, parametre logu ve `broker.gelen.istekler` sayacı dışında kalır. Diğer isteklerde Redis'ten tek okuma yapılır. Anahtar ve format ayarla değiştirilebilir olmalı; varsayım: `broker:session:{token}` → `{"userId": "...", "permissions": [...]}`. Gerçek format bugünkü broker kodundan teyit edilmeli.
+- **Oturum:** Eski broker'dan teyit edildi: kayıt `user:session:{uid}`, geçerlilik token, `X-Clientip` ve `X-User-Agent` eşleşmesiyle; login ve logout ayrı bir giriş servisinde. Oturum işlemleri parametre logu ve `broker.gelen.istekler` sayacı dışında kalır. Kod henüz eski varsayımla çalışıyor (`broker:session:{token}`, oturum işleminde gövdedeki route anonim olmalı); geçiş "Sıradaki iş" 3 ve 4.
 - **Anonim route + oturum:** Token geçerliyse kullanıcı yine çözülür (`X-uid`, `perm_list`); geçersizse anonim route yine çalışır.
 - **Servise giden header'lar:** `X-uid` (oturumdaki kullanıcı), `X-Request-Id`, `traceparent`; gizli anahtar ayarlıysa HMAC imzalı `X-User-Context`.
 - **Test çağrıları** Kafka'ya log yazmaz; merkezi admin bunları kendisi audit eder.
-- **Eski sayaç:** `broker.gelen.istekler` tag anahtarları ayarla verilir (eski koddan teyit edilmeli). Bilinmeyenler "Bilinmeyen Proje" / "Bilinmeyen Endpoint".
-- **Elastic aylık indeks:** Ay, request ID'deki (UUIDv7) zamandan, ayarlanabilir saat diliminde (varsayılan UTC) hesaplanır; eski kodun saat dilimiyle teyit edilmeli. Parametre dokümanı `_id`'si `UUID.nameUUIDFromBytes(requestId|alan|sıra)`.
+- **Eski sayaç:** `broker.gelen.istekler` tag anahtarları ayarla verilir; eski controller'la teyit edildi (`maintask`, `subtask`). Bilinmeyenler "Bilinmeyen Proje" / "Bilinmeyen Endpoint".
+- **Elastic aylık indeks:** Ay, request ID'deki (UUIDv7) zamandan, ayarlanabilir saat diliminde hesaplanır. Eski kod sunucunun saat dilimini kullanıyor; varsayılan "Sıradaki iş" 2'de `Europe/Istanbul` olacak. Parametre dokümanı `_id`'si `UUID.nameUUIDFromBytes(requestId|alan|sıra)`.
 - **Admin kimliği:** OAuth2 resource server (JWT); rollerin geldiği claim ve grup→rol eşlemesi ayardan. `local` profilinde HTTP Basic: `viewer`, `editor`, `approver`, `lead` (şifre = kullanıcı adı; `lead` üç role de sahip).
 - **Roller:** `VIEWER`, `ROUTE_EDITOR`, `APPROVER`. `ROUTE_EDITOR` DEV'e doğrudan uygular (talep onaysız uygulanır), TEST ve PROD için talep açar.
 - **Taşıma kuralları:** Onay gerekir = hedef ortam `requires_approval` **ya da** versiyon anonim erişimi açıyorsa (hangi ortam olursa olsun). Onay gerekenlerde gerekçe zorunlu. `ROLLBACK` yalnızca hedef ortama daha önce `APPLIED` olmuş bir versiyona; `DISABLE`/`ENABLE` hedefteki mevcut versiyonla. Profil önce, route sonra uygulanır. Ön kontroller ve adları `docs/frontend-guide.md`'de.
@@ -38,6 +167,8 @@ Tasarım dokümanındakilere ek olarak bu oturumda netleşenler:
 - **Arşiv:** Yalnızca hiçbir ortamda `ACTIVE` olmayan subtask arşivlenir (409 `ROUTE_DEPLOYED`).
 
 ## Modüller ve durum
+
+Bu bölüm kodun 2026-10-13'teki halini anlatır (PostgreSQL, token anahtarlı oturum); "Sıradaki iş"teki maddeler bittikçe güncellenir.
 
 ### broker-core (yeşil)
 
@@ -156,21 +287,25 @@ Derlemede doğrulandı (Boot 4.1.1, Spring Framework 7.0, Jackson 3.1, Kafka 4.2
 - Flyway auto-config, test sınıf yolunda Flyway olan her modülde çalışır; broker-runtime'da `spring.flyway.enabled=false`.
 - `jwt.issuer-uri` boş string verilirse Boot `iss` doğrulayıcısını boş değerle kurar.
 
-## Sıradaki adımlar
+## Sonraki turlar
 
-Dört modül ve çekirdek yazıldı; `mvn -B verify` yeşil (131 test). Sıradakiler:
+1. Dağıtım: dört uygulamanın ve giriş servisinin imajları ve ortam manifestleri (env-admin ve admin `mtls` profiliyle; broker'da kalıcı spool volume'u önerilir). Kafka topic'i ve DLQ tasarımdaki ayarlarla açılmalı; ClickHouse DDL'i ve Elastic bileşen şablonu `broker-log-sink/src/main/resources` altında.
+2. Geçiş planı adım 1–2 (tasarım "Geçiş planı"): DEV'de eski broker ile sink'in Elastic dokümanlarını alan alan karşılaştırma; statik subtask'leri `runtime_route`'a ve merkezi history'ye aktaran tek seferlik script.
+3. Eski broker'ın kendi özellikleri (dashboard yerleşimi, hızlı bağlantılar, `giris_public`, `refresh_permissions`, koordinatör çıkışı), "Bilgi bekleyenler" 4 gelince.
+4. Alarm ("Sıradaki iş" 7).
+5. Frontend: sözleşme `docs/frontend-guide.md`'de; canlı sürüm (artifact) bu dosyadan eşitlenir.
 
-1. "Açık noktalar"daki teyitler: oturum kaydının formatı, eski sayacın tag'leri, Elastic ay hesabının saat dilimi, SSO claim'i, proje ve yetkilendirme servislerinin gerçek API'leri (varsayılan uçlar `HttpProjectCatalog` ve `HttpAuthorizationService` yorumlarında).
-2. Dağıtım: dört uygulamanın imajları ve ortam manifestleri (env-admin ve admin `mtls` profiliyle; broker'da kalıcı spool volume'u önerilir). Kafka topic'i ve DLQ tasarımdaki ayarlarla açılmalı; ClickHouse DDL'i ve Elastic bileşen şablonu `broker-log-sink/src/main/resources` altında.
-3. Geçiş planı adım 1–2 (tasarım "Geçiş planı"): DEV'de eski broker ile sink'in Elastic dokümanlarını alan alan karşılaştırma; statik subtask'leri `runtime_route`'a ve merkezi history'ye aktaran tek seferlik script.
-4. Frontend: sözleşme `docs/frontend-guide.md`'de; canlı sürüm (artifact) bu dosyadan eşitlenmeli.
+## Tasarıma yansıtılacaklar
+
+Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya yazılır; canlı doküman buradan güncellenir.
+
+- Henüz yok.
 
 ## Açık noktalar
 
-- Redis'teki oturum kaydının gerçek anahtarı ve formatı (`broker.session.*` ile ayarlanabilir).
-- `broker.gelen.istekler` sayacının tag anahtarları (`broker.legacy-counter.*`) ve eski Elastic indeksinin ay hesabındaki saat dilimi (`broker.sink.elastic.index-zone`).
-- SSO sağlayıcısı ve rol claim'i; yetkilendirme servisi ile proje servisinin gerçek API'leri.
-- Profilsiz yanıtlarda `data_response` içeriği (şimdilik yalnızca status).
+- SSO sağlayıcısı ve rol claim'i.
+- Logout eskisi gibi yalnızca `uid` ile çalışıyor, başkasının oturumunu kapatmaya açık. Token ya da en azından `X-Clientip` ve `X-User-Agent` eşleşmesi istenebilir.
+- Kullanıcı başına tek oturum: yeni login eskisini ezer (eski davranış).
 - PROD'da base URL değişikliğinin onay akışına alınması; PROD'da `DISABLE`/`ROLLBACK` için acil durum politikası (şimdilik onay istiyor).
 - Frontend gövdesinde üst seviyede `broker` adlı alan gönderen istek var mı (eski dokümanda ezilir).
 - Broker span'ının `maintask/subtask` diye adlandırılması için OTel agent API'si.
