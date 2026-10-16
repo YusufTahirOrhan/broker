@@ -133,7 +133,7 @@ Ortam başına config versiyonu ve her broker instance'ının yüklediği versiy
 
 ## API'nin genel kuralları
 
-Backend REST ve JSON konuşur; bütün yollar `/api/v1` altındadır ve alan adları camelCase'tir. Swagger arayüzü `/swagger-ui.html`, OpenAPI tanımı `/v3/api-docs` adresindedir.
+Backend REST ve JSON konuşur; bütün yollar `/api/v1` altındadır ve alan adları camelCase'tir. Swagger arayüzü `/swagger-ui.html`, OpenAPI tanımı `/v3/api-docs` adresindedir; ikisi yalnızca `local` ve `dev` profillerinde açıktır. API'yi yerelde örnek veriyle tek komutla açmak için `docs/local-run.md`.
 
 - **Kimlik:** Her istek `Authorization: Bearer <SSO access token>` taşır. Token yoksa ya da geçersizse 401, rol yetmiyorsa 403 döner. `ROUTE_EDITOR` ve `APPROVER` rolleri okuma iznini de kapsar.
 - **Yerel geliştirme:** Backend `local` profiliyle çalışınca SSO yerine HTTP Basic kabul eder. Hazır kullanıcılar `viewer`, `editor`, `approver` ve üç role birden sahip `lead`'dir; şifre kullanıcı adıyla aynıdır. Dört göz kuralı `lead` ile talep açıp `approver` ile onaylayarak denenir.
@@ -192,7 +192,7 @@ Tüm yollar `/api/v1` altındadır. Rol sütunu en az gereken roldür; şemalar�
 | GET | `/me` | VIEWER | Kullanıcı adı, görünen ad ve roller |
 | GET | `/environments` | VIEWER | Ortamlar, sıraları, onay ve test ayarları |
 | GET | `/environments/{env}/status` | VIEWER | Config versiyonu ve instance'ların yüklediği versiyonlar |
-| GET | `/meta/definition-rules` | VIEWER | Enum'lar, sınırlar, desenler, okunabilir ve yasak header'lar |
+| GET | `/meta/definition-rules` | VIEWER | Enum'lar, sınırlar, desenler, okunabilir ve yasak header'lar (`forbiddenHeaderExceptions` istisnalarıyla), yer tutucular |
 
 ### Projeler ve yetkiler
 
@@ -299,7 +299,7 @@ Yanıt aynı alanların yanında `id`, `projectId`, `maintask`, `version`, `stat
 
 ### Örnek: test sonucu
 
-`POST /projects/12/test` gövdesi `environment`, kaydedilmemiş tanım (`httpMethod`, `pathTemplate`, `responseProfileId`, `definition`), örnek frontend gövdesi (`sample`) ve isteğe bağlı `headers` ile `userId` alır. `/routes/preview` aynı gövdeyi alır ve yalnızca `request` ile `errors` döner.
+`POST /projects/12/test` gövdesi `environment`, kaydedilmemiş tanım (`httpMethod`, `pathTemplate`, `responseProfileId`, `definition`), örnek frontend gövdesi (`sample`) ve isteğe bağlı `headers`, `userId`, `permissions` ile `foreignPermissions` alır (formdaki yetki listeleri; `${user.permission}` bunlardan ilki olur). `/routes/preview` aynı gövdeyi alır ve yalnızca `request` ile `errors` döner.
 
 ```json
 {
@@ -428,7 +428,7 @@ Ekran bu kuralları `GET /meta/definition-rules` yanıtından okur ve kendi içi
 | `request.fields[]` | `name`, `type`, `required`, `default` | `name` noktalı yoldur (`adres.il`). `type`: string, integer, number, boolean, object, array. Zarf alanları (`maintask`, `subtask`, `application`, `uid`) tanımlanmaz |
 | `request.pathVariables` | ad → değer | Şablondaki her `{ad}` tam bir kez eşlenir; değer zorunlu ya da varsayılanı olan alana bağlanır |
 | `request.queryParams` | ad → değer | Değeri olmayan parametre gönderilmez |
-| `request.headers` | ad → değer | `Authorization`, `X-User-*`, `X-uid`, `Host`, `Content-Length`, `Connection`, `Transfer-Encoding` tanımlanamaz |
+| `request.headers` | ad → değer | `Authorization`, `X-User-*`, `X-uid`, `Host`, `Content-Length`, `Connection`, `Transfer-Encoding` tanımlanamaz. `X-User-Agent` istisnadır: frontend'in header'ıdır, `${header.X-User-Agent}` ile iletilebilir (giriş servisi oturumu ona bağlar) |
 | `request.body.mode` | `NONE`, `PASS_THROUGH`, `TEMPLATE`, `MULTIPART` | GET ve DELETE'te yalnızca `NONE`. `PASS_THROUGH` zarf alanları dışındaki gövdeyi olduğu gibi gönderir |
 | `request.body.contentType` | Metin | `TEMPLATE`'te varsayılan `application/json` |
 | `request.body.template` | JSON | Yalnızca `TEMPLATE`'te; tek bir yer tutucu da olabilir: `"${request.payload}"` |
@@ -450,6 +450,7 @@ Değeri yalnızca bir yer tutucudan oluşan alan değerin tipini korur: `"${requ
 | `${request.<yol>}` | Tanım | Frontend gövdesindeki alan; `fields`'ta tanımlı olmalı. Zarf alanları (`uid`, `application`, `maintask`, `subtask`) tanımlanmadan okunur; anonim route'ta `uid` doğrulanmamıştır |
 | `${header.<ad>}` | Tanım | Frontend isteğinin header'ı; yalnızca `readableHeaders` listesindekiler |
 | `${user.id}` | Tanım | Oturum kaydıyla doğrulanan kullanıcı: kayıt gövdedeki `uid` ile bulunur, token, `X-Clientip` ve `X-User-Agent` eşleşmelidir. Oturum yoksa boş |
+| `${user.permission}` | Tanım | Kullanıcıda olan ilk route yetkisi: önce `permissions`, sonra `foreignPermissions`, tanımdaki sırayla. Oturum yoksa ya da kullanıcıda bu yetkilerden hiçbiri yoksa değeri yoktur, alan yazılmaz. Önizleme ve testte kullanıcının formdaki yetkilere sahip olduğu varsayılır |
 | `${requestId}` | Tanım, profil | İsteğin ID'si |
 | `${backend.status}` | Profil | Servisin HTTP status kodu; timeout'ta null |
 | `${backend.body}` | Profil | Servisin yanıt gövdesi; `error` şablonunda yalnızca 4xx'te dolu |
@@ -524,6 +525,9 @@ Backend geliştirildikçe bu tablo güncellenir; en yeni kayıt en üsttedir. Bi
 
 | Tarih | Değişiklik |
 | --- | --- |
+| 2026-10-16 | Yeni yer tutucu `${user.permission}`: kullanıcıda olan ilk route yetkisi (önce `permissions`, sonra `foreignPermissions`). Önizleme ve test gövdesi isteğe bağlı `permissions` ve `foreignPermissions` alır; `definition-rules`'daki `placeholders.definition` yeni yer tutucuyu listeler |
+| 2026-10-16 | Swagger ve OpenAPI yalnızca `local` ve `dev` profillerinde açık. Yerel çalıştırma `docs/local-run.md`'de: admin API `local` profilinde DEV Oracle'daki yerel bir şemaya bağlanır ve boş şemayı örnek veriyle doldurur |
+| 2026-10-16 | Broker'ın uygulamalara döndüğü yanıtlar, `application` kontrolü, oturum kaydı ve zarf alanlarının `${request.*}` ile okunması uygulandı. `X-User-Agent` route header'ı olarak tanımlanabilir; `X-User-*` yasağının tek istisnası. `GET /meta/definition-rules` yanıtına `forbiddenHeaderExceptions` eklendi, `placeholders.definition` zarf yer tutucularını (`${request.uid}`, `${request.application}`, `${request.maintask}`, `${request.subtask}`) da listeler |
 | 2026-10-16 | Sözleşme güncellendi; backend'de sıradaki geliştirme turunda uygulanacak. `logResponseBody` editörde "Yanıt verisi loglansın" seçeneği oldu; açıkken yanıt verisi Elastic'e de yazılır. Broker'ın uygulamalara döndüğü yanıtlar eski broker'la aynı: `application` kontrolü ve geçersiz oturum HTTP 200 ile eski gövdeleri döner, login ve logout giriş servisinden gelir. Zarf alanları `${request.*}` ile okunur, `${user.id}` oturum kaydıyla doğrulanır. Projeler ve yetkiler tek bir yetki projesinden gelir |
 | 2026-10-13 | Backend uygulandı ve testlerden geçti; henüz bir ortama kurulmadı, yerelde `local` profiliyle çalıştırılabilir. Netleşen gövde ve yanıtlar "Gövde ve yanıt ayrıntıları" bölümünde: yetki açmada `environments`, geri almada `restoreVersion`, spec karşılaştırmasında `items` ve `specOperation`, istekten şablon, yoklama, ortam durumu ve profil önizleme. Talep listesinde öğeler `diff` ve `affectedRoutes` taşımaz, `status` virgülle çoklu değer alır; `DISABLE`/`ENABLE`'da `version` isteğe bağlı. Ön kontrollerin aksiyona göre listesi eklendi. Yeni hata kodu: `INTERNAL_ERROR` (500) |
 | 2026-10-13 | İlk sürüm: ekranlar, API sözleşmesi, alan kuralları ve hata kodları |

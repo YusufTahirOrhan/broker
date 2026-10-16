@@ -15,6 +15,7 @@ import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -28,6 +29,8 @@ import org.springframework.test.context.DynamicPropertySource;
 import com.acme.broker.core.json.Json;
 import com.acme.broker.core.logging.EventCodec;
 import com.acme.broker.core.logging.LogEvent;
+import com.acme.broker.core.session.SessionRecord;
+import com.acme.broker.core.session.SessionRecordCodec;
 import com.acme.broker.core.testing.CoreFixtures;
 import com.acme.broker.core.testing.FakeHttpServer;
 import com.acme.broker.core.testing.JsonHttp;
@@ -40,11 +43,13 @@ import com.acme.broker.runtime.support.RuntimeFixture;
  * The log gate with a Kafka that does not acknowledge: the topic does not exist and cannot be auto-created, so every
  * send fails within {@code max.block.ms}.
  */
+@Tag("docker")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "broker.kafka.topic=broker.logs.gate",
         "broker.kafka.warmup=false",
         "broker.kafka.ack-timeout=1s",
-        "broker.spool.resend-interval=1h"
+        "broker.spool.resend-interval=1h",
+        "broker.applications.mode=off"
 })
 @EmbeddedKafka(partitions = 1, bootstrapServersProperty = "spring.kafka.bootstrap-servers",
         brokerProperties = "auto.create.topics.enable=false")
@@ -86,13 +91,14 @@ class LogGateTest {
         RuntimeFixture.route("order-service", "add_order_note", "POST", "/orders/{id}/notes", List.of("ORDER_WRITE"),
                 false, null, CoreFixtures.ADD_ORDER_NOTE);
         cache.reload();
-        redis.opsForValue().set("broker:session:gate-token", "{\"userId\": \"u1\", \"permissions\": [\"ORDER_WRITE\"]}");
+        redis.opsForValue().set(SessionRecordCodec.DEFAULT.key("u1"), SessionRecordCodec.DEFAULT.write(
+                new SessionRecord("u1", "gate-token", "10.0.0.1", "agent", List.of("ORDER_WRITE"))));
         backend.json("POST", "/orders/1/notes", 201, "{}");
 
         JsonHttp.Response response = new JsonHttp("http://localhost:" + port).send("POST", "/broker", """
                 {"maintask": "order-service", "subtask": "add_order_note", "siparisNo": 1, "notMetni": "x",
-                 "password": "gizli"}
-                """, Map.of("X-Token", "gate-token"));
+                 "password": "gizli", "uid": "u1"}
+                """, Map.of("X-Token", "gate-token", "X-Clientip", "10.0.0.1", "X-User-Agent", "agent"));
 
         assertThat(response.status()).isEqualTo(500);
         assertThat(response.json()).isEqualTo(Json.parse("{\"result\": false}"));

@@ -1,0 +1,6 @@
+# DEV ortamı: OpenAPI ve Swagger açık (diğer ortamlarda kapalı)
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true

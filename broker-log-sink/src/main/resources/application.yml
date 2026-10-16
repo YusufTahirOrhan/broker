@@ -43,8 +43,8 @@ broker:
       enabled: ${BROKER_SINK_ELASTIC_ENABLED:true}
       url: ${BROKER_ELASTIC_URL:http://localhost:9200}
       index-prefix: requests_
-      # Eski kodun ay hesabındaki saat dilimi; teyit edilmeli
-      index-zone: ${BROKER_ELASTIC_INDEX_ZONE:UTC}
+      # Aylık indeksin ayı bu saat diliminde hesaplanır; eski broker sunucunun saat dilimini (TSİ) kullanıyor
+      index-zone: ${BROKER_ELASTIC_INDEX_ZONE:Europe/Istanbul}
       api-key: ${BROKER_ELASTIC_API_KEY:}
       username: ${BROKER_ELASTIC_USERNAME:}
       password: ${BROKER_ELASTIC_PASSWORD:}

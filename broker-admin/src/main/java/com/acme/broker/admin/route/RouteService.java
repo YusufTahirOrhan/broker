@@ -281,10 +281,21 @@ public class RouteService {
                 .toList();
     }
 
-    /** {@code /routes/preview} and {@code /projects/{id}/test}: an unsaved definition and a sample body. */
+    /**
+     * {@code /routes/preview} and {@code /projects/{id}/test}: an unsaved definition and a sample body.
+     * {@code permissions} and {@code foreignPermissions} are the form's lists; the trial user is taken to hold them, so
+     * {@code ${user.permission}} is the first of them.
+     */
     public record Trial(Long projectId, String environment, String httpMethod, String pathTemplate,
                         Long responseProfileId, JsonNode definition, JsonNode sample, Map<String, String> headers,
-                        String userId) {
+                        String userId, List<String> permissions, List<String> foreignPermissions) {
+
+        /** What {@code ${user.permission}} stands for in a preview or test call. */
+        public String permission() {
+            List<String> all = new ArrayList<>(permissions == null ? List.of() : permissions);
+            all.addAll(foreignPermissions == null ? List.of() : foreignPermissions);
+            return RequestContext.firstPermission(all, all);
+        }
     }
 
     public record Preview(TestCallResult.RequestView request, List<FieldError> errors) {
@@ -321,7 +332,8 @@ public class RouteService {
             BackendRequest request = BackendRequestBuilder.build(HttpMethodName.parse(trial.httpMethod()).orElseThrow(),
                     PathTemplate.parse(trial.pathTemplate()), definition, baseUrl,
                     new RequestContext((ObjectNode) trial.sample(), validated.effectiveBody(), headers::get, readable,
-                            trial.userId() == null ? user : trial.userId(), "00000000-0000-7000-8000-000000000000"));
+                            trial.userId() == null ? user : trial.userId(), trial.permission(),
+                            "00000000-0000-7000-8000-000000000000"));
             return new Preview(TestCallResult.RequestView.of(request), List.of());
         } catch (RequestBuildException e) {
             return new Preview(null, List.of(e.error()));

@@ -12,12 +12,43 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
- * History rows hold {@code to_jsonb(route_definition)}: snake_case columns. Screens, comparisons and promotions use
- * the camelCase view of what a version is, without bookkeeping columns.
+ * History rows hold the whole route row as {@link #stored} writes it: snake_case column names, with the permission
+ * lists as arrays (the shape PostgreSQL's {@code to_jsonb} gave, so earlier snapshots read the same). Screens,
+ * comparisons and promotions use the camelCase view of what a version is, without bookkeeping columns.
  */
 public final class RouteSnapshots {
 
     private RouteSnapshots() {
+    }
+
+    /** The snapshot of the row as it is after a change. */
+    public static ObjectNode stored(RouteRepository.Row row) {
+        ObjectNode stored = Json.object();
+        stored.put("id", row.id());
+        stored.put("project_id", row.projectId());
+        stored.put("subtask", row.subtask());
+        stored.put("http_method", row.httpMethod());
+        stored.put("path_template", row.pathTemplate());
+        ArrayNode permissions = stored.putArray("permissions");
+        row.permissions().forEach(permissions::add);
+        ArrayNode foreign = stored.putArray("foreign_permissions");
+        row.foreignPermissions().forEach(foreign::add);
+        stored.put("anonymous", row.anonymous());
+        if (row.responseProfileId() == null) {
+            stored.putNull("response_profile_id");
+        } else {
+            stored.put("response_profile_id", row.responseProfileId());
+        }
+        stored.set("definition", row.definition());
+        stored.set("spec_operation", row.specOperation() == null ? Json.nullNode() : row.specOperation());
+        stored.put("spec_fingerprint", row.specFingerprint());
+        stored.put("status", row.status());
+        stored.put("version", row.version());
+        stored.put("created_by", row.createdBy());
+        stored.put("created_at", row.createdAt().toString());
+        stored.put("updated_by", row.updatedBy());
+        stored.put("updated_at", row.updatedAt().toString());
+        return stored;
     }
 
     public static ObjectNode view(JsonNode stored) {

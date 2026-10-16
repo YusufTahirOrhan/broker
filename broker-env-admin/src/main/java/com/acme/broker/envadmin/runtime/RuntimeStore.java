@@ -1,14 +1,16 @@
 package com.acme.broker.envadmin.runtime;
 
-import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.time.Instant;
 import java.time.OffsetDateTime;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.IntSupplier;
 
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.jdbc.core.SqlParameterValue;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -18,18 +20,11 @@ import com.acme.broker.core.json.Json;
 import tools.jackson.databind.JsonNode;
 
 /**
- * The runtime DB as the Admin API writes it. Every write is the single statement of the design document: the row is
- * upserted only when the incoming {@code promotion_id} is newer, and the config version moves only when a row did.
+ * The runtime DB as the Admin API writes it. Every write is one transaction: the row is merged only when the incoming
+ * {@code promotion_id} is newer, and the config version moves only when a row did.
  */
 @Repository
 public class RuntimeStore {
-
-    private static final String BUMP_VERSION = """
-            UPDATE broker_runtime.runtime_config_version
-               SET version = version + 1, updated_at = now()
-             WHERE id = 1 AND EXISTS (SELECT 1 FROM applied)
-            RETURNING version
-            """;
 
     private final JdbcClient jdbc;
     private final TransactionTemplate transactions;
@@ -73,27 +68,21 @@ public class RuntimeStore {
                 return new ApplyResult.Missing("PROFILE_NOT_FOUND",
                         "Yanıt profili bu ortamda yok: " + route.responseProfile() + "; önce profil taşınmalı");
             }
-            Optional<Long> version = jdbc.sql("""
-                            WITH applied AS (
-                                INSERT INTO broker_runtime.runtime_route AS r
-                                       (maintask, subtask, definition_id, version, http_method, path_template,
-                                        permissions, anonymous, response_profile, definition, status,
-                                        applied_by, promotion_id)
-                                VALUES (:maintask, :subtask, :definitionId, :version, :method, :path,
-                                        ARRAY(SELECT jsonb_array_elements_text(CAST(:permissions AS jsonb))),
-                                        :anonymous, :profile, CAST(:definition AS jsonb), 'ACTIVE',
-                                        :user, :promotionId)
-                                ON CONFLICT (maintask, subtask) DO UPDATE
-                                   SET definition_id = EXCLUDED.definition_id, version = EXCLUDED.version,
-                                       http_method = EXCLUDED.http_method, path_template = EXCLUDED.path_template,
-                                       permissions = EXCLUDED.permissions, anonymous = EXCLUDED.anonymous,
-                                       response_profile = EXCLUDED.response_profile, definition = EXCLUDED.definition,
-                                       status = EXCLUDED.status, applied_by = EXCLUDED.applied_by,
-                                       promotion_id = EXCLUDED.promotion_id, applied_at = now()
-                                 WHERE EXCLUDED.promotion_id > r.promotion_id
-                                RETURNING 1
-                            )
-                            """ + BUMP_VERSION)
+            Optional<Long> version = bumpIf(merge(() -> jdbc.sql("""
+                            MERGE INTO runtime_route r
+                            USING dual ON (r.maintask = :maintask AND r.subtask = :subtask)
+                             WHEN MATCHED THEN UPDATE
+                                  SET r.definition_id = :definitionId, r.version = :version, r.http_method = :method,
+                                      r.path_template = :path, r.permissions = :permissions, r.anonymous = :anonymous,
+                                      r.response_profile = :profile, r.definition = :definition, r.status = 'ACTIVE',
+                                      r.applied_by = :user, r.promotion_id = :promotionId, r.applied_at = SYSTIMESTAMP
+                                WHERE r.promotion_id < :promotionId
+                             WHEN NOT MATCHED THEN INSERT
+                                  (maintask, subtask, definition_id, version, http_method, path_template, permissions,
+                                   anonymous, response_profile, definition, status, applied_by, promotion_id)
+                                  VALUES (:maintask, :subtask, :definitionId, :version, :method, :path, :permissions,
+                                          :anonymous, :profile, :definition, 'ACTIVE', :user, :promotionId)
+                            """)
                     .param("maintask", route.maintask())
                     .param("subtask", route.subtask())
                     .param("definitionId", route.definitionId())
@@ -101,13 +90,12 @@ public class RuntimeStore {
                     .param("method", route.httpMethod())
                     .param("path", route.pathTemplate())
                     .param("permissions", Json.write(route.permissions()))
-                    .param("anonymous", route.anonymous())
+                    .param("anonymous", flag(route.anonymous()))
                     .param("profile", route.responseProfile())
-                    .param("definition", Json.write(route.definition()))
+                    .param("definition", clob(Json.write(route.definition())))
                     .param("user", route.actor())
                     .param("promotionId", route.promotionId())
-                    .query(Long.class)
-                    .optional();
+                    .update()));
             if (version.isPresent()) {
                 return new ApplyResult.Applied(version.get());
             }
@@ -118,31 +106,28 @@ public class RuntimeStore {
 
     public ApplyResult applyProfile(ProfileSnapshot profile) {
         return transactions.execute(status -> {
-            Optional<Long> version = jdbc.sql("""
-                            WITH applied AS (
-                                INSERT INTO broker_runtime.runtime_response_profile AS p
-                                       (name, profile_id, version, definition, applied_by, promotion_id)
-                                VALUES (:name, :profileId, :version, CAST(:definition AS jsonb), :user, :promotionId)
-                                ON CONFLICT (name) DO UPDATE
-                                   SET profile_id = EXCLUDED.profile_id, version = EXCLUDED.version,
-                                       definition = EXCLUDED.definition, applied_by = EXCLUDED.applied_by,
-                                       promotion_id = EXCLUDED.promotion_id, applied_at = now()
-                                 WHERE EXCLUDED.promotion_id > p.promotion_id
-                                RETURNING 1
-                            )
-                            """ + BUMP_VERSION)
+            Optional<Long> version = bumpIf(merge(() -> jdbc.sql("""
+                            MERGE INTO runtime_response_profile p
+                            USING dual ON (p.name = :name)
+                             WHEN MATCHED THEN UPDATE
+                                  SET p.profile_id = :profileId, p.version = :version, p.definition = :definition,
+                                      p.applied_by = :user, p.promotion_id = :promotionId, p.applied_at = SYSTIMESTAMP
+                                WHERE p.promotion_id < :promotionId
+                             WHEN NOT MATCHED THEN INSERT
+                                  (name, profile_id, version, definition, applied_by, promotion_id)
+                                  VALUES (:name, :profileId, :version, :definition, :user, :promotionId)
+                            """)
                     .param("name", profile.name())
                     .param("profileId", profile.profileId())
                     .param("version", profile.version())
-                    .param("definition", Json.write(profile.definition()))
+                    .param("definition", clob(Json.write(profile.definition())))
                     .param("user", profile.actor())
                     .param("promotionId", profile.promotionId())
-                    .query(Long.class)
-                    .optional();
+                    .update()));
             if (version.isPresent()) {
                 return new ApplyResult.Applied(version.get());
             }
-            long current = jdbc.sql("SELECT promotion_id FROM broker_runtime.runtime_response_profile WHERE name = :name")
+            long current = jdbc.sql("SELECT promotion_id FROM runtime_response_profile WHERE name = :name")
                     .param("name", profile.name())
                     .query(Long.class)
                     .optional()
@@ -154,21 +139,17 @@ public class RuntimeStore {
     /** Kill switch: the route stays in the table as DISABLED, so brokers drop it on their next load. */
     public ApplyResult disableRoute(String maintask, String subtask, long promotionId, String actor) {
         return transactions.execute(status -> {
-            Optional<Long> version = jdbc.sql("""
-                            WITH applied AS (
-                                UPDATE broker_runtime.runtime_route
-                                   SET status = 'DISABLED', applied_by = :user, promotion_id = :promotionId,
-                                       applied_at = now()
-                                 WHERE maintask = :maintask AND subtask = :subtask AND promotion_id < :promotionId
-                                RETURNING 1
-                            )
-                            """ + BUMP_VERSION)
+            Optional<Long> version = bumpIf(jdbc.sql("""
+                            UPDATE runtime_route
+                               SET status = 'DISABLED', applied_by = :user, promotion_id = :promotionId,
+                                   applied_at = SYSTIMESTAMP
+                             WHERE maintask = :maintask AND subtask = :subtask AND promotion_id < :promotionId
+                            """)
                     .param("maintask", maintask)
                     .param("subtask", subtask)
                     .param("promotionId", promotionId)
                     .param("user", actor)
-                    .query(Long.class)
-                    .optional();
+                    .update());
             if (version.isPresent()) {
                 return new ApplyResult.Applied(version.get());
             }
@@ -186,25 +167,57 @@ public class RuntimeStore {
      * version like a route change does. Returns the new version, or empty when nothing changed.
      */
     public Optional<Long> upsertProject(String maintask, String baseUrl, boolean enabled) {
-        return transactions.execute(status -> jdbc.sql("""
-                        WITH applied AS (
-                            INSERT INTO broker_runtime.runtime_project AS p (maintask, base_url, enabled)
-                            VALUES (:maintask, :baseUrl, :enabled)
-                            ON CONFLICT (maintask) DO UPDATE
-                               SET base_url = EXCLUDED.base_url, enabled = EXCLUDED.enabled, updated_at = now()
-                             WHERE (p.base_url, p.enabled) IS DISTINCT FROM (EXCLUDED.base_url, EXCLUDED.enabled)
-                            RETURNING 1
-                        )
-                        """ + BUMP_VERSION)
+        return transactions.execute(status -> bumpIf(merge(() -> jdbc.sql("""
+                        MERGE INTO runtime_project p
+                        USING dual ON (p.maintask = :maintask)
+                         WHEN MATCHED THEN UPDATE
+                              SET p.base_url = :baseUrl, p.enabled = :enabled, p.updated_at = SYSTIMESTAMP
+                            WHERE p.base_url <> :baseUrl OR p.enabled <> :enabled
+                         WHEN NOT MATCHED THEN INSERT (maintask, base_url, enabled)
+                              VALUES (:maintask, :baseUrl, :enabled)
+                        """)
                 .param("maintask", maintask)
                 .param("baseUrl", baseUrl)
-                .param("enabled", enabled)
-                .query(Long.class)
-                .optional());
+                .param("enabled", flag(enabled))
+                .update())));
+    }
+
+    /**
+     * Moves the config version when the write changed a row. The version row is the last lock every write takes, so
+     * concurrent writes queue on it in the same order and the version a write returns is the one it produced.
+     */
+    private Optional<Long> bumpIf(int changed) {
+        if (changed == 0) {
+            return Optional.empty();
+        }
+        jdbc.sql("UPDATE runtime_config_version SET version = version + 1, updated_at = SYSTIMESTAMP WHERE id = 1")
+                .update();
+        return Optional.of(configVersion().version());
+    }
+
+    /**
+     * Runs a MERGE once more when a concurrent insert of the same key won the race (ORA-00001): the second run sees
+     * the committed row and takes the update branch.
+     */
+    private static int merge(IntSupplier statement) {
+        try {
+            return statement.getAsInt();
+        } catch (DuplicateKeyException e) {
+            return statement.getAsInt();
+        }
+    }
+
+    private static int flag(boolean value) {
+        return value ? 1 : 0;
+    }
+
+    /** Definitions can be larger than a VARCHAR2 bind; they are bound as CLOB. */
+    private static SqlParameterValue clob(String text) {
+        return new SqlParameterValue(Types.CLOB, text);
     }
 
     public ConfigVersion configVersion() {
-        return jdbc.sql("SELECT version, updated_at FROM broker_runtime.runtime_config_version WHERE id = 1")
+        return jdbc.sql("SELECT version, updated_at FROM runtime_config_version WHERE id = 1")
                 .query((rs, row) -> new ConfigVersion(rs.getLong("version"), instant(rs, "updated_at")))
                 .single();
     }
@@ -212,7 +225,7 @@ public class RuntimeStore {
     public Optional<ProjectRow> project(String maintask) {
         return jdbc.sql("""
                         SELECT maintask, base_url, enabled, updated_at
-                          FROM broker_runtime.runtime_project WHERE maintask = :maintask
+                          FROM runtime_project WHERE maintask = :maintask
                         """)
                 .param("maintask", maintask)
                 .query(RuntimeStore::projectRow)
@@ -220,7 +233,7 @@ public class RuntimeStore {
     }
 
     public List<ProjectRow> projects() {
-        return jdbc.sql("SELECT maintask, base_url, enabled, updated_at FROM broker_runtime.runtime_project ORDER BY maintask")
+        return jdbc.sql("SELECT maintask, base_url, enabled, updated_at FROM runtime_project ORDER BY maintask")
                 .query(RuntimeStore::projectRow)
                 .list();
     }
@@ -228,7 +241,7 @@ public class RuntimeStore {
     public List<ProfileRow> profiles() {
         return jdbc.sql("""
                         SELECT name, profile_id, version, promotion_id, applied_by, applied_at
-                          FROM broker_runtime.runtime_response_profile ORDER BY name
+                          FROM runtime_response_profile ORDER BY name
                         """)
                 .query((rs, row) -> new ProfileRow(rs.getString("name"), rs.getLong("profile_id"),
                         rs.getInt("version"), rs.getLong("promotion_id"), rs.getString("applied_by"),
@@ -240,25 +253,25 @@ public class RuntimeStore {
         return jdbc.sql("""
                         SELECT maintask, subtask, definition_id, version, http_method, path_template, permissions,
                                anonymous, response_profile, status, promotion_id, applied_by, applied_at
-                          FROM broker_runtime.runtime_route ORDER BY maintask, subtask
+                          FROM runtime_route ORDER BY maintask, subtask
                         """)
                 .query((rs, row) -> new RouteRow(rs.getString("maintask"), rs.getString("subtask"),
                         rs.getLong("definition_id"), rs.getInt("version"), rs.getString("http_method"),
-                        rs.getString("path_template"), strings(rs.getArray("permissions")),
+                        rs.getString("path_template"), Json.stringList(rs.getString("permissions")),
                         rs.getBoolean("anonymous"), rs.getString("response_profile"), rs.getString("status"),
                         rs.getLong("promotion_id"), rs.getString("applied_by"), instant(rs, "applied_at")))
                 .list();
     }
 
     private boolean projectExists(String maintask) {
-        return jdbc.sql("SELECT count(*) FROM broker_runtime.runtime_project WHERE maintask = :maintask")
+        return jdbc.sql("SELECT count(*) FROM runtime_project WHERE maintask = :maintask")
                 .param("maintask", maintask)
                 .query(Long.class)
                 .single() > 0;
     }
 
     private boolean profileExists(String name) {
-        return jdbc.sql("SELECT count(*) FROM broker_runtime.runtime_response_profile WHERE name = :name")
+        return jdbc.sql("SELECT count(*) FROM runtime_response_profile WHERE name = :name")
                 .param("name", name)
                 .query(Long.class)
                 .single() > 0;
@@ -266,7 +279,7 @@ public class RuntimeStore {
 
     private Optional<Long> routePromotion(String maintask, String subtask) {
         return jdbc.sql("""
-                        SELECT promotion_id FROM broker_runtime.runtime_route
+                        SELECT promotion_id FROM runtime_route
                          WHERE maintask = :maintask AND subtask = :subtask
                         """)
                 .param("maintask", maintask)
@@ -290,9 +303,5 @@ public class RuntimeStore {
     private static Instant instant(ResultSet rs, String column) throws SQLException {
         OffsetDateTime time = rs.getObject(column, OffsetDateTime.class);
         return time == null ? null : time.toInstant();
-    }
-
-    private static List<String> strings(Array array) throws SQLException {
-        return array == null ? List.of() : Arrays.asList((String[]) array.getArray());
     }
 }

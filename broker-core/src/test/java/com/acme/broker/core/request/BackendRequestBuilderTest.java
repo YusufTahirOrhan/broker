@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 import org.junit.jupiter.api.Test;
@@ -35,6 +36,11 @@ class BackendRequestBuilderTest {
 
     private static BackendRequest build(String method, String path, String definitionJson, String bodyJson,
                                         Map<String, String> headers, String userId) {
+        return build(method, path, definitionJson, bodyJson, headers, userId, null);
+    }
+
+    private static BackendRequest build(String method, String path, String definitionJson, String bodyJson,
+                                        Map<String, String> headers, String userId, String permission) {
         RouteDefinition definition = definition(definitionJson);
         ObjectNode body = (ObjectNode) Json.parse(bodyJson);
         RequestBodyValidator.Result validated = RequestBodyValidator.validate(body, definition.request().fields());
@@ -42,7 +48,7 @@ class BackendRequestBuilderTest {
         TreeMap<String, String> caseInsensitive = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         caseInsensitive.putAll(headers);
         RequestContext context = new RequestContext(body, validated.effectiveBody(), caseInsensitive::get, READABLE,
-                userId, "0192f1c4-7a3b-7c1e-9d2f-5b8e4a1c3d20");
+                userId, permission, "0192f1c4-7a3b-7c1e-9d2f-5b8e4a1c3d20");
         return BackendRequestBuilder.build(HttpMethodName.valueOf(method), PathTemplate.parse(path), definition,
                 "http://order-service.dev.svc:8080/", context);
     }
@@ -162,11 +168,42 @@ class BackendRequestBuilderTest {
     }
 
     @Test
+    void userPermissionIsTheFirstRoutePermissionTheUserHasAndIsLeftOutWithoutOne() {
+        String definition = """
+                {"request": {"fields": [{"name": "sorgu", "type": "string", "required": true}],
+                             "headers": {"X-Perm": "${user.permission}"},
+                             "body": {"mode": "TEMPLATE", "template": {"q": "${request.sorgu}", "perm": "${user.permission}"}}}}
+                """;
+        String body = "{\"sorgu\": \"x\"}";
+
+        BackendRequest withPermission = build("POST", "/sorgu", definition, body, Map.of(), "u1", "SORGU_TEMEL");
+        assertThat(withPermission.headers().get("X-Perm")).containsExactly("SORGU_TEMEL");
+        assertThat(Json.parse(withPermission.body())).isEqualTo(Json.parse("{\"q\": \"x\", \"perm\": \"SORGU_TEMEL\"}"));
+
+        BackendRequest without = build("POST", "/sorgu", definition, body, Map.of(), null, null);
+        assertThat(without.headers()).doesNotContainKey("X-Perm");
+        assertThat(Json.parse(without.body())).isEqualTo(Json.parse("{\"q\": \"x\"}"));
+    }
+
+    @Test
+    void theFirstPermissionFollowsTheRoutesOrder() {
+        List<String> route = List.of("SORGU_TEMEL", "SORGU_ILERI", "CRM_AGENT");
+
+        assertThat(RequestContext.firstPermission(route, Set.of("SORGU_ILERI", "SORGU_TEMEL"))).isEqualTo("SORGU_TEMEL");
+        assertThat(RequestContext.firstPermission(route, Set.of("CRM_AGENT", "SORGU_ILERI"))).isEqualTo("SORGU_ILERI");
+        assertThat(RequestContext.firstPermission(route, Set.of("CRM_AGENT"))).isEqualTo("CRM_AGENT");
+        assertThat(RequestContext.firstPermission(route, Set.of("OTHER"))).isNull();
+        assertThat(RequestContext.firstPermission(route, null)).isNull();
+        assertThat(RequestContext.firstPermission(List.of(), Set.of("A"))).isNull();
+    }
+
+    @Test
     void missingPathValueFailsTheBuild() {
         RouteDefinition definition = definition("""
                 {"request": {"pathVariables": {"id": "${request.id}"}}}
                 """);
-        RequestContext context = new RequestContext(Json.object(), Json.object(), name -> null, READABLE, null, "r");
+        RequestContext context = new RequestContext(Json.object(), Json.object(), name -> null, READABLE, null, null,
+                "r");
         assertThatThrownBy(() -> BackendRequestBuilder.build(HttpMethodName.GET, PathTemplate.parse("/o/{id}"),
                 definition, "http://x", context)).isInstanceOf(RequestBuildException.class);
     }

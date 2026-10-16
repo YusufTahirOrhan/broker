@@ -13,10 +13,11 @@ import tools.jackson.databind.JsonNode;
  * @param sample          the frontend body, envelope fields included or not
  * @param headers         frontend request headers that {@code ${header.*}} may read
  * @param userId          the user {@code ${user.id}} and {@code X-uid} stand for
+ * @param permission      what {@code ${user.permission}} stands for, or null
  */
 public record TestCallRequest(String maintask, String baseUrl, String httpMethod, String pathTemplate,
                               JsonNode definition, Profile responseProfile, JsonNode sample,
-                              Map<String, String> headers, String userId, String actor) {
+                              Map<String, String> headers, String userId, String permission, String actor) {
 
     /** Path of the broker's internal endpoint; it exists only where test calls are enabled. */
     public static final String PATH = "/internal/v1/test";
@@ -28,6 +29,6 @@ public record TestCallRequest(String maintask, String baseUrl, String httpMethod
 
     public TestCallRequest withBaseUrl(String url) {
         return new TestCallRequest(maintask, url, httpMethod, pathTemplate, definition, responseProfile, sample,
-                headers, userId, actor);
+                headers, userId, permission, actor);
     }
 }

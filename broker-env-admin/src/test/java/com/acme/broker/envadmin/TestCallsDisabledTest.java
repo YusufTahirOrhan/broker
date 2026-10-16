@@ -2,6 +2,7 @@ package com.acme.broker.envadmin;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -12,6 +13,7 @@ import com.acme.broker.core.testing.JsonHttp;
 import com.acme.broker.envadmin.testing.RuntimeContainers;
 
 /** PROD: the Admin API refuses test calls; a POST there would create real records. */
+@Tag("docker")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "server.ssl.enabled=false",
         "management.server.port=0",

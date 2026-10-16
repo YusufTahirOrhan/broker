@@ -8,10 +8,11 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
 import com.acme.broker.admin.db.Rows;
-import com.acme.broker.core.json.Json;
 
 import tools.jackson.databind.JsonNode;
 
@@ -22,13 +23,15 @@ public class PromotionRepository {
     private static final String SELECT = """
             SELECT pr.id, pr.definition_id, pr.version, pr.profile_id, pr.profile_version, pr.source_env,
                    pr.target_env, pr.action, pr.status, pr.requested_by, pr.requested_at, pr.reason, pr.decided_by,
-                   pr.decided_at, pr.decision_note, pr.probe_status, pr.probe_detail::text AS probe_detail,
+                   pr.decided_at, pr.decision_note, pr.probe_status, pr.probe_detail,
                    pr.config_version, pr.applied_at, pr.failure_reason,
-                   coalesce(p.maintask || ' / ' || r.subtask, rp.name) AS subject_name, r.project_id
+                   CASE WHEN pr.definition_id IS NOT NULL THEN p.maintask || ' / ' || r.subtask ELSE pf.name END
+                       AS subject_name,
+                   r.project_id
               FROM promotion_request pr
               LEFT JOIN route_definition r ON r.id = pr.definition_id
               LEFT JOIN project p ON p.id = r.project_id
-              LEFT JOIN response_profile rp ON rp.id = pr.profile_id
+              LEFT JOIN response_profile pf ON pf.id = pr.profile_id
             """;
 
     private final JdbcClient jdbc;
@@ -57,8 +60,8 @@ public class PromotionRepository {
     }
 
     private static Row row(ResultSet rs, int index) throws SQLException {
-        return new Row(rs.getLong("id"), Rows.longOrNull(rs, "definition_id"), (Integer) rs.getObject("version"),
-                Rows.longOrNull(rs, "profile_id"), (Integer) rs.getObject("profile_version"), rs.getString("source_env"),
+        return new Row(rs.getLong("id"), Rows.longOrNull(rs, "definition_id"), Rows.intOrNull(rs, "version"),
+                Rows.longOrNull(rs, "profile_id"), Rows.intOrNull(rs, "profile_version"), rs.getString("source_env"),
                 rs.getString("target_env"), rs.getString("action"), rs.getString("status"),
                 rs.getString("requested_by"), Rows.instant(rs, "requested_at"), rs.getString("reason"),
                 rs.getString("decided_by"), Rows.instant(rs, "decided_at"), rs.getString("decision_note"),
@@ -69,12 +72,12 @@ public class PromotionRepository {
 
     public long insert(boolean route, long subjectId, int version, String sourceEnv, String targetEnv, String action,
                        String status, String user, String reason) {
-        return jdbc.sql("""
+        KeyHolder keys = new GeneratedKeyHolder();
+        jdbc.sql("""
                         INSERT INTO promotion_request (definition_id, version, profile_id, profile_version, source_env,
                                                        target_env, action, status, requested_by, reason)
                         VALUES (:definition, :version, :profile, :profileVersion, :source, :target, :action, :status,
                                 :user, :reason)
-                        RETURNING id
                         """)
                 .param("definition", route ? subjectId : null)
                 .param("version", route ? version : null)
@@ -85,8 +88,9 @@ public class PromotionRepository {
                 .param("action", action)
                 .param("status", status)
                 .param("user", user)
-                .param("reason", reason)
-                .query(Long.class).single();
+                .param("reason", Rows.clob(reason))
+                .update(keys, "id");
+        return Rows.key(keys);
     }
 
     public Optional<Row> find(long id) {
@@ -97,7 +101,7 @@ public class PromotionRepository {
     }
 
     public List<Row> page(Filter filter, int page, int size) {
-        return jdbc.sql(SELECT + where(filter) + " ORDER BY pr.requested_at DESC, pr.id DESC LIMIT :size OFFSET :offset")
+        return jdbc.sql(SELECT + where(filter) + " ORDER BY pr.requested_at DESC, pr.id DESC OFFSET :offset ROWS FETCH NEXT :size ROWS ONLY")
                 .params(parameters(filter))
                 .param("size", size)
                 .param("offset", (long) page * size)
@@ -161,31 +165,31 @@ public class PromotionRepository {
     public boolean decide(long id, String status, String user, String note) {
         return jdbc.sql("""
                         UPDATE promotion_request
-                           SET status = :status, decided_by = :user, decided_at = now(), decision_note = :note
+                           SET status = :status, decided_by = :user, decided_at = SYSTIMESTAMP, decision_note = :note
                          WHERE id = :id AND status = 'PENDING_APPROVAL'
                         """)
                 .param("id", id)
                 .param("status", status)
                 .param("user", user)
-                .param("note", note)
+                .param("note", Rows.clob(note))
                 .update() == 1;
     }
 
     public void probed(long id, String result, JsonNode detail) {
         jdbc.sql("""
-                        UPDATE promotion_request SET probe_status = :result, probe_detail = CAST(:detail AS jsonb)
+                        UPDATE promotion_request SET probe_status = :result, probe_detail = :detail
                          WHERE id = :id
                         """)
                 .param("id", id)
                 .param("result", result)
-                .param("detail", detail == null ? null : Json.write(detail))
+                .param("detail", Rows.clob(detail))
                 .update();
     }
 
     public void applied(long id, long configVersion) {
         jdbc.sql("""
                         UPDATE promotion_request
-                           SET status = 'APPLIED', config_version = :version, applied_at = now(), failure_reason = NULL
+                           SET status = 'APPLIED', config_version = :version, applied_at = SYSTIMESTAMP, failure_reason = NULL
                          WHERE id = :id
                         """)
                 .param("id", id)
@@ -196,7 +200,7 @@ public class PromotionRepository {
     public void failed(long id, String reason) {
         jdbc.sql("UPDATE promotion_request SET status = 'FAILED', failure_reason = :reason WHERE id = :id")
                 .param("id", id)
-                .param("reason", reason)
+                .param("reason", Rows.clob(reason))
                 .update();
     }
 
@@ -204,7 +208,7 @@ public class PromotionRepository {
     public void unanswered(long id, String reason) {
         jdbc.sql("UPDATE promotion_request SET failure_reason = :reason WHERE id = :id")
                 .param("id", id)
-                .param("reason", reason)
+                .param("reason", Rows.clob(reason))
                 .update();
     }
 

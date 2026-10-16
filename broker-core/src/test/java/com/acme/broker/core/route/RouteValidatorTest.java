@@ -49,7 +49,8 @@ class RouteValidatorTest {
     @Test
     void identityHeadersCannotBeDefined() {
         String definition = """
-                {"request": {"headers": {"Authorization": "x", "X-User-Id": "${user.id}", "X-uid": "1", "X-Channel": "WEB"}}}
+                {"request": {"headers": {"Authorization": "x", "X-User-Id": "${user.id}", "X-uid": "1", "X-Channel": "WEB",
+                                         "X-User-Agent": "${header.X-Clientip}"}}}
                 """;
         assertThat(validate("GET", "/a", definition)).extracting(FieldError::field).containsExactlyInAnyOrder(
                 "definition.request.headers.Authorization", "definition.request.headers.X-User-Id",
@@ -82,12 +83,28 @@ class RouteValidatorTest {
                 {"request": {"fields": [{"name": "adres", "type": "object", "required": true}],
                              "queryParams": {"il": "${request.adres.il}", "x": "${request.yok}",
                                              "lang": "${header.Accept-Language}", "secret": "${header.X-Token}",
-                                             "who": "${user.name}", "status": "${backend.status}"}}}
+                                             "who": "${user.name}", "status": "${backend.status}",
+                                             "perm": "${user.permission}"}}}
                 """;
         List<FieldError> errors = validate("GET", "/a", definition);
         assertThat(errors).extracting(FieldError::field).containsExactlyInAnyOrder(
                 "definition.request.queryParams.x", "definition.request.queryParams.secret",
                 "definition.request.queryParams.who", "definition.request.queryParams.status");
+    }
+
+    @Test
+    void envelopeFieldsAreReadWithoutAFieldDefinitionButNotInThePath() {
+        String definition = """
+                {"request": {"fields": [{"name": "password", "type": "string", "required": true}],
+                             "pathVariables": {"id": "${request.uid}"},
+                             "headers": {"X-App": "${request.application}", "X-Task": "${request.maintask}/${request.subtask}"},
+                             "body": {"mode": "TEMPLATE",
+                                      "template": {"uid": "${request.uid}", "password": "${request.password}"}}}}
+                """;
+        assertThat(validate("POST", "/login/{id}", definition)).extracting(FieldError::field)
+                .containsExactly("definition.request.pathVariables.id");
+        assertThat(validate("POST", "/login", definition.replace("\"pathVariables\": {\"id\": \"${request.uid}\"},", "")))
+                .isEmpty();
     }
 
     @Test

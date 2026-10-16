@@ -125,6 +125,36 @@ class RoutesAndProfilesTest extends AdminTestBase {
         assertThat(request.get("headers").get("Accept-Language").stringValue()).isEqualTo("tr-TR");
         assertThat(request.get("body").get("authorId").stringValue()).isEqualTo("editor");
 
+        // the login service's route: envelope fields need no field definition, X-User-Agent is passed on
+        JsonNode login = post("editor", "/routes/preview", """
+                {"projectId": %d, "httpMethod": "POST", "pathTemplate": "/login",
+                 "definition": {"request": {"fields": [{"name": "password", "type": "string", "required": true}],
+                                            "headers": {"X-Clientip": "${header.X-Clientip}",
+                                                        "X-User-Agent": "${header.X-User-Agent}"},
+                                            "body": {"mode": "TEMPLATE",
+                                                     "template": {"uid": "${request.uid}", "password": "${request.password}"}}}},
+                 "sample": {"maintask": "giris", "subtask": "login", "uid": "u42", "password": "p4ss"},
+                 "headers": {"X-Clientip": "10.0.0.1", "X-User-Agent": "agent"}}
+                """.formatted(projectId)).json();
+        assertThat(login.get("errors")).isEmpty();
+        assertThat(login.get("request").get("body")).isEqualTo(Json.parse("{\"uid\": \"u42\", \"password\": \"p4ss\"}"));
+        assertThat(login.get("request").get("headers").get("X-User-Agent").stringValue()).isEqualTo("agent");
+
+        // ${user.permission}: the preview user holds the form's permissions, own ones first
+        String permissionPreview = """
+                {"projectId": %d, "httpMethod": "GET", "pathTemplate": "/sorgu",
+                 "definition": {"request": {"headers": {"X-Perm": "${user.permission}"}}},
+                 "sample": {}, %s}
+                """;
+        assertThat(post("editor", "/routes/preview", permissionPreview.formatted(projectId,
+                "\"permissions\": [\"ORDER_READ\", \"ORDER_WRITE\"], \"foreignPermissions\": [\"CRM_AGENT\"]")).json()
+                .at("/request/headers/X-Perm").stringValue()).isEqualTo("ORDER_READ");
+        assertThat(post("editor", "/routes/preview", permissionPreview.formatted(projectId,
+                "\"foreignPermissions\": [\"CRM_AGENT\"]")).json().at("/request/headers/X-Perm").stringValue())
+                .isEqualTo("CRM_AGENT");
+        assertThat(post("editor", "/routes/preview", permissionPreview.formatted(projectId, "\"userId\": \"x\""))
+                .json().at("/request/headers").has("X-Perm")).isFalse();
+
         JsonNode invalid = post("editor", "/routes/preview", """
                 {"projectId": %d, "httpMethod": "POST", "pathTemplate": "/orders/{id}/notes", "definition": %s,
                  "sample": {"notMetni": 5}}

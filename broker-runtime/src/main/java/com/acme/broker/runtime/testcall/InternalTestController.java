@@ -125,7 +125,7 @@ public class InternalTestController {
             request = BackendRequestBuilder.build(HttpMethodName.parse(call.httpMethod()).orElseThrow(),
                     PathTemplate.parse(call.pathTemplate()), definition, call.baseUrl(),
                     new RequestContext(sample, validated.effectiveBody(), headers::get, readable, call.userId(),
-                            requestId));
+                            call.permission(), requestId));
         } catch (RequestBuildException e) {
             return invalid(List.of(e.error()));
         }

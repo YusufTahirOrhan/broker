@@ -1,8 +1,8 @@
 package com.acme.broker.runtime.route;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 import com.acme.broker.core.response.ResponseProfile;
 import com.acme.broker.core.route.HttpMethodName;
@@ -51,7 +51,8 @@ public final class RouteCompiler {
             return new Compiled.Broken<>(describe(errors));
         }
         return new Compiled.Ok<>(new Route(maintask, subtask, version, HttpMethodName.parse(httpMethod).orElseThrow(),
-                PathTemplate.parse(pathTemplate), permissions == null ? Set.of() : Set.copyOf(permissions), anonymous,
+                PathTemplate.parse(pathTemplate),
+                permissions == null ? List.of() : List.copyOf(new LinkedHashSet<>(permissions)), anonymous,
                 profile, RouteDefinitionParser.parse(definition).definition(), baseUrl, skipPermissionCheck));
     }
 

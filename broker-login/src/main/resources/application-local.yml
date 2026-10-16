@@ -1,0 +1,21 @@
+# Geliştiricinin makinesi: LDAP ve Koordinatör yerine sabit kullanıcılar (şifre = kullanıcı adı) ve sabit yetkiler.
+# BROKER_REDIS_* ile DEV Redis'e bağlanır ama DEV'in ortak anahtarlarına yazmaz: oturumlar ve application listesi
+# yalnızca yerel anahtarlarda. Yerel broker bu oturumları BROKER_SESSION_KEY_PREFIX=local: ile okur.
+# DEV'in LDAP'ı ya da Koordinatör'ü denenecekse: LOGIN_LDAP_MODE=bind + LOGIN_LDAP_URLS, KOORDINATOR_MODE=http +
+# KOORDINATOR_URL
+login:
+  ldap:
+    mode: static
+    users:
+      dev.ali: dev.ali
+      dev.ayse: dev.ayse
+  session:
+    key-pattern: "local:user:session:{uid}"
+  applications:
+    key: "broker:applications:local"
+  koordinator-secret: local-koordinator-secret
+
+koordinator:
+  mode: ${KOORDINATOR_MODE:static}
+  static-permissions: [ORDER_READ, ORDER_WRITE, LOGPROJECT_TEMEL]
+  static-projects: [web, mobil]

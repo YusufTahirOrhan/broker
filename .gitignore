@@ -7,3 +7,4 @@ target/
 .DS_Store
 broker-local.json
 /var/
+local.env

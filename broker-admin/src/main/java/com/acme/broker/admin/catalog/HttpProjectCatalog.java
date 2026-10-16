@@ -14,22 +14,25 @@ import java.util.Optional;
 
 import org.springframework.http.HttpStatus;
 
+import com.acme.broker.admin.config.KoordinatorProperties;
 import com.acme.broker.admin.web.ApiException;
 import com.acme.broker.core.json.Json;
 
 import tools.jackson.databind.JsonNode;
 
 /**
- * Assumed API, to be confirmed with the project service: {@code GET /projects?query=} → {@code [{"id", "name"}]} and
- * {@code GET /projects/{id}} → {@code {"id", "name"}} or 404.
+ * Projects from the Koordinatör. Assumed API until its real one arrives: {@code GET /projects?query=} →
+ * {@code [{"id", "code", "name"}]} and {@code GET /projects/{id}} → {@code {"id", "code", "name"}} or 404.
  */
 public class HttpProjectCatalog implements ProjectCatalog {
 
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
     private final String url;
+    private final KoordinatorProperties koordinator;
 
-    public HttpProjectCatalog(String url) {
+    public HttpProjectCatalog(String url, KoordinatorProperties koordinator) {
         this.url = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
+        this.koordinator = koordinator;
     }
 
     @Override
@@ -65,8 +68,8 @@ public class HttpProjectCatalog implements ProjectCatalog {
     }
 
     private HttpResponse<byte[]> get(String path) {
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url + path)).timeout(Duration.ofSeconds(10)).GET()
-                .header("Accept", "application/json").build();
+        HttpRequest request = koordinator.authorize(HttpRequest.newBuilder(URI.create(url + path))
+                .timeout(Duration.ofSeconds(10)).GET().header("Accept", "application/json")).build();
         try {
             return client.send(request, HttpResponse.BodyHandlers.ofByteArray());
         } catch (IOException e) {

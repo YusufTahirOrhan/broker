@@ -22,14 +22,15 @@ public record SinkProperties(String topic, String dlqTopic, Duration retryInterv
     }
 
     /**
-     * @param indexZone the time zone the old broker used to pick {@code requests_yyyy-MM}; to be confirmed from its code
+     * @param indexZone the time zone of the month in {@code requests_yyyy-MM}. The old broker formats it with
+     *                  {@code new SimpleDateFormat("yyyy-MM")}, in the server's zone; its servers run in Turkish time
      * @param apiKey    sent as {@code Authorization: ApiKey ...}; else basic auth when a username is set
      */
     public record Elastic(boolean enabled, String url, String indexPrefix, ZoneId indexZone, String apiKey,
                           String username, String password, Duration timeout, Integer retryOnConflict) {
         public Elastic {
             indexPrefix = indexPrefix == null ? "requests_" : indexPrefix;
-            indexZone = indexZone == null ? ZoneId.of("UTC") : indexZone;
+            indexZone = indexZone == null ? ZoneId.of("Europe/Istanbul") : indexZone;
             timeout = timeout == null ? Duration.ofSeconds(30) : timeout;
             retryOnConflict = retryOnConflict == null ? 3 : retryOnConflict;
         }

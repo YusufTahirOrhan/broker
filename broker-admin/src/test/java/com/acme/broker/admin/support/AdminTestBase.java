@@ -5,21 +5,21 @@ import java.util.Base64;
 import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.junit.jupiter.api.Tag;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import com.acme.broker.core.testing.JsonHttp;
 
 /**
  * The central admin with the {@code local} profile (HTTP Basic, in-memory project and authorization services),
- * PostgreSQL in a container and the environments faked by {@link FakeEnvironments}.
+ * Oracle in a container ({@link CentralDatabase}) and the environments faked by {@link FakeEnvironments}.
  */
+@Tag("docker")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "broker.admin.catalog.projects.P-100=Sipariş Servisi",
         "broker.admin.catalog.projects.P-200=Log Projesi",
@@ -27,23 +27,17 @@ import com.acme.broker.core.testing.JsonHttp;
         "broker.admin.catalog.projects.P-400=İnsan Kaynakları",
         "broker.admin.authorization.permissions.DEV=ORDER_READ,ORDER_WRITE,LOGPROJECT_TEMEL,CRM_AGENT",
         "broker.admin.authorization.permissions.TEST=ORDER_READ,ORDER_WRITE,LOGPROJECT_TEMEL,CRM_AGENT",
-        "broker.admin.authorization.permissions.PROD=ORDER_READ,ORDER_WRITE,CRM_AGENT"
+        "broker.admin.authorization.permissions.PROD=ORDER_READ,ORDER_WRITE,CRM_AGENT",
+        "broker.admin.local.seed=false"
 })
 @ActiveProfiles("local")
 public abstract class AdminTestBase {
 
-    public static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
     public static final FakeEnvironments ENVIRONMENTS = new FakeEnvironments();
-
-    static {
-        POSTGRES.start();
-    }
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", POSTGRES::getUsername);
-        registry.add("spring.datasource.password", POSTGRES::getPassword);
+        CentralDatabase.register(registry);
         registry.add("spring.flyway.placeholders.dev_admin_api_url", () -> ENVIRONMENTS.url("dev"));
         registry.add("spring.flyway.placeholders.test_admin_api_url", () -> ENVIRONMENTS.url("test"));
         registry.add("spring.flyway.placeholders.prod_admin_api_url", () -> ENVIRONMENTS.url("prod"));
@@ -52,8 +46,8 @@ public abstract class AdminTestBase {
     @LocalServerPort
     protected int port;
 
-    @Autowired
-    protected JdbcClient jdbc;
+    /** The schema owner's connection; the application's user may not write everything a test sets up. */
+    protected final JdbcClient jdbc = CentralDatabase.owner();
 
     protected JsonHttp http;
 
@@ -61,12 +55,7 @@ public abstract class AdminTestBase {
     void cleanDatabase() {
         http = new JsonHttp("http://localhost:" + port);
         ENVIRONMENTS.reset();
-        // history tables are append-only even for their owner; a test database starts over by truncating
-        jdbc.sql("""
-                TRUNCATE promotion_request, route_deployment, response_profile_deployment, route_definition_history,
-                         route_definition, project_environment, project, response_profile_history, response_profile
-                         RESTART IDENTITY CASCADE
-                """).update();
+        CentralDatabase.reset();
     }
 
     protected JsonHttp.Response as(String user, String method, String path, String json) {

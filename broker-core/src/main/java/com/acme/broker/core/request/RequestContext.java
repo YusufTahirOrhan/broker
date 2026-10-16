@@ -1,5 +1,7 @@
 package com.acme.broker.core.request;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.function.Function;
 
 import com.acme.broker.core.json.Json;
@@ -18,9 +20,28 @@ import tools.jackson.databind.node.ObjectNode;
  * @param headerLookup  case-insensitive lookup of the frontend request's headers
  * @param readable      which headers {@code ${header.*}} may read
  * @param userId        user of the verified session, null for anonymous calls without a session
+ * @param permission    {@code ${user.permission}}: the first of the route's permissions the user has
+ *                      ({@link #firstPermission}); null without a session or without such a permission
  */
 public record RequestContext(ObjectNode originalBody, ObjectNode effectiveBody, Function<String, String> headerLookup,
-                             RouteValidator.Context readable, String userId, String requestId) {
+                             RouteValidator.Context readable, String userId, String permission, String requestId) {
+
+    /**
+     * The first of {@code routePermissions} (the route's own permissions, then the ones added from other projects, in
+     * the definition's order) that the user has; null when none. The legacy broker picked {@code perm} for
+     * {@code sorgu} this way: {@code SORGU_TEMEL} first, then {@code SORGU_ILERI}.
+     */
+    public static String firstPermission(List<String> routePermissions, Collection<String> userPermissions) {
+        if (routePermissions == null || userPermissions == null) {
+            return null;
+        }
+        for (String permission : routePermissions) {
+            if (userPermissions.contains(permission)) {
+                return permission;
+            }
+        }
+        return null;
+    }
 
     public Resolver resolver() {
         return placeholder -> switch (placeholder.root()) {
@@ -28,11 +49,19 @@ public record RequestContext(ObjectNode originalBody, ObjectNode effectiveBody, 
                     ? Json.missing()
                     : RequestBodyValidator.find(effectiveBody, placeholder.path());
             case Placeholder.HEADER -> header(placeholder.path());
-            case Placeholder.USER -> "id".equals(placeholder.path()) && userId != null
-                    ? Json.string(userId) : Json.missing();
+            case Placeholder.USER -> user(placeholder.path());
             case Placeholder.REQUEST_ID -> Json.string(requestId);
             default -> Json.missing();
         };
+    }
+
+    private JsonNode user(String field) {
+        String value = switch (field) {
+            case "id" -> userId;
+            case "permission" -> permission;
+            default -> null;
+        };
+        return value == null ? Json.missing() : Json.string(value);
     }
 
     private JsonNode header(String name) {

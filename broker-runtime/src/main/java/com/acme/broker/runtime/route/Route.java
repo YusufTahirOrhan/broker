@@ -1,5 +1,6 @@
 package com.acme.broker.runtime.route;
 
+import java.util.List;
 import java.util.Set;
 
 import com.acme.broker.core.route.HttpMethodName;
@@ -10,11 +11,13 @@ import com.acme.broker.core.route.RouteDefinition;
  * A route ready to serve: parsed once when the snapshot is loaded. {@code maintask} and {@code subtask} are the
  * registered spelling; metrics and log events use it.
  *
+ * @param permissions         the route's own permissions, then those added from other projects, in the definition's
+ *                            order; {@code ${user.permission}} is the first one the user has
  * @param profile             null when the backend response is returned as is
  * @param skipPermissionCheck only for local override routes, when the developer asked for it
  */
 public record Route(String maintask, String subtask, int version, HttpMethodName method, PathTemplate pathTemplate,
-                    Set<String> permissions, boolean anonymous, CompiledProfile profile, RouteDefinition definition,
+                    List<String> permissions, boolean anonymous, CompiledProfile profile, RouteDefinition definition,
                     String baseUrl, boolean skipPermissionCheck) {
 
     public Route withBaseUrl(String url) {

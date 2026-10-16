@@ -7,20 +7,22 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
 import com.acme.broker.admin.db.Rows;
 import com.acme.broker.core.json.Json;
 
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /** {@code response_profile}, its append-only history and its deployments. */
 @Repository
 public class ProfileRepository {
 
     private static final String COLUMNS = """
-            id, name, description, definition::text AS definition, version, created_by, created_at, updated_by,
-            updated_at""";
+            id, name, description, definition, version, created_by, created_at, updated_by, updated_at""";
 
     private final JdbcClient jdbc;
 
@@ -64,16 +66,17 @@ public class ProfileRepository {
     }
 
     public long insert(String name, String description, JsonNode definition, String user, String comment) {
-        long id = jdbc.sql("""
+        KeyHolder keys = new GeneratedKeyHolder();
+        jdbc.sql("""
                         INSERT INTO response_profile (name, description, definition, created_by, updated_by)
-                        VALUES (:name, :description, CAST(:definition AS jsonb), :user, :user)
-                        RETURNING id
+                        VALUES (:name, :description, :definition, :user, :user)
                         """)
                 .param("name", name)
-                .param("description", description)
-                .param("definition", Json.write(definition))
+                .param("description", Rows.clob(description))
+                .param("definition", Rows.clob(definition))
                 .param("user", user)
-                .query(Long.class).single();
+                .update(keys, "id");
+        long id = Rows.key(keys);
         history(id, "CREATE", comment);
         return id;
     }
@@ -81,38 +84,55 @@ public class ProfileRepository {
     /** Writes a new version; empty when {@code expectedVersion} is no longer current. */
     public Optional<Integer> update(long id, int expectedVersion, String description, JsonNode definition, String user,
                                     String action, String comment) {
-        Optional<Integer> version = jdbc.sql("""
+        int updated = jdbc.sql("""
                         UPDATE response_profile
-                           SET description = :description, definition = CAST(:definition AS jsonb),
-                               version = version + 1, updated_by = :user, updated_at = now()
+                           SET description = :description, definition = :definition,
+                               version = version + 1, updated_by = :user, updated_at = SYSTIMESTAMP
                          WHERE id = :id AND version = :expected
-                        RETURNING version
                         """)
                 .param("id", id)
                 .param("expected", expectedVersion)
-                .param("description", description)
-                .param("definition", Json.write(definition))
+                .param("description", Rows.clob(description))
+                .param("definition", Rows.clob(definition))
                 .param("user", user)
-                .query(Integer.class).optional();
-        version.ifPresent(ignored -> history(id, action, comment));
-        return version;
+                .update();
+        if (updated == 0) {
+            return Optional.empty();
+        }
+        history(id, action, comment);
+        return Optional.of(expectedVersion + 1);
     }
 
+    /** History holds the whole row as it is after the change (snake_case columns, as {@code to_jsonb} wrote them). */
     private void history(long id, String action, String comment) {
+        Row row = find(id).orElseThrow();
+        ObjectNode snapshot = Json.object();
+        snapshot.put("id", row.id());
+        snapshot.put("name", row.name());
+        snapshot.put("description", row.description());
+        snapshot.set("definition", row.definition());
+        snapshot.put("version", row.version());
+        snapshot.put("created_by", row.createdBy());
+        snapshot.put("created_at", row.createdAt().toString());
+        snapshot.put("updated_by", row.updatedBy());
+        snapshot.put("updated_at", row.updatedAt().toString());
         jdbc.sql("""
-                        INSERT INTO response_profile_history (profile_id, version, action, snapshot, changed_by, comment)
-                        SELECT id, version, :action, to_jsonb(p), updated_by, :comment
-                          FROM response_profile p WHERE id = :id
+                        INSERT INTO response_profile_history (profile_id, version, action, snapshot, changed_by,
+                                                              change_note)
+                        VALUES (:id, :version, :action, :snapshot, :user, :comment)
                         """)
                 .param("id", id)
+                .param("version", row.version())
                 .param("action", action)
-                .param("comment", comment)
+                .param("snapshot", Rows.clob(snapshot))
+                .param("user", row.updatedBy())
+                .param("comment", Rows.clob(comment))
                 .update();
     }
 
     public List<HistoryRow> history(long id) {
         return jdbc.sql("""
-                        SELECT version, action, snapshot::text AS snapshot, changed_by, changed_at, comment
+                        SELECT version, action, snapshot, changed_by, changed_at, change_note
                           FROM response_profile_history WHERE profile_id = :id ORDER BY version DESC
                         """)
                 .param("id", id)
@@ -121,7 +141,7 @@ public class ProfileRepository {
 
     public Optional<HistoryRow> history(long id, int version) {
         return jdbc.sql("""
-                        SELECT version, action, snapshot::text AS snapshot, changed_by, changed_at, comment
+                        SELECT version, action, snapshot, changed_by, changed_at, change_note
                           FROM response_profile_history WHERE profile_id = :id AND version = :version
                         """)
                 .param("id", id)
@@ -131,7 +151,7 @@ public class ProfileRepository {
 
     private static HistoryRow historyRow(ResultSet rs, int index) throws SQLException {
         return new HistoryRow(rs.getInt("version"), rs.getString("action"), Rows.json(rs, "snapshot"),
-                rs.getString("changed_by"), Rows.instant(rs, "changed_at"), rs.getString("comment"));
+                rs.getString("changed_by"), Rows.instant(rs, "changed_at"), rs.getString("change_note"));
     }
 
     public List<Deployment> deployments() {
@@ -155,17 +175,19 @@ public class ProfileRepository {
     }
 
     public void upsertDeployment(long profileId, String environment, int version, String user) {
-        jdbc.sql("""
-                        INSERT INTO response_profile_deployment (profile_id, environment, version, activated_by)
-                        VALUES (:id, :environment, :version, :user)
-                        ON CONFLICT (profile_id, environment) DO UPDATE
-                           SET version = EXCLUDED.version, activated_by = EXCLUDED.activated_by, activated_at = now()
+        Rows.merge(() -> jdbc.sql("""
+                        MERGE INTO response_profile_deployment d
+                        USING dual ON (d.profile_id = :id AND d.environment = :environment)
+                         WHEN MATCHED THEN UPDATE
+                              SET d.version = :version, d.activated_by = :user, d.activated_at = SYSTIMESTAMP
+                         WHEN NOT MATCHED THEN INSERT (profile_id, environment, version, activated_by)
+                              VALUES (:id, :environment, :version, :user)
                         """)
                 .param("id", profileId)
                 .param("environment", environment)
                 .param("version", version)
                 .param("user", user)
-                .update();
+                .update());
     }
 
     /** Routes whose deployed version uses the profile, per environment. */
@@ -177,7 +199,7 @@ public class ProfileRepository {
                           JOIN route_definition r ON r.id = d.definition_id
                           JOIN project p ON p.id = r.project_id
                           JOIN environment e ON e.code = d.environment
-                         WHERE d.status = 'ACTIVE' AND (h.snapshot ->> 'response_profile_id')::bigint = :id
+                         WHERE d.status = 'ACTIVE' AND JSON_VALUE(h.snapshot, '$.response_profile_id' RETURNING NUMBER) = :id
                          ORDER BY e.sort_order, p.maintask, r.subtask
                         """)
                 .param("id", profileId)

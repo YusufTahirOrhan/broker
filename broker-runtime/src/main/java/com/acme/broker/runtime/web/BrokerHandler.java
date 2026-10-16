@@ -40,7 +40,7 @@ import com.acme.broker.runtime.metrics.BrokerMetrics;
 import com.acme.broker.runtime.route.Route;
 import com.acme.broker.runtime.route.RouteCache;
 import com.acme.broker.runtime.route.RouteSnapshot;
-import com.acme.broker.runtime.session.Session;
+import com.acme.broker.runtime.session.ApplicationList;
 import com.acme.broker.runtime.session.SessionStore;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -49,8 +49,10 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
- * The request flow of the design document ("Broker'da istek işleme"). Every exit goes through {@link #finish}, which
- * returns nothing to the frontend before the events of the request are acknowledged.
+ * The request flow of the design document ("Broker'da istek işleme") with the legacy broker's order: body and
+ * {@code X-Token}, application, session operations (login/logout to the login service), route and session. Every exit
+ * goes through {@link #finish}, which returns nothing to the frontend before the events of the request are
+ * acknowledged.
  */
 @Component
 public class BrokerHandler {
@@ -72,12 +74,18 @@ public class BrokerHandler {
     private final BrokerMetrics metrics;
     private final RouteValidator.Context readable;
     private final BrokerProperties.Forward forward;
+    private final BrokerProperties.Session sessionSettings;
+    private final ApplicationList applications;
+    private final boolean legacyResponses;
 
-    public BrokerHandler(RouteCache routes, SessionStore sessions, LogGate gate, EventFactory events,
-                         Forwarder forwarder, UserContextSigner userContext, BrokerMetrics metrics,
+    public BrokerHandler(RouteCache routes, SessionStore sessions, ApplicationList applications, LogGate gate,
+                         EventFactory events, Forwarder forwarder, UserContextSigner userContext, BrokerMetrics metrics,
                          BrokerProperties properties) {
         this.routes = routes;
         this.sessions = sessions;
+        this.applications = applications;
+        this.sessionSettings = properties.session();
+        this.legacyResponses = properties.compat().legacyResponses();
         this.gate = gate;
         this.events = events;
         this.forwarder = forwarder;
@@ -131,58 +139,104 @@ public class BrokerHandler {
             reject(x, response, 400, Outcome.INVALID_REQUEST, "X-Token header'ı zorunlu.", List.of());
             return;
         }
-        x.sessionOperation = sessions.isSessionOperation(x.token) ? x.token : null;
-
-        // 3. Route çözümleme: yalnızca bellek
+        boolean sessionToken = sessions.isSessionOperation(x.token);
         RouteSnapshot snapshot = routes.snapshot();
         Optional<Route> found = snapshot.find(x.maintask, x.subtask);
         x.knownProject = snapshot.project(x.maintask).orElse(null);
-        if (x.sessionOperation == null) {
+        if (!sessionToken) {
             metrics.legacyIncoming(found.map(Route::maintask).orElse(x.knownProject),
                     found.map(Route::subtask).orElse(null));
         }
+
+        // 3. Application: login, logout ve anonim route'lar dahil her istekte
+        if (!applications.allows(x.application)) {
+            if (legacyResponses) {
+                legacy(x, response, BrokerErrors.legacyRefused());
+            } else {
+                reject(x, response, 403, Outcome.DENIED, "Uygulama bu işlemi kullanamaz: " + x.application, List.of());
+            }
+            return;
+        }
+
+        // 4. Oturum işlemleri: gövdedeki maintask'a bakılmadan giriş servisinin route'una
+        if (sessionToken && !sessionSettings.isPublic(x.maintask)) {
+            x.sessionOperation = x.token;
+            String target = sessionSettings.routes().get(x.token);
+            int slash = target.indexOf('/');
+            Optional<Route> operation = slash < 0 ? Optional.empty()
+                    : snapshot.find(target.substring(0, slash), target.substring(slash + 1));
+            if (operation.isEmpty() || !operation.get().anonymous()) {
+                log.error("Oturum işlemi yapılandırılmamış: X-Token {} için {} route'u {} (requestId={})", x.token,
+                        target, operation.isEmpty() ? "yok" : "anonim değil", x.requestId);
+                reject(x, response, 503, Outcome.TECHNICAL_ERROR, "Oturum işlemi şu an yapılamıyor.", List.of());
+                return;
+            }
+            x.route = operation.get();
+            forward(x, request, response);
+            return;
+        }
+
+        // 5. Route; yoksa önce oturum, böylece oturumsuz biri hangi route'ların olduğunu göremez
         if (found.isEmpty()) {
-            String name = (x.maintask == null ? "?" : x.maintask) + "/" + (x.subtask == null ? "?" : x.subtask);
-            reject(x, response, 404, Outcome.UNKNOWN_TASK, "Bilinmeyen işlem: " + name, List.of());
+            switch (checkSession(x)) {
+                case UNAVAILABLE -> sessionUnavailable(x, response);
+                case INVALID -> sessionRefused(x, response);
+                case VALID -> {
+                    String name = (x.maintask == null ? "?" : x.maintask) + "/" + (x.subtask == null ? "?" : x.subtask);
+                    reject(x, response, 404, Outcome.UNKNOWN_TASK, "Bilinmeyen işlem: " + name, List.of());
+                }
+            }
             return;
         }
         Route route = found.get();
         x.route = route;
-
-        // 4. Oturum ve yetki: tek Redis okuması
-        if (x.sessionOperation != null) {
-            if (!route.anonymous()) {
-                reject(x, response, 403, Outcome.DENIED, "Oturum işlemi yalnızca anonim bir route ile yapılabilir.",
-                        List.of());
+        SessionCheck session = checkSession(x);
+        if (!route.anonymous()) {
+            // anonim route oturum geçersizse ya da okunamazsa kullanıcısız devam eder
+            if (session == SessionCheck.UNAVAILABLE) {
+                sessionUnavailable(x, response);
                 return;
             }
-        } else {
-            Optional<Session> session;
-            try {
-                session = sessions.find(x.token);
-            } catch (RuntimeException e) {
-                log.error("Oturum Redis'ten okunamadı (requestId={})", x.requestId, e);
-                if (!route.anonymous()) {
-                    reject(x, response, 503, Outcome.TECHNICAL_ERROR, "Oturum doğrulanamadı; lütfen tekrar deneyin.",
-                            List.of());
-                    return;
-                }
-                session = Optional.empty(); // an anonymous route works without a user, as with an invalid token
+            if (session == SessionCheck.INVALID) {
+                sessionRefused(x, response);
+                return;
             }
-            x.session = session.orElse(null);
-            if (!route.anonymous()) {
-                if (x.session == null) {
-                    reject(x, response, 401, Outcome.DENIED, "Oturum bulunamadı; lütfen yeniden giriş yapın.",
-                            List.of());
-                    return;
-                }
-                if (!route.allows(x.session.permissions())) {
-                    reject(x, response, 403, Outcome.DENIED, "Bu işlem için yetkiniz yok.", List.of());
-                    return;
-                }
+            if (!route.allows(x.session.permissions())) {
+                reject(x, response, 403, Outcome.DENIED, "Bu işlem için yetkiniz yok.", List.of());
+                return;
             }
         }
+        forward(x, request, response);
+    }
 
+    private enum SessionCheck { VALID, INVALID, UNAVAILABLE }
+
+    /** One Redis read: the record of the body's uid, valid when the token and client headers match it. */
+    private SessionCheck checkSession(Exchange x) {
+        try {
+            x.session = sessions.find(x.uid, x.token, x.clientIp, x.userAgent).orElse(null);
+            return x.session == null ? SessionCheck.INVALID : SessionCheck.VALID;
+        } catch (RuntimeException e) {
+            log.error("Oturum Redis'ten okunamadı (requestId={})", x.requestId, e);
+            return SessionCheck.UNAVAILABLE;
+        }
+    }
+
+    private void sessionRefused(Exchange x, HttpServletResponse response) throws IOException {
+        if (legacyResponses) {
+            legacy(x, response, BrokerErrors.legacySessionInvalid());
+        } else {
+            reject(x, response, 401, Outcome.DENIED, "Oturum bulunamadı; lütfen yeniden giriş yapın.", List.of());
+        }
+    }
+
+    private void sessionUnavailable(Exchange x, HttpServletResponse response) throws IOException {
+        reject(x, response, 503, Outcome.TECHNICAL_ERROR, "Oturum doğrulanamadı; lütfen tekrar deneyin.", List.of());
+    }
+
+    /** Steps 5-7 for a request whose route and session are settled. */
+    private void forward(Exchange x, HttpServletRequest request, HttpServletResponse response) throws IOException {
+        Route route = x.route;
         // 5. REQUEST olayı: onay gelmeden servis çağrılmaz
         LogEvent requestEvent = events.request(x);
         List<LogEvent> unacknowledged = gate.write(requestEvent);
@@ -201,11 +255,13 @@ public class BrokerHandler {
             return;
         }
         String userId = x.session == null ? null : x.session.userId();
+        String permission = x.session == null ? null
+                : RequestContext.firstPermission(route.permissions(), x.session.permissions());
         BackendRequest backendRequest;
         try {
             backendRequest = BackendRequestBuilder.build(route.method(), route.pathTemplate(), definition,
                     route.baseUrl(), new RequestContext(x.body, validated.effectiveBody(), request::getHeader,
-                            readable, userId, x.requestId));
+                            readable, userId, permission, x.requestId));
         } catch (RequestBuildException e) {
             reject(x, response, 400, Outcome.INVALID_REQUEST, "İstek gövdesi alan tanımına uymuyor.",
                     List.of(e.error()));
@@ -216,7 +272,8 @@ public class BrokerHandler {
         // 6. Forward
         Map<String, String> extra = new LinkedHashMap<>();
         extra.put("traceparent", x.trace.traceparent());
-        if (userContext.enabled() && userId != null) {
+        // session operations are signed too, without a user: the login service accepts only the broker's calls
+        if (userContext.enabled() && (userId != null || x.sessionOperation != null)) {
             extra.put(userContext.header(), userContext.sign(userId, x.requestId, Instant.now()));
         }
         Forwarder.Result result = forwarder.send(backendRequest, definition.timeoutMs(), definition.maxAttempts(), extra);
@@ -264,15 +321,18 @@ public class BrokerHandler {
         JsonNode logged = definition.logging().logResponseBody() ? parsed : null;
 
         Reply reply;
-        JsonNode clientLog;
+        EventFactory.ClientLog clientLog;
         if (route.profile() != null) {
             ClientResponse wrapped = route.profile().profile()
                     .render(new ResponseProfile.BackendResult(status, parsed, outcome, x.requestId));
             reply = Reply.json(wrapped.status(), outcome, wrapped.body());
-            clientLog = EventFactory.clientResponse(wrapped.body());
+            clientLog = EventFactory.clientResponse(wrapped.body(), definition.logging());
+        } else if (x.sessionOperation != null) {
+            reply = new Reply(status, outcome, contentType, body.bytes());
+            clientLog = EventFactory.sessionResponse(status, parsed);
         } else {
             reply = new Reply(status, outcome, contentType, body.bytes());
-            clientLog = statusOnly(status);
+            clientLog = EventFactory.passedThrough(status, parsed, definition.logging());
         }
         finish(x, response, reply, events.response(x, status, outcome, logged, body.bytes().length, clientLog, null));
     }
@@ -306,19 +366,28 @@ public class BrokerHandler {
     private void backendFailed(Exchange x, HttpServletResponse response, Outcome outcome, int brokerStatus,
                                String message, String errorMessage) throws IOException {
         Reply reply;
-        JsonNode clientLog;
+        EventFactory.ClientLog clientLog;
         if (x.route.profile() != null) {
             ClientResponse wrapped = x.route.profile().profile()
                     .render(new ResponseProfile.BackendResult(null, null, outcome, x.requestId));
             reply = Reply.json(wrapped.status(), outcome, wrapped.body());
-            clientLog = EventFactory.clientResponse(wrapped.body());
+            clientLog = EventFactory.clientResponse(wrapped.body(), x.route.definition().logging());
         } else {
             ObjectNode error = BrokerErrors.body(brokerStatus, outcome, message, x.requestId, List.of());
             reply = Reply.json(brokerStatus, outcome, error);
-            clientLog = error;
+            clientLog = EventFactory.ClientLog.of(error);
         }
         // no backend status: the event carries the status the frontend got, so status_code is never empty
         finish(x, response, reply, events.response(x, reply.status(), outcome, null, null, clientLog, errorMessage));
+    }
+
+    /**
+     * The legacy broker's HTTP 200 bodies ({@code {"response": false}} and the 301 body), logged as it logged every
+     * response: the body with {@code "data": ""} added.
+     */
+    private void legacy(Exchange x, HttpServletResponse response, ObjectNode body) throws IOException {
+        finish(x, response, Reply.json(200, Outcome.DENIED, body),
+                events.response(x, 200, Outcome.DENIED, null, null, EventFactory.legacyLogged(body), null));
     }
 
     /** Errors the broker gives without calling the backend, in the common format. */
@@ -373,11 +442,5 @@ public class BrokerHandler {
     private void record(Exchange x, Outcome outcome) {
         metrics.request(x.metricMaintask(), x.metricSubtask(), outcome.name(),
                 Duration.ofNanos(System.nanoTime() - x.startedNanos));
-    }
-
-    private static JsonNode statusOnly(int status) {
-        ObjectNode node = Json.object();
-        node.put("status", status);
-        return node;
     }
 }

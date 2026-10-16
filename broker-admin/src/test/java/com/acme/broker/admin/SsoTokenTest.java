@@ -13,6 +13,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -20,6 +21,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 import com.acme.broker.admin.support.AdminTestBase;
+import com.acme.broker.admin.support.CentralDatabase;
 import com.acme.broker.core.testing.JsonHttp;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
@@ -30,6 +32,7 @@ import com.nimbusds.jwt.SignedJWT;
 import tools.jackson.databind.JsonNode;
 
 /** Without the local profile the API takes SSO access tokens; roles come from a claim, groups are mapped. */
+@Tag("docker")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "broker.admin.catalog.mode=memory",
         "broker.admin.authorization.mode=memory",
@@ -47,9 +50,7 @@ class SsoTokenTest {
         Files.writeString(pem, "-----BEGIN PUBLIC KEY-----\n"
                 + Base64.getMimeEncoder().encodeToString(KEYS.getPublic().getEncoded()) + "\n-----END PUBLIC KEY-----\n");
         registry.add("spring.security.oauth2.resourceserver.jwt.public-key-location", () -> pem.toUri().toString());
-        registry.add("spring.datasource.url", AdminTestBase.POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", AdminTestBase.POSTGRES::getUsername);
-        registry.add("spring.datasource.password", AdminTestBase.POSTGRES::getPassword);
+        CentralDatabase.register(registry);
         registry.add("spring.flyway.placeholders.dev_admin_api_url", () -> AdminTestBase.ENVIRONMENTS.url("dev"));
         registry.add("spring.flyway.placeholders.test_admin_api_url", () -> AdminTestBase.ENVIRONMENTS.url("test"));
         registry.add("spring.flyway.placeholders.prod_admin_api_url", () -> AdminTestBase.ENVIRONMENTS.url("prod"));
@@ -86,6 +87,15 @@ class SsoTokenTest {
         assertThat(expired.json().get("code").stringValue()).isEqualTo("UNAUTHENTICATED");
         assertThat(me(null).status()).isEqualTo(401);
         assertThat(me("not-a-token").status()).isEqualTo(401);
+    }
+
+    @Test
+    void openApiAndSwaggerAreOffOutsideLocalAndDev() throws Exception {
+        JsonHttp http = new JsonHttp("http://localhost:" + port);
+        Map<String, String> signedIn = Map.of("Authorization", "Bearer " + token(List.of("devops-editors"), 300));
+
+        assertThat(http.send("GET", "/v3/api-docs", null, signedIn).status()).isEqualTo(404);
+        assertThat(http.send("GET", "/swagger-ui.html", null, signedIn).status()).isEqualTo(404);
     }
 
     private static String token(List<String> groups, long validSeconds) throws Exception {

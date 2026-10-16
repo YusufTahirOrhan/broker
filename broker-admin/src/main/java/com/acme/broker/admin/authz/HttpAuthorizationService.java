@@ -17,6 +17,7 @@ import java.util.Set;
 
 import org.springframework.http.HttpStatus;
 
+import com.acme.broker.admin.config.KoordinatorProperties;
 import com.acme.broker.admin.web.ApiException;
 import com.acme.broker.core.json.Json;
 
@@ -24,7 +25,9 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
- * Assumed API of each environment's authorization service, to be confirmed: {@code GET /permissions?prefix=} →
+ * Permissions from the Koordinatör, the same base URL for every environment unless
+ * {@code broker.admin.authorization.urls.<ENV>} gives another. Assumed API until its real one arrives:
+ * {@code GET /permissions?prefix=} →
  * {@code [{"code", "description"}]}, {@code GET /permissions/{code}} → 200 or 404, {@code POST /permissions}
  * {@code {"code", "description"}} → 201, or 409 when it exists.
  */
@@ -32,9 +35,11 @@ public class HttpAuthorizationService implements AuthorizationService {
 
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
     private final Map<String, String> urls;
+    private final KoordinatorProperties koordinator;
 
-    public HttpAuthorizationService(Map<String, String> urls) {
+    public HttpAuthorizationService(Map<String, String> urls, KoordinatorProperties koordinator) {
         this.urls = urls;
+        this.koordinator = koordinator;
     }
 
     @Override
@@ -87,8 +92,8 @@ public class HttpAuthorizationService implements AuthorizationService {
     }
 
     private URI uri(String environment, String path) {
-        String url = urls.get(environment);
-        if (url == null) {
+        String url = koordinator.urlOr(urls.get(environment));
+        if (url == null || url.isBlank()) {
             throw new ApiException(HttpStatus.BAD_GATEWAY, "UPSTREAM_ERROR",
                     environment + " için yetkilendirme servisi adresi tanımlı değil.");
         }
@@ -97,8 +102,8 @@ public class HttpAuthorizationService implements AuthorizationService {
 
     private HttpResponse<byte[]> send(String environment, HttpRequest.Builder request) {
         try {
-            return client.send(request.timeout(Duration.ofSeconds(10)).header("Accept", "application/json").build(),
-                    HttpResponse.BodyHandlers.ofByteArray());
+            return client.send(koordinator.authorize(request.timeout(Duration.ofSeconds(10))
+                    .header("Accept", "application/json")).build(), HttpResponse.BodyHandlers.ofByteArray());
         } catch (IOException e) {
             throw upstream(environment, "ulaşılamadı");
         } catch (InterruptedException e) {

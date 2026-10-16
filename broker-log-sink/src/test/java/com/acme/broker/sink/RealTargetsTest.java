@@ -14,6 +14,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -34,6 +35,7 @@ import tools.jackson.databind.node.ObjectNode;
  * The writers against real servers: the design document's ClickHouse DDL, and Elasticsearch with the
  * {@code broker-fields} component template composed into a {@code requests_*} template as in production.
  */
+@Tag("docker")
 class RealTargetsTest {
 
     static final GenericContainer<?> clickhouse = new GenericContainer<>("clickhouse/clickhouse-server:24.8-alpine")
@@ -46,6 +48,9 @@ class RealTargetsTest {
             .withEnv("discovery.type", "single-node")
             .withEnv("xpack.security.enabled", "false")
             .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m")
+            // a build machine's disk is often over Elasticsearch's 90 % watermark (the Oracle test image alone is
+            // ~6 GB); above it new indices get no shard and every write times out
+            .withEnv("cluster.routing.allocation.disk.threshold_enabled", "false")
             .withExposedPorts(9200)
             .waitingFor(Wait.forHttp("/_cluster/health?wait_for_status=yellow").forPort(9200)
                     .withStartupTimeout(Duration.ofMinutes(3)));
@@ -132,6 +137,37 @@ class RealTargetsTest {
 
         assertThat(rejected).extracting(Rejection::index).containsExactly(0);
         assertThat(rejected.getFirst().reason()).startsWith("Elastic 400");
+    }
+
+    @Test
+    void aLoggedResponseDataTextOf40KbIsAcceptedByTheDefaultMapping() throws Exception {
+        ElasticBulkWriter writer = new ElasticBulkWriter(new SinkProperties.Elastic(true, elasticUrl(), null, null,
+                null, null, null, null, null));
+        String id = Events.newRequestId();
+        ObjectNode data = Json.object();
+        data.put("kayitlar", "müşteri kaydı; ".repeat(2_600));
+        String text = Json.write(data);
+        assertThat(Json.utf8Length(text)).isGreaterThan(40_000);
+        ObjectNode clientResponse = Json.object();
+        clientResponse.put("BACKEND_STATUS", 200);
+        clientResponse.put("status", 200);
+        clientResponse.put("data", text);
+        LogEvent response = Events.response(id);
+        LogEvent logged = new LogEvent(response.requestId(), response.traceId(), response.eventType(),
+                response.eventTime(), response.environment(), response.maintask(), response.subtask(),
+                response.routeVersion(), response.responseProfile(), response.responseProfileVersion(),
+                response.application(), response.uid(), response.userId(), response.queryId(), response.permList(),
+                response.token(), response.sessionOperation(), response.clientIp(), response.userAgent(),
+                response.httpMethod(), response.targetPath(), response.statusCode(), response.outcome(),
+                response.durationMs(), response.body(), response.bodySize(), true, clientResponse,
+                response.errorMessage(), response.brokerInstance());
+
+        assertThat(writer.write(List.of(Events.request(id, "order-service"), logged))).isEmpty();
+        send("POST", elasticUrl() + "/requests_2026-10/_refresh", "");
+
+        JsonNode document = Json.parse(send("GET", elasticUrl() + "/requests_2026-10/_doc/" + id, null)).get("_source");
+        assertThat(Json.text(document.get("data_response").get("data"))).isEqualTo(text);
+        assertThat(document.get("broker").get("body_truncated").booleanValue()).isTrue();
     }
 
     /** The event with one more field in the frontend body. */

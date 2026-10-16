@@ -33,6 +33,7 @@ public final class DefinitionRules {
         strings(rules.putArray("envelopeFields"), RouteDefinitionParser.ENVELOPE_FIELDS.stream().sorted().toList());
         strings(rules.putArray("readableHeaders"), List.copyOf(readableHeaders));
         strings(rules.putArray("forbiddenHeaders"), RouteValidator.FORBIDDEN_HEADERS);
+        strings(rules.putArray("forbiddenHeaderExceptions"), RouteValidator.FORBIDDEN_HEADER_EXCEPTIONS);
         strings(rules.putArray("alwaysMaskedFields"), List.of(LoggingSpec.ALWAYS_MASKED));
 
         ObjectNode timeout = rules.putObject("timeoutMs");
@@ -63,7 +64,9 @@ public final class DefinitionRules {
 
         ObjectNode placeholders = rules.putObject("placeholders");
         strings(placeholders.putArray("definition"),
-                List.of("${request.<yol>}", "${header.<ad>}", "${user.id}", "${requestId}"));
+                List.of("${request.<yol>}", "${request.uid}", "${request.application}", "${request.maintask}",
+                        "${request.subtask}", "${header.<ad>}", "${user.id}", "${user.permission}",
+                        "${requestId}"));
         strings(placeholders.putArray("profile"),
                 List.of("${backend.status}", "${backend.body}", "${outcome}", "${requestId}"));
         return rules;

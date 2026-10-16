@@ -7,6 +7,7 @@ import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.time.Duration;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -19,6 +20,7 @@ import com.acme.broker.core.testing.TestCertificates;
 import com.acme.broker.envadmin.testing.RuntimeContainers;
 
 /** The Admin API with the production TLS setup: client certificates are required and their subjects checked. */
+@Tag("docker")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "management.server.port=0",
         "broker.env-admin.allowed-client-subjects[0]=CN=broker-admin, O=Acme"
