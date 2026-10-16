@@ -26,6 +26,19 @@ class LoggingTest {
     }
 
     @Test
+    void textKeepsStringsAndWritesOtherValuesAsJson() {
+        assertThat(Json.text(Masker.text(Json.string("düz metin"), 100).body())).isEqualTo("düz metin");
+        assertThat(Json.text(Masker.text(Json.parse("{\"a\": [1, \"ş\"]}"), 100).body()))
+                .isEqualTo("{\"a\":[1,\"ş\"]}");
+        assertThat(Json.text(Masker.text(Json.nullNode(), 100).body())).isEqualTo("null");
+
+        Masker.Capture cut = Masker.text(Json.parse("{\"ad\": \"Çağrı\"}"), 11);
+        assertThat(cut.truncated()).isTrue();
+        assertThat(cut.size()).isEqualTo(17);
+        assertThat(Json.text(cut.body())).isEqualTo("{\"ad\":\"Ça");
+    }
+
+    @Test
     void captureCutsLargeBodiesOnCharacterBoundaries() {
         Masker.Capture small = Masker.capture(Json.parse("{\"a\": 1}"), 100);
         assertThat(small.truncated()).isFalse();

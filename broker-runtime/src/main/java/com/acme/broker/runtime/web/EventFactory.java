@@ -47,26 +47,41 @@ class EventFactory {
                 null, null);
     }
 
+    /** {@code client_response} as it is logged, and whether its text had to be cut to the route's limit. */
+    record ClientLog(JsonNode value, boolean truncated) {
+
+        static ClientLog of(JsonNode value) {
+            return new ClientLog(value, false);
+        }
+    }
+
+    LogEvent response(Exchange x, Integer statusCode, Outcome outcome, JsonNode backendBody, Integer bodySize,
+                      JsonNode clientResponse, String errorMessage) {
+        return response(x, statusCode, outcome, backendBody, bodySize, ClientLog.of(clientResponse), errorMessage);
+    }
+
     /**
      * @param backendBody the service's body to log, or null; masked and trimmed here
      * @param bodySize    size of the service's body in bytes, when known
+     * @param clientLog   what the frontend got, as {@link #clientResponse} or {@link #passedThrough} logs it; a cut
+     *                    text marks the body as truncated ({@code broker.body_truncated})
      */
     LogEvent response(Exchange x, Integer statusCode, Outcome outcome, JsonNode backendBody, Integer bodySize,
-                      JsonNode clientResponse, String errorMessage) {
+                      ClientLog clientLog, String errorMessage) {
         JsonNode logged = null;
-        boolean truncated = false;
+        boolean truncated = clientLog.truncated();
         if (backendBody != null && !backendBody.isMissingNode()) {
             int limit = x.route == null ? LoggingSpec.DEFAULT_MAX_BODY_BYTES : x.route.definition().logging().maxBodyBytes();
             Masker.Capture capture = Masker.capture(Masker.mask(backendBody, maskFields(x)), limit);
             logged = capture.body();
-            truncated = capture.truncated();
+            truncated |= capture.truncated();
             if (bodySize == null) {
                 bodySize = capture.size();
             }
         }
         long duration = (System.nanoTime() - x.startedNanos) / 1_000_000;
         return event(x, LogEvent.EventType.RESPONSE, Instant.now(), statusCode, outcome.name(), duration, logged,
-                bodySize, truncated, clientResponse, errorMessage);
+                bodySize, truncated, clientLog.value(), errorMessage);
     }
 
     /** The response event of a request that got 500 because its log could not be written. */
@@ -75,14 +90,58 @@ class EventFactory {
                 "Log olayı Kafka'ya yazılamadı");
     }
 
-    /** {@code client_response}: what the frontend got, with its top-level {@code data} emptied as today. */
-    static JsonNode clientResponse(JsonNode body) {
-        if (body != null && body.isObject() && body.has("data")) {
+    /**
+     * {@code client_response} of a body a response profile built. Without {@code logResponseBody} its top-level
+     * {@code data} is emptied, as the legacy broker logged it; with it the body is masked and {@code data} becomes the
+     * JSON text of the data (a string stays as it is), cut at {@code maxBodyBytes}. The field stays a string, so the
+     * Elastic mapping of {@code data_response.data} does not change.
+     */
+    static ClientLog clientResponse(JsonNode body, LoggingSpec logging) {
+        if (body == null || !body.isObject() || !body.has("data")) {
+            return ClientLog.of(body);
+        }
+        if (!logging.logResponseBody()) {
             ObjectNode copy = (ObjectNode) body.deepCopy();
             copy.put("data", "");
-            return copy;
+            return ClientLog.of(copy);
         }
-        return body;
+        ObjectNode masked = (ObjectNode) Masker.mask(body, logging.effectiveMaskFields());
+        Masker.Capture data = Masker.text(masked.get("data"), logging.maxBodyBytes());
+        masked.set("data", data.body());
+        return new ClientLog(masked, data.truncated());
+    }
+
+    /**
+     * {@code client_response} of a body passed through without a profile. Without {@code logResponseBody} only
+     * {@code {"status": <code>}}, so data that is not to be logged does not reach {@code data_response}. With it the
+     * masked body, its top-level {@code data} as JSON text when it is not a string; a body that is not a JSON object
+     * goes into {@code data} as text. Larger than {@code maxBodyBytes}: {@code {"status": <code>, "data": "<cut text>"}}.
+     */
+    static ClientLog passedThrough(int status, JsonNode body, LoggingSpec logging) {
+        ObjectNode statusOnly = Json.object();
+        statusOnly.put("status", status);
+        if (!logging.logResponseBody() || body == null || body.isMissingNode()) {
+            return ClientLog.of(statusOnly);
+        }
+        JsonNode masked = Masker.mask(body, logging.effectiveMaskFields());
+        ObjectNode logged;
+        if (masked.isObject()) {
+            logged = (ObjectNode) masked;
+            JsonNode data = logged.get("data");
+            if (data != null && !data.isString()) {
+                logged.set("data", Masker.text(data, Integer.MAX_VALUE).body());
+            }
+        } else {
+            logged = statusOnly.deepCopy();
+            logged.set("data", Masker.text(masked, Integer.MAX_VALUE).body());
+        }
+        Masker.Capture size = Masker.text(logged, logging.maxBodyBytes());
+        if (!size.truncated()) {
+            return ClientLog.of(logged);
+        }
+        ObjectNode cut = statusOnly.deepCopy();
+        cut.set("data", size.body());
+        return new ClientLog(cut, true);
     }
 
     private LogEvent event(Exchange x, LogEvent.EventType type, Instant time, Integer statusCode, String outcome,

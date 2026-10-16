@@ -104,7 +104,8 @@ public record BrokerProperties(String environment, String instanceId, List<Strin
     }
 
     /**
-     * Today's {@code broker.gelen.istekler} counter; its tag keys must be confirmed from the old code.
+     * Today's {@code broker.gelen.istekler} counter, as the legacy controller counts it: tags {@code maintask} and
+     * {@code subtask}, "Bilinmeyen Proje" / "Bilinmeyen Endpoint" when the body lacks them.
      */
     public record LegacyCounter(String name, String projectTag, String endpointTag, String unknownProject,
                                 String unknownEndpoint) {

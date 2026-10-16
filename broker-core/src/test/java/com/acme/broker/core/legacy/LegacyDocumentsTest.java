@@ -30,10 +30,14 @@ class LegacyDocumentsTest {
     }
 
     private static LogEvent response(String outcome) {
+        return response(outcome, "{\"BACKEND_STATUS\": 200, \"status\": 200, \"data\": \"\"}", false);
+    }
+
+    private static LogEvent response(String outcome, String clientResponse, boolean truncated) {
         return new LogEvent(REQUEST_ID, "trace", LogEvent.EventType.RESPONSE, RECEIVED.plusSeconds(1), "PROD",
                 "logProject", "get_logs", 3, "log-project", 2, "web", "u1", "u1", null, null, "token-1", null,
-                "10.0.0.1", "agent", "POST", "/logs", 200, outcome, 87L, null, 10, false,
-                Json.parse("{\"BACKEND_STATUS\": 200, \"status\": 200, \"data\": \"\"}"), null, "broker-1");
+                "10.0.0.1", "agent", "POST", "/logs", 200, outcome, 87L, null, 10, truncated,
+                Json.parse(clientResponse), null, "broker-1");
     }
 
     private static final String BODY = """
@@ -107,6 +111,22 @@ class LegacyDocumentsTest {
         ObjectNode failed = documents.operations(response("LOG_UNAVAILABLE")).getFirst().document();
         assertThat(failed.has("data_response")).isFalse();
         assertThat(Json.text(failed.get("broker").get("outcome"))).isEqualTo("LOG_UNAVAILABLE");
+    }
+
+    @Test
+    void loggedResponseDataStaysAStringAndACutIsMarked() {
+        ObjectNode logged = documents.operations(response("SUCCESS",
+                "{\"BACKEND_STATUS\": 200, \"status\": 200, \"data\": \"{\\\"id\\\":7,\\\"tckn\\\":\\\"xxxx\\\"}\"}",
+                false)).getFirst().document();
+        assertThat(logged.get("data_response").get("data").isString()).isTrue();
+        assertThat(Json.text(logged.get("data_response").get("data"))).isEqualTo("{\"id\":7,\"tckn\":\"xxxx\"}");
+        assertThat(logged.get("broker").get("body_truncated").booleanValue()).isFalse();
+
+        ObjectNode cut = documents.operations(response("SUCCESS",
+                "{\"BACKEND_STATUS\": 200, \"status\": 200, \"data\": \"{\\\"id\\\":7,\\\"ad\\\":\\\"Ça\"}", true))
+                .getFirst().document();
+        assertThat(Json.text(cut.get("data_response").get("data"))).isEqualTo("{\"id\":7,\"ad\":\"Ça");
+        assertThat(cut.get("broker").get("body_truncated").booleanValue()).isTrue();
     }
 
     @Test

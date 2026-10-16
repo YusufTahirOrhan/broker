@@ -152,6 +152,34 @@ class BrokerFlowTest {
     }
 
     @Test
+    void responseDataIsLoggedOnlyWhenTheRouteAsksForIt() {
+        RuntimeFixture.route("order-service", "find_customer", "GET", "/customers/{id}", List.of("ORDER_READ"), false,
+                null, """
+                {"request": {"fields": [{"name": "id", "type": "integer", "required": true}],
+                             "pathVariables": {"id": "${request.id}"}},
+                 "logging": {"logResponseBody": true, "maskFields": ["tckn"], "maxBodyBytes": 64}}
+                """);
+        cache.reload();
+        backend.json("GET", "/customers/1", 200, "{\"ok\": true, \"data\": {\"tckn\": \"12345678901\", \"ad\": \"Ayşe\"}}");
+        backend.json("GET", "/customers/2", 200,
+                "{\"ok\": true, \"data\": {\"ad\": \"" + "Çağrı ".repeat(20) + "\"}}");
+
+        JsonHttp.Response small = broker("tok-1", "{\"maintask\": \"order-service\", \"subtask\": \"find_customer\", \"id\": 1}");
+        JsonHttp.Response large = broker("tok-1", "{\"maintask\": \"order-service\", \"subtask\": \"find_customer\", \"id\": 2}");
+
+        assertThat(small.json().get("data").get("tckn").stringValue()).isEqualTo("12345678901");
+        LogEvent logged = events.awaitType(small.header("X-Request-Id"), LogEvent.EventType.RESPONSE);
+        assertThat(logged.clientResponse()).isEqualTo(Json.parse("""
+                {"ok": true, "data": "{\\"tckn\\":\\"xxxx\\",\\"ad\\":\\"Ayşe\\"}"}
+                """));
+        assertThat(logged.bodyTruncated()).isFalse();
+        LogEvent cut = events.awaitType(large.header("X-Request-Id"), LogEvent.EventType.RESPONSE);
+        assertThat(Json.fieldNames(cut.clientResponse())).containsExactly("status", "data");
+        assertThat(Json.utf8Length(Json.text(cut.clientResponse().get("data")))).isLessThanOrEqualTo(64);
+        assertThat(cut.bodyTruncated()).isTrue();
+    }
+
+    @Test
     void definitionsLargerThanAVarcharLoadAndForward() {
         String definition = CoreFixtures.largeAddOrderNote(40_000);
         RuntimeFixture.route("order-service", "add_long_note", "POST", "/orders/{id}/notes", List.of("ORDER_WRITE"),
@@ -257,9 +285,11 @@ class BrokerFlowTest {
             assertThat(response.responseProfile()).isEqualTo("log-project");
             assertThat(response.responseProfileVersion()).isEqualTo(2);
             assertThat(response.body()).isEqualTo(Json.parse("{\"id\": 7, \"secret\": \"xxxx\"}"));
+            // the route logs response data: data is the masked JSON text, still a string for Elastic
             assertThat(response.clientResponse()).isEqualTo(Json.parse("""
-                    {"BACKEND_STATUS": 200, "status": 200, "data": ""}
+                    {"BACKEND_STATUS": 200, "status": 200, "data": "{\\"id\\":7,\\"secret\\":\\"xxxx\\"}"}
                     """));
+            assertThat(response.bodyTruncated()).isFalse();
             LogEvent request = events.awaitType(ok.header("X-Request-Id"), LogEvent.EventType.REQUEST);
             assertThat(Json.text(request.body().get("maintask"))).isEqualTo("LOGPROJECT");
 

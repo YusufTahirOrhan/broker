@@ -17,7 +17,7 @@ Son güncelleme: 2026-10-16.
 
 ## Sıradaki iş (2026-10-16)
 
-**Durum:** 1 bitti; 2–6 sırada.
+**Durum:** 1 ve 2 bitti; 3–6 sırada.
 
 Maddeler sırayla yapılır; her biri kendi commit'leriyle biter ve her push'tan önce `mvn -B verify` yeşildir. 7. madde bu turda yapılmaz. "Bilgi bekleyenler"deki konular işi durdurmaz: o parçalar arayüz arkasında, ayara bağlı ve aşağıdaki varsayılanlarla yazılır; bilgi gelince yalnızca o parça değişir. Eski broker'dan alınan gövdeler, anahtarlar ve alan adları birebir korunur ve testlerle sabitlenir. Bir madde bitince bu nottaki modül bölümleri de güncellenir.
 
@@ -47,6 +47,7 @@ Maddeler sırayla yapılır; her biri kendi commit'leriyle biter ve her push'tan
   - **Runtime yazımı:** `MERGE` (eşleşirse yalnızca `promotion_id` daha yeniyse günceller) + aynı transaction'da versiyon artışı; ORA-00001'de MERGE bir kez tekrarlanır. Eşzamanlı ilk yazma testi var.
   - **Snapshot okuması:** `RouteRepository` kendi `DataSourceTransactionManager`'ını `enforceReadOnly` ile kurar (`SET TRANSACTION READ ONLY`); arada commit edilen yazmayı görmediği testle doğrulandı.
   - **32 KB'tan büyük tanım** (Türkçe karakterli 40 KB'lık şablon) env-admin, broker ve merkezde yazılıp okunur.
+  - `RealTargetsTest`'in Elastic container'ında disk eşiği kapalı: derleme makinesinin diski %90'ın üstündeyse (Oracle imajı ~6 GB) Elasticsearch yeni indekse shard ayırmıyor ve yazmalar zaman aşımına düşüyordu.
 
 ### 2. Yanıt verisinin loglanması ve küçük log düzeltmeleri
 
@@ -59,6 +60,10 @@ Subtask editöründeki "Yanıt verisi loglansın" seçeneği mevcut `logging.log
 - **Elastic aylık indeksi:** Eski kod `requests_yyyy-MM`'i saat dilimi vermeden (`new SimpleDateFormat("yyyy-MM")`), yani sunucunun saat diliminde hesaplıyor. `broker.sink.elastic.index-zone` varsayılanı `Europe/Istanbul` olur; kullanıcı eski sunucunun TSİ'de çalıştığını teyit etti.
 - **Eski sayaç:** `broker.gelen.istekler` tag'leri (`maintask`, `subtask`) ve "Bilinmeyen Proje"/"Bilinmeyen Endpoint" eski controller'la teyit edildi; ayardaki "teyit edilmeli" notları kalkar.
 - **Test:** core ve runtime birim testleri; `RealTargetsTest`'te 40 KB'lık `data` metni olan doküman varsayılan dinamik eşlemeyle kabul edilir.
+- **Yapıldı (2026-10-16):** `EventFactory.clientResponse(body, logging)` (profil zarfı) ve `EventFactory.passedThrough(status, body, logging)` (profilsiz), ikisi de `ClientLog(value, truncated)` döner; kırpma olayın `body_truncated`'ına eklenir. Metne çevirme ve UTF-8'i bölmeden kırpma core'da `Masker.text`. Uygulanırken netleşenler:
+  - Açıkken profil zarfının tamamı maskelenir (yalnızca `data` değil); `data` string ise olduğu gibi kalır, değilse JSON metni olur. `data`'sı olmayan zarf olduğu gibi yazılır.
+  - Profilsiz yanıt açıkken JSON nesnesi değilse (dizi, sayı, metin) `{"status": <kod>, "data": "<metin>"}` yazılır; `data_response` Elastic'te nesne kalır. Sınır, `data`'sı metne çevrilmiş maskeli gövdenin JSON metnine uygulanır; aşarsa o metin kırpılıp `data`'ya konur.
+  - Elastic indeks ayı varsayılanı `Europe/Istanbul` (`SinkProperties`, `BROKER_ELASTIC_INDEX_ZONE`); ay sınırındaki olay testle sabitlendi. "Teyit edilmeli" notları kalktı.
 
 ### 3. Broker: eski broker'la aynı oturum, application kontrolü ve yanıtlar
 
@@ -180,7 +185,7 @@ Tasarım dokümanındakilere ek olarak netleşenler:
 - **Servise giden header'lar:** `X-uid` (oturumdaki kullanıcı), `X-Request-Id`, `traceparent`; gizli anahtar ayarlıysa HMAC imzalı `X-User-Context`.
 - **Test çağrıları** Kafka'ya log yazmaz; merkezi admin bunları kendisi audit eder.
 - **Eski sayaç:** `broker.gelen.istekler` tag anahtarları ayarla verilir; eski controller'la teyit edildi (`maintask`, `subtask`). Bilinmeyenler "Bilinmeyen Proje" / "Bilinmeyen Endpoint".
-- **Elastic aylık indeks:** Ay, request ID'deki (UUIDv7) zamandan, ayarlanabilir saat diliminde hesaplanır. Eski kod sunucunun saat dilimini kullanıyor; varsayılan "Sıradaki iş" 2'de `Europe/Istanbul` olacak. Parametre dokümanı `_id`'si `UUID.nameUUIDFromBytes(requestId|alan|sıra)`.
+- **Elastic aylık indeks:** Ay, request ID'deki (UUIDv7) zamandan, ayarlanabilir saat diliminde hesaplanır. Eski kod sunucunun saat dilimini (TSİ) kullanıyor; varsayılan `Europe/Istanbul`. Parametre dokümanı `_id`'si `UUID.nameUUIDFromBytes(requestId|alan|sıra)`.
 - **Admin kimliği:** OAuth2 resource server (JWT); rollerin geldiği claim ve grup→rol eşlemesi ayardan. `local` profilinde HTTP Basic: `viewer`, `editor`, `approver`, `lead` (şifre = kullanıcı adı; `lead` üç role de sahip).
 - **Roller:** `VIEWER`, `ROUTE_EDITOR`, `APPROVER`. `ROUTE_EDITOR` DEV'e doğrudan uygular (talep onaysız uygulanır), TEST ve PROD için talep açar.
 - **Taşıma kuralları:** Onay gerekir = hedef ortam `requires_approval` **ya da** versiyon anonim erişimi açıyorsa (hangi ortam olursa olsun). Onay gerekenlerde gerekçe zorunlu. `ROLLBACK` yalnızca hedef ortama daha önce `APPLIED` olmuş bir versiyona; `DISABLE`/`ENABLE` hedefteki mevcut versiyonla. Profil önce, route sonra uygulanır. Ön kontroller ve adları `docs/frontend-guide.md`'de.
@@ -231,7 +236,7 @@ Paket `com.acme.broker.runtime`. Tek endpoint `POST /broker`; akış `web/Broker
 5. REQUEST olayı; onay yoksa servis çağrılmaz, 500 `{"result": false}`, olaylar spool'a.
 6. `RequestBodyValidator` + `BackendRequestBuilder`; servise `X-uid`, `X-Request-Id`, `traceparent`, ayarlıysa `X-User-Context` (`v1.<payload>.<HMAC-SHA256>`, payload `{userId, requestId, issuedAt}`).
 7. JDK `HttpClient` (HTTP/1.1, proxy yok, redirect izlenmez). Retry yalnızca GET'te 502/503/504 ve bağlantı hatasında; timeout tekrarlanmaz (route'un bütçesini zaten harcamıştır). Gövde okuma da route timeout'una tabidir.
-8. Dosya yanıtı (`BINARY` ya da `Content-Disposition`): RESPONSE olayı onaylanınca stream; `client_response` `{"info": ...}`, `body_size` `Content-Length`'ten. Değilse gövde okunur, outcome gerçek status'tan; profil varsa zarflanır (`client_response`'ta `data` boş string), yoksa gövde olduğu gibi döner ve `client_response` `{"status": <kod>}`.
+8. Dosya yanıtı (`BINARY` ya da `Content-Disposition`): RESPONSE olayı onaylanınca stream; `client_response` `{"info": ...}`, `body_size` `Content-Length`'ten. Değilse gövde okunur, outcome gerçek status'tan; profil varsa zarflanır, yoksa gövde olduğu gibi döner. `client_response`: `logResponseBody` kapalıyken profilde `data` boş string, profilsizde `{"status": <kod>}`; açıkken maskeli zarf ya da gövde, `data` JSON metni, `maxBodyBytes`'ta kırpılır (`EventFactory`).
 9. Her yanıtta `X-Request-Id`; hata yollarında REQUEST ve RESPONSE birlikte gönderilip ikisi de beklenir.
 
 - **`status_code`:** Servis yanıt verdiyse servisin status'u; vermediyse (broker hataları, timeout, bağlantı hatası) frontend'e dönen status. ClickHouse kolonu böylece boş kalmaz.
@@ -290,7 +295,7 @@ Paket `com.acme.broker.admin`. Sözleşme `docs/frontend-guide.md`; uygulama sı
 
 Paket `com.acme.broker.sink`. İki `@KafkaListener` (toplu), her biri kendi consumer group'unda; `broker.sink.elastic.enabled` ve `broker.sink.clickhouse.enabled` ile ayrı ayrı açılır (aynı imaj iki deployment olarak da çalışabilir).
 
-- **Elastic (`broker-logs-elastic`):** `LegacyDocuments` → tek `_bulk` NDJSON; ana doküman `update` + `doc_as_upsert` + `retry_on_conflict`, parametre dokümanları `index`. Kimlik `ApiKey` ya da basic. Öğe hatası 429/5xx → batch yeniden denenir; diğer 4xx → o olay DLQ'ya.
+- **Elastic (`broker-logs-elastic`):** `LegacyDocuments` → tek `_bulk` NDJSON; indeks ayı request ID'nin zamanından, varsayılan `Europe/Istanbul`; ana doküman `update` + `doc_as_upsert` + `retry_on_conflict`, parametre dokümanları `index`. Kimlik `ApiKey` ya da basic. Öğe hatası 429/5xx → batch yeniden denenir; diğer 4xx → o olay DLQ'ya.
 - **ClickHouse (`broker-logs-clickhouse`):** `INSERT INTO broker_logs.broker_log FORMAT JSONEachRow`, `date_time_input_format=best_effort`; satırda `null` yok (varsayılanlar), `token`/`perm_list`/`client_response`/`query_id` yazılmaz. 400 → satır satır tekrar, kabul edilmeyen satır DLQ'ya; 401/403/404/5xx/bağlantı → batch yeniden denenir.
 - **DLQ:** `broker.logs.v1.dlq`, orijinal key/değer ve `broker.dlq.sink`, `broker.dlq.reason`, `broker.dlq.origin` header'ları; DLQ onayı gelmeden offset commit edilmez.
 - **Offset:** `ack-mode: batch`; hata durumunda `DefaultErrorHandler` sınırsız sabit aralıkla (`broker.sink.retry-interval`) aynı batch'i dener, kayıt atlanmaz. Batch: `max-poll-records` 10.000, `fetch-max-wait` 1 sn.
@@ -326,6 +331,7 @@ Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya ya
 - **History kolonları:** `comment` (Oracle'da ayrılmış) `change_note` oldu; API'de alan adı `comment` kaldı. History snapshot'ı DB'de `to_jsonb` ile değil uygulamada kurulur, anahtarlar aynı.
 - **Runtime'a uygulama ("tek ifadeyle uygular" paragrafı ve SQL'i):** Oracle'da DML'li CTE yok. `MERGE` (eşleşen satırı yalnızca `promotion_id` daha yeniyse günceller) ve versiyon artışı aynı transaction'da; eşzamanlı ilk eklemede ORA-00001 gelirse MERGE bir kez tekrarlanır. Davranış aynı: eski ya da tekrar gelen talep yazamaz, değişiklik yoksa versiyon artmaz.
 - **Runtime şeması:** `runtime_route.permissions` JSON dizisi metni; kısıt `JSON_EXISTS(permissions, '$[0]')`.
+- **`logResponseBody` açıkken `client_response` (log hattı):** profil zarfının tamamı maskelenir, `data` JSON metni olur (string ise olduğu gibi). Profilsiz yanıtta maskeli gövde yazılır; gövde JSON nesnesi değilse `{"status": <kod>, "data": "<metin>"}`. `maxBodyBytes` aşılırsa metin UTF-8'i bölmeden kırpılır ve `broker.body_truncated: true`.
 
 ## Açık noktalar
 

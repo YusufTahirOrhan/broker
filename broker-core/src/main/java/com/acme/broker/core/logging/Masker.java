@@ -67,6 +67,20 @@ public final class Masker {
         return new Capture(Json.string(cut(bytes, maxBytes)), bytes.length, true);
     }
 
+    /**
+     * The value as a string node: a string as it is, anything else as its JSON text; cut at {@code maxBytes} UTF-8
+     * bytes without splitting a character when it is longer.
+     */
+    public static Capture text(JsonNode value, int maxBytes) {
+        String text = value == null || value.isMissingNode() ? "null" : value.isString() ? value.stringValue()
+                : value.toString();
+        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length <= maxBytes) {
+            return new Capture(Json.string(text), bytes.length, false);
+        }
+        return new Capture(Json.string(cut(bytes, maxBytes)), bytes.length, true);
+    }
+
     /** Cuts UTF-8 bytes without splitting a multi-byte character. */
     static String cut(byte[] bytes, int maxBytes) {
         int end = maxBytes;

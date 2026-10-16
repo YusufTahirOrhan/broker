@@ -264,15 +264,15 @@ public class BrokerHandler {
         JsonNode logged = definition.logging().logResponseBody() ? parsed : null;
 
         Reply reply;
-        JsonNode clientLog;
+        EventFactory.ClientLog clientLog;
         if (route.profile() != null) {
             ClientResponse wrapped = route.profile().profile()
                     .render(new ResponseProfile.BackendResult(status, parsed, outcome, x.requestId));
             reply = Reply.json(wrapped.status(), outcome, wrapped.body());
-            clientLog = EventFactory.clientResponse(wrapped.body());
+            clientLog = EventFactory.clientResponse(wrapped.body(), definition.logging());
         } else {
             reply = new Reply(status, outcome, contentType, body.bytes());
-            clientLog = statusOnly(status);
+            clientLog = EventFactory.passedThrough(status, parsed, definition.logging());
         }
         finish(x, response, reply, events.response(x, status, outcome, logged, body.bytes().length, clientLog, null));
     }
@@ -306,16 +306,16 @@ public class BrokerHandler {
     private void backendFailed(Exchange x, HttpServletResponse response, Outcome outcome, int brokerStatus,
                                String message, String errorMessage) throws IOException {
         Reply reply;
-        JsonNode clientLog;
+        EventFactory.ClientLog clientLog;
         if (x.route.profile() != null) {
             ClientResponse wrapped = x.route.profile().profile()
                     .render(new ResponseProfile.BackendResult(null, null, outcome, x.requestId));
             reply = Reply.json(wrapped.status(), outcome, wrapped.body());
-            clientLog = EventFactory.clientResponse(wrapped.body());
+            clientLog = EventFactory.clientResponse(wrapped.body(), x.route.definition().logging());
         } else {
             ObjectNode error = BrokerErrors.body(brokerStatus, outcome, message, x.requestId, List.of());
             reply = Reply.json(brokerStatus, outcome, error);
-            clientLog = error;
+            clientLog = EventFactory.ClientLog.of(error);
         }
         // no backend status: the event carries the status the frontend got, so status_code is never empty
         finish(x, response, reply, events.response(x, reply.status(), outcome, null, null, clientLog, errorMessage));
@@ -373,11 +373,5 @@ public class BrokerHandler {
     private void record(Exchange x, Outcome outcome) {
         metrics.request(x.metricMaintask(), x.metricSubtask(), outcome.name(),
                 Duration.ofNanos(System.nanoTime() - x.startedNanos));
-    }
-
-    private static JsonNode statusOnly(int status) {
-        ObjectNode node = Json.object();
-        node.put("status", status);
-        return node;
     }
 }

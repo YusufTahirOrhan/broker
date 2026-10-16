@@ -3,10 +3,13 @@ package com.acme.broker.sink.elastic;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import com.acme.broker.core.ids.Ids;
 import com.acme.broker.core.json.Json;
 import com.acme.broker.sink.config.SinkProperties;
 import com.acme.broker.sink.fake.Events;
@@ -38,6 +41,20 @@ class ElasticBulkWriterTest {
         assertThat(lines.get(3).get("adres").get("parameter_name").stringValue()).isEqualTo("il");
         assertThat(lines.get(6).get("update").get("_id").stringValue()).isEqualTo(id);
         assertThat(lines.get(7).get("doc").has("data_response")).isTrue();
+    }
+
+    @Test
+    void theMonthOfTheIndexIsTurkishTimeByDefault() {
+        // 22:30 UTC on the last day of September is already October in Istanbul, where the old broker runs
+        String id = Ids.uuidV7(Instant.parse("2026-09-30T22:30:00Z").toEpochMilli()).toString();
+
+        JsonNode turkish = Json.parse(writer.bulk(List.of(Events.response(id))).body().lines().findFirst().orElseThrow());
+        ElasticBulkWriter utcWriter = new ElasticBulkWriter(new SinkProperties.Elastic(true, "http://localhost:9200",
+                null, ZoneId.of("UTC"), null, null, null, null, null));
+        JsonNode utc = Json.parse(utcWriter.bulk(List.of(Events.response(id))).body().lines().findFirst().orElseThrow());
+
+        assertThat(turkish.get("update").get("_index").stringValue()).isEqualTo("requests_2026-10");
+        assertThat(utc.get("update").get("_index").stringValue()).isEqualTo("requests_2026-09");
     }
 
     @Test

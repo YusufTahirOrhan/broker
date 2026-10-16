@@ -76,7 +76,7 @@ broker:
     connect-timeout: 2s
     user-context-secret: ${BROKER_USER_CONTEXT_SECRET:}
   legacy-counter:
-    # Tag anahtarları eski koddan teyit edilmeli
+    # Eski controller'daki sayaç; tag anahtarları ve "Bilinmeyen ..." değerleri eski kodla aynı
     name: broker.gelen.istekler
     project-tag: maintask
     endpoint-tag: subtask

@@ -137,6 +137,37 @@ class RealTargetsTest {
         assertThat(rejected.getFirst().reason()).startsWith("Elastic 400");
     }
 
+    @Test
+    void aLoggedResponseDataTextOf40KbIsAcceptedByTheDefaultMapping() throws Exception {
+        ElasticBulkWriter writer = new ElasticBulkWriter(new SinkProperties.Elastic(true, elasticUrl(), null, null,
+                null, null, null, null, null));
+        String id = Events.newRequestId();
+        ObjectNode data = Json.object();
+        data.put("kayitlar", "müşteri kaydı; ".repeat(2_600));
+        String text = Json.write(data);
+        assertThat(Json.utf8Length(text)).isGreaterThan(40_000);
+        ObjectNode clientResponse = Json.object();
+        clientResponse.put("BACKEND_STATUS", 200);
+        clientResponse.put("status", 200);
+        clientResponse.put("data", text);
+        LogEvent response = Events.response(id);
+        LogEvent logged = new LogEvent(response.requestId(), response.traceId(), response.eventType(),
+                response.eventTime(), response.environment(), response.maintask(), response.subtask(),
+                response.routeVersion(), response.responseProfile(), response.responseProfileVersion(),
+                response.application(), response.uid(), response.userId(), response.queryId(), response.permList(),
+                response.token(), response.sessionOperation(), response.clientIp(), response.userAgent(),
+                response.httpMethod(), response.targetPath(), response.statusCode(), response.outcome(),
+                response.durationMs(), response.body(), response.bodySize(), true, clientResponse,
+                response.errorMessage(), response.brokerInstance());
+
+        assertThat(writer.write(List.of(Events.request(id, "order-service"), logged))).isEmpty();
+        send("POST", elasticUrl() + "/requests_2026-10/_refresh", "");
+
+        JsonNode document = Json.parse(send("GET", elasticUrl() + "/requests_2026-10/_doc/" + id, null)).get("_source");
+        assertThat(Json.text(document.get("data_response").get("data"))).isEqualTo(text);
+        assertThat(document.get("broker").get("body_truncated").booleanValue()).isTrue();
+    }
+
     /** The event with one more field in the frontend body. */
     private static LogEvent withBody(LogEvent event, String field, JsonNode value) {
         ObjectNode body = (ObjectNode) event.body().deepCopy();
