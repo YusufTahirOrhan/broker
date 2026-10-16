@@ -56,7 +56,7 @@ Mevcut frontend'ler bunlara bağlı.
 
 - Oturum geçerli = kayıt var **ve** `X-Token`, `X-User-Agent`, `X-Clientip` header'ları kayıttakiyle birebir aynı (büyük/küçük harf duyarlı; eksik header eşleşmez).
 - `${user.id}` ve `X-uid` = kayıttaki `uid` (doğrulanmış gövde `uid`'i). `perm_list` = kayıttaki `permissions`, sırasıyla.
-- Kayıt broker-core'da `SessionRecord` + `SessionRecordCodec`; broker ve giriş servisi aynısını kullanır. Okuma esnektir: düz JSON ve Jackson default typing izleri (`"@class"` alanı, `["java.util.ArrayList", [...]]` dizileri) okunur. Yazma biçimi ayardan gelir (`plain` varsayılan); kesin biçim "Bilgi bekleyenler"de.
+- Kayıt broker-core'da `SessionRecord` + `SessionRecordCodec`; broker ve giriş servisi aynısını kullanır. Biçim eski broker'ın `RedisTemplate`'inden teyit edildi: anahtar `StringRedisSerializer` (düz string), değer `JacksonJsonRedisSerializer<>(Object.class)`, yani tip bilgisi (`@class`) olmayan UTF-8 JSON nesnesi. Boş alan JSON `null` yazılır. Böylece eski ve yeni broker aynı kaydı okuyup yazabilir.
 - Anahtar deseni ve alan adları ayardan; varsayılanlar yukarıdakiler (`broker.session.key-pattern: "user:session:{uid}"`).
 
 **Application kontrolü.** Gövdedeki `application` izinli listede olmalı (harf duyarsız, `Names.key`); değilse ya da yoksa HTTP 200 `{"response": false}`, outcome `DENIED`. Login, logout ve anonim route'lar dahil her istekte uygulanır.
@@ -94,14 +94,14 @@ Yeni modül, kök `pom.xml`'e eklenir; paket `com.acme.broker.login`, çalışt�
      - Yazılamadı: `{"status": 401, "Ldap": false, "login": false, "X-Token": "404"}`. `response` anahtarı yok; eski kod `Ldap`'ı burada false yapıyor.
   4. Değilse: `{"response": false, "status": 401, "Ldap": <ldap>, "login": false}`
   - Başarıda `LDAP`, hatada `Ldap` yazımı eskisi gibi farklı kalır.
-- **`POST /logout`**, gövde `{"uid"}`, header'lar `X-Clientip` ve `X-User-Agent`: kayıt varsa ve kayıttaki `X-Clientip` ile `X-User-Agent` istektekilerle aynıysa silinir → `{"response": true, "status": 200, "message": "logged out"}`; değilse ya da hata olursa `{"response": false, "status": 301, "message": "something went wrong with logging out."}`. Eski broker yalnızca `uid`'e bakıyordu, herkes herkesin oturumunu kapatabiliyordu. Header eşleşmesi frontend değişmeden çalışır (`login.logout.require-client-match`, varsayılan true).
+- **`POST /logout`**, gövde `{"uid"}`, header'lar `X-Clientip` ve `X-User-Agent`: kayıt varsa ve kayıttaki `X-Clientip` ile `X-User-Agent` istektekilerle aynıysa silinir → `{"response": true, "status": 200, "message": "logged out"}`; değilse ya da hata olursa `{"response": false, "status": 301, "message": "something went wrong with logging out."}`. Eski broker yalnızca `uid`'e bakıyordu, herkes herkesin oturumunu kapatabiliyordu. Header eşleşmesi frontend değişmeden çalışır (`login.logout.require-client-match`, varsayılan true); kullanıcı onayladı.
 - **Koordinatör (yetki projesi):** Kullanıcı yetkileri, proje listesi ve zorla çıkış onunla. Gerçek API'ler sonra gelecek; şimdilik aşağıdaki varsayılan uçlar yazılır, yollar ve alan adları ayardan değişir. Tek base URL (`koordinator.url`), kimlik için ayardan sabit bir header.
   - `GET /users/{uid}/permissions` → `{"yetkiler": ["LOGPROJECT_TEMEL", ...]}` (anahtar eski yanıttaki gibi `yetkiler`).
   - `GET /projects` → `[{"id", "code", "name"}]`; application listesi `code` değerleri.
   - Admin'in mevcut varsayımları (`HttpProjectCatalog`, `HttpAuthorizationService`) aynı base URL'e taşınır.
 - **Koordinatör çıkışı:** Koordinatör bir kullanıcının oturumunu kapatabilir (eski `expire_user_triggered_from_koordinator`). Giriş servisinde `POST /internal/v1/sessions/{uid}/logout`, header `X-Koordinator-Secret` (`login.koordinator-secret` ile sabit zamanlı karşılaştırma): silindiyse 204, oturum yoksa 404, gizli anahtar yanlışsa 403. Broker'dan geçmez; Koordinatör doğrudan çağırır.
 - **Application listesi:** 5 dakikada bir Koordinatör'ün proje listesini alır ve boş değilse `broker:applications`'a süresiz yazar. Hata olursa eski değer kalır; metrik ve log.
-- **LDAP:** Spring LDAP. Ayar: `login.ldap.urls`, `base`; ya doğrudan bind (`user-dn-pattern`, ör. `uid={0},ou=people`) ya da servis hesabıyla arayıp bind (`bind-dn`, `bind-password`, `search-base`, `search-filter`). Bağlantı 3 sn, okuma 5 sn. Gerçek ayar "Bilgi bekleyenler"de.
+- **LDAP:** Eski koddaki gibi Spring LDAP ile doğrudan bind: `ldapTemplate.getContextSource().getContext(<principal>, password)`, principal `uid@<alan adı>` (Active Directory UPN; preprod'da `uid@test.com.tr`). Bind başarılıysa true; `uid` ya da şifre boşsa ya da herhangi bir exception olursa false. Arama yok. Ayar: `login.ldap.urls`, `login.ldap.principal-pattern` (ör. `{uid}@test.com.tr`; testlerde gömülü LDAP için `uid={uid},ou=people,dc=test` gibi bir DN), bağlantı 3 sn, okuma 5 sn. Eski broker ortam başına ayrı `Ldap` sınıfı kullanıyor (`LdapPreprod`, `spring.profiles.active=preprod`); yeni serviste fark yalnızca ayardır. `local` profilinde ayardaki sabit kullanıcılarla çalışan bir mod olur (`login.ldap.mode: static`); başka profilde açılırsa uygulama başlamaz.
 - **Güvenlik:** Şifre hiçbir yerde loglanmaz. `login.user-context-secret` ayarlıysa broker'ın imzaladığı `X-User-Context` doğrulanır (`issuedAt` 60 sn içinde), imzasız çağrı 403. Servis yalnızca broker'ın ağından erişilebilir olmalı.
 - **Örnek tanımlar:** `giris/login` ve `giris/logout` route tanımları modülün README'sinde ve `broker-local.json` örneğinde: POST, `TEMPLATE` gövde `{"uid": "${request.uid}", "password": "${request.password}"}` (logout'ta yalnızca `uid`), header'lar `${header.X-Clientip}` ve `${header.X-User-Agent}`, anonim, profil yok.
 - **Test:** gömülü LDAP (UnboundID), Koordinatör için `FakeHttpServer`, Testcontainers Redis; yanıt gövdeleri birebir. Uçtan uca: login → token'la istek geçer → farklı `X-User-Agent` 301 alır → farklı `X-User-Agent`'la logout reddedilir → doğru header'larla logout → aynı istek 301 alır.
@@ -137,18 +137,18 @@ Kullanıcının paylaştığı eski kod ekran görüntülerinden (2026-10-12 ve 
 - **Koordinatör:** Yetki projesinin adı. Projeleri ve yetkileri yönetir, `koordinator.secret` ile kullanıcı oturumu kapatabilir. API'leri sonra gelecek.
 - **`PublicApisService`:** Broker'daki bütün proje servislerine referans tutuyor; `refresh_permissions` ve `giris_public` subtask'leri bu servislere sabit yazılmış. Yeni düzende özel bir karşılığı yok.
 - **Saat dilimi:** Eski broker sunucusu TSİ'de çalışıyor (kullanıcı teyidi).
+- **`RedisTemplate<String, Object>` bean'i:** `setKeySerializer(new StringRedisSerializer())`, `setValueSerializer(new JacksonJsonRedisSerializer<>(Object.class))`, hash anahtar ve değerleri de `JacksonJsonRedisSerializer`, `setEnableTransactionSupport(true)`. Değerler tip bilgisi olmayan JSON.
+- **LDAP (`LdapPreprod.check_user`):** `uid`, şifre boş değilse `ldapTemplate.getContextSource().getContext(uid + "@test.com.tr", password)`; başarılıysa true, exception olursa false. Sınıf `@ConditionalOnProperty(name = "spring.profiles.active", havingValue = "preprod")` ile yalnızca preprod'da yükleniyor; diğer ortamların sınıfları görülmedi.
+- **Java sürümü:** Eski kod `catch (Exception _)` kullanıyor (Java 22+) ve spring-data-redis 4.0.3 ile çalışıyor (Boot 4.0); JSON aynı Jackson 3 ile yazılıyor.
 
 ## Bilgi bekleyenler
 
 Kullanıcıdan istendi; gelince ilgili madde güncellenir:
 
-1. Eski broker'da `RedisTemplate` bean'ini tanımlayan sınıf (`setKeySerializer` / `setValueSerializer` satırları). `RedisService` yalnızca hazır template'i kullanıyor; kullanıcının Redis'e doğrudan erişimi yok. Bulunamazsa düz JSON değer ve düz string anahtar varsayılır, DEV'de bir kayıtla doğrulanır (madde 3, 4).
-2. `ldap.check_user` metodu → LDAP bağlantısı ve DN ya da arama biçimi (madde 4).
-3. Koordinatör'ün gerçek uçları; şimdilik madde 4'teki varsayılanlar.
-4. Dashboard yerleşimini ve hızlı bağlantıları kullanan subtask'ler (maintask/subtask ve gövdeler) → yeni yerleri (sonraki tur).
-5. `X-Clientip` header'ını kimin koyduğu: frontend kodu mu, önündeki proxy mi. İstemci koyuyorsa oturumdaki IP kontrolü güvenlik sağlamaz (bkz. Açık noktalar).
-6. Logdaki `token`: olduğu gibi mi kalsın, özeti mi yazılsın (bkz. Açık noktalar).
-7. Alarm: `alarmService.checkAlarm` ve `alarm_log` kodu, `alarm` indeksinden örnek bir doküman (madde 7).
+1. Koordinatör'ün gerçek uçları; şimdilik madde 4'teki varsayılanlar.
+2. Diğer ortamların `Ldap` sınıfları (dev ve test'te farklı bir alan adı ya da her şifreyi kabul eden bir sınıf olabilir). Şimdilik her ortamda gerçek bind, fark yalnızca ayarda.
+3. Dashboard yerleşimini ve hızlı bağlantıları kullanan subtask'ler (maintask/subtask ve gövdeler) → yeni yerleri (sonraki tur).
+4. Alarm: `alarmService.checkAlarm` ve `alarm_log` kodu, `alarm` indeksinden örnek bir doküman (madde 7).
 
 ## Verilmiş kararlar
 
@@ -159,6 +159,7 @@ Tasarım dokümanındakilere ek olarak netleşenler:
 - **Veri erişimi:** JPA yok; `JdbcClient` ve SQL, şemalar Flyway ile. Veritabanı Oracle 19c (merkezi ve runtime); kod şu an PostgreSQL'de, geçiş "Sıradaki iş" 1.
 - **Broker'ın ortak hata formatı:** `{"result": false, "status": 403, "outcome": "DENIED", "message": "...", "requestId": "...", "errors": []}`. Durumlar: `X-Token` yok 400 `INVALID_REQUEST`, oturum yok 401 `DENIED`, yetki yok 403 `DENIED`, route yok 404 `UNKNOWN_TASK`, gövde `fields`'a uymuyor 400 `INVALID_REQUEST` (alan bazında `errors`). Eski broker'ın gövdeleriyle dönecek durumlar (application, oturum, login, logout) "Sıradaki iş" 3 ve 4'te.
 - **Log yazılamazsa:** `500` ve `{"result": false}`, outcome `LOG_UNAVAILABLE`; olaylar spool'a yazılır. Profil uygulanmaz.
+- **Logdaki oturum bilgisi:** `token`, `client_ip`, `user_agent` ve login yanıtındaki `X-Token` eskisi gibi olduğu gibi loglanır. Kullanıcı kararı: istek olduğu gibi loglanmalı; broker'ın Elasticsearch'ü ayrı, erişim çok sınırlı ve oturumlar kayıt altında.
 - **Profilsiz yanıt:** Gövde olduğu gibi döner. RESPONSE olayındaki `client_response` bu durumda yalnızca `{"status": <kod>}` olur, böylece loglanmamış veri `data_response`'a sızmaz; `logResponseBody` açıksa "Sıradaki iş" 2'deki kural geçerlidir.
 - **Dosya yanıtı** (`BINARY` route ya da servis `Content-Disposition` döndürdü): `client_response` = `{"info": <route'un binaryInfo'su ya da "Dosya yanıtı: <dosya adı>">}`; gövde loglanmaz, onaydan sonra stream edilir.
 - **Timeout ve bağlantı hatası, profil yoksa:** ortak formatta 504 `TIMEOUT` ve 502 `TECHNICAL_ERROR`.
@@ -299,7 +300,7 @@ Derlemede doğrulandı (Boot 4.1.1, Spring Framework 7.0, Jackson 3.1, Kafka 4.2
 
 1. Dağıtım: dört uygulamanın ve giriş servisinin imajları ve ortam manifestleri (env-admin ve admin `mtls` profiliyle; broker'da kalıcı spool volume'u önerilir). Kafka topic'i ve DLQ tasarımdaki ayarlarla açılmalı; ClickHouse DDL'i ve Elastic bileşen şablonu `broker-log-sink/src/main/resources` altında.
 2. Geçiş planı adım 1–2 (tasarım "Geçiş planı"): DEV'de eski broker ile sink'in Elastic dokümanlarını alan alan karşılaştırma; statik subtask'leri `runtime_route`'a ve merkezi history'ye aktaran tek seferlik script.
-3. Eski broker'ın Redis'te tuttuğu kullanıcı verileri (dashboard yerleşimi `user:layout:{sicil}`, hızlı bağlantılar `user:quick_link:{sicil}`), "Bilgi bekleyenler" 4 gelince.
+3. Eski broker'ın Redis'te tuttuğu kullanıcı verileri (dashboard yerleşimi `user:layout:{sicil}`, hızlı bağlantılar `user:quick_link:{sicil}`), "Bilgi bekleyenler" 3 gelince. Değerleri de tip bilgisi olmayan JSON; anahtar ve biçim korunursa veri taşımadan yeni servise geçilir.
 4. Alarm ("Sıradaki iş" 7).
 5. Frontend: sözleşme `docs/frontend-guide.md`'de; canlı sürüm (artifact) bu dosyadan eşitlenir.
 
@@ -312,9 +313,8 @@ Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya ya
 ## Açık noktalar
 
 - SSO sağlayıcısı ve rol claim'i.
-- **Logdaki oturum bilgisi:** Elastic'e `token`, `client_ip` ve `user_agent` birlikte yazılıyor; login yanıtındaki yeni token da `data_response`'ta. Oturum kontrolü yalnızca bu üçüne baktığı için Kibana'ya erişen biri, açık bir oturumu 1 gün boyunca taklit edebilir. Öneri: `token` alanına token'ın özeti (SHA-256'nın ilk 16 karakteri) yazılsın, login yanıtındaki `X-Token` maskelensin; aynı oturumun kayıtları yine gruplanabilir. Eski log değerlerini değiştirdiği için karar kullanıcıda.
-- **`X-Clientip`:** İstemci koyuyorsa IP bağlaması güvenlik sağlamaz. Eski broker kapandıktan sonra broker IP'yi bağlantıdan ya da güvenilir proxy'nin header'ından almalı; geçişte iki broker aynı değeri karşılaştırdığı için şimdilik header kalır.
-- **Hata yanıtlarında HTTP 200:** Mevcut frontend'ler için korunuyor. Hepsi güncellenince `broker.compat.legacy-responses: false` ile ortak formata geçilir.
+- **`X-Clientip`:** Kullanıcı bu header'ı frontend'in değil, önündeki proxy'nin koyduğunu düşünüyor; teyit edilmedi. İstemci koyuyorsa IP bağlaması güvenlik sağlamaz; o durumda eski broker kapandıktan sonra IP bağlantıdan ya da güvenilir proxy'nin header'ından alınmalı.
+- **Hata yanıtlarında HTTP 200 (ileride):** Mevcut frontend'ler için korunuyor. Frontend'ler güncellenince `broker.compat.legacy-responses: false` ile ortak formata ve gerçek HTTP status'lara geçilebilir; kullanıcı açık kalmasını istedi.
 - Kullanıcı başına tek oturum ve 1 günlük sabit süre (eski davranış): yeni login eskisini ezer, kullanılsa da oturum 1 günde biter.
 - PROD'da base URL değişikliğinin onay akışına alınması; PROD'da `DISABLE`/`ROLLBACK` için acil durum politikası (şimdilik onay istiyor).
 - Frontend gövdesinde üst seviyede `broker` adlı alan gönderen istek var mı (eski dokümanda ezilir).

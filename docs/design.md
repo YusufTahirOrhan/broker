@@ -77,8 +77,8 @@ Controller durum tutmaz, yalnızca sırayı yönetir. Route tablosu ve derlenmi�
 
 Login eskisi gibi broker üzerinden yapılır, ama işi ayrı bir giriş servisi yapar; broker yalnızca yönlendirir ve oturumu okur. Gövdeler ve Redis kaydı eski broker'la birebir aynıdır, böylece frontend'ler değişmez ve geçişte iki broker aynı oturumları kullanabilir.
 
-- **Login:** `X-Token: login` isteği giriş servisine gider. Servis kullanıcıyı LDAP'ta doğrular, yetkilerini Koordinatör'den (yetki projesi) alır, düz bir UUID token üretir ve kaydı Redis'e yazar.
-- **Oturum kaydı:** Anahtar `user:session:{uid}`, değer `{"uid", "X-Token", "X-Clientip", "X-User-Agent", "permissions"}`, süre 1 gün; broker süreyi uzatmaz. Yeni login aynı kullanıcının eski oturumunu ezer.
+- **Login:** `X-Token: login` isteği giriş servisine gider. Servis kullanıcıyı eskisi gibi LDAP'a uid@alan-adı ile bind ederek doğrular, yetkilerini Koordinatör'den (yetki projesi) alır, düz bir UUID token üretir ve kaydı Redis'e yazar.
+- **Oturum kaydı:** Anahtar `user:session:{uid}`, değer `{"uid", "X-Token", "X-Clientip", "X-User-Agent", "permissions"}`, süre 1 gün; broker süreyi uzatmaz. Değer, eski broker'daki gibi tip bilgisi olmayan JSON'dur. Yeni login aynı kullanıcının eski oturumunu ezer.
 - **Kontrol:** Kayıt gövdedeki `uid` ile okunur; token ve iki header kayıttakiyle aynıysa oturum geçerlidir. Servislere giden `X-uid` ve `${user.id}` bu doğrulanmış `uid`'dir.
 - **Logout:** `X-Token: logout` isteği kaydı siler. Kayıttaki `X-Clientip` ve `X-User-Agent` istekteki header'larla aynı olmalıdır; eski broker yalnızca `uid`'e baktığı için herkes herkesin oturumunu kapatabiliyordu. Frontend bu header'ları zaten gönderdiği için frontend'de değişiklik gerekmez. Koordinatör bir oturumu giriş servisinden doğrudan kapatabilir.
 - **Application listesi:** Giriş servisi izinli application'ları Koordinatör'den 5 dakikada bir alıp Redis'e yazar; broker listeyi oradan okur ve liste yüklenmeden trafik almaz.
@@ -1325,8 +1325,9 @@ Path tabanlı bir sözleşme (`POST /api/{maintask}/{subtask}`) ileride hazır g
 - [ ] **Yetki projesi (Koordinatör):** Projeler ve yetkiler Koordinatör'de yönetiliyor; admin, giriş servisi ve application listesi onu kullanır, kullanıcı oturumunu da kapatabilir. Gerçek API'ler sonra gelecek; şimdilik varsayılan uçlarla yazılıyor ve her ortamda ayrı çalıştığı varsayıldı.
 - [x] **Giriş:** Ayrı bir giriş servisi LDAP'ta doğrular, UUID token üretir ve oturumu Redis'e 1 günlüğüne yazar; broker `login` ve `logout` isteklerini ona yönlendirir. Yanıtlar eski broker'la aynı.
 - [x] **Yanıt verisinin loglanması:** Subtask başına "Yanıt verisi loglansın" seçeneği (`logResponseBody`), varsayılan kapalı.
-- [ ] **Oturum kaydının biçimi:** Eski broker'ın `RedisTemplate` serileştirmesi, bean'in tanımlandığı sınıftan teyit edilecek; bulunamazsa düz JSON varsayılır ve DEV'de bir kayıtla doğrulanır. İki broker aynı anda çalışacaksa değer birebir aynı olmalı.
+- [x] **Oturum kaydının biçimi:** Anahtar düz string, değer tip bilgisi olmayan JSON (eski broker'ın `StringRedisSerializer` ve `JacksonJsonRedisSerializer`'ı); iki broker aynı kaydı okuyup yazabilir.
 - [ ] **Eski broker'ın Redis'teki kullanıcı verileri:** Dashboard yerleşimi ve hızlı bağlantılar (`user:layout:*`, `user:quick_link:*`) eski broker'ın içinde; yeni düzende bir servise taşınmalı, hangi subtask'lerle çağrıldıkları bekleniyor. `giris_public` ve `refresh_permissions` sıradan maintask'ler; subtask'leri diğerleri gibi taşınır.
 - [x] **Logout:** Kayıttaki `X-Clientip` ve `X-User-Agent` eşleşmesi isteniyor; eski broker yalnızca `uid`'e bakıyordu. Frontend'de değişiklik gerekmez.
-- [ ] **Logdaki oturum bilgisi:** `token`, `client_ip` ve `user_agent` Elastic'e birlikte yazılıyor; Kibana'ya erişen biri açık bir oturumu taklit edebilir. Token'ın özetini yazmak ve login yanıtındaki token'ı maskelemek önerildi; eski log değerlerini değiştirdiği için karar bekleniyor.
-- [ ] **`X-Clientip`:** İstemci koyuyorsa IP bağlaması güvenlik sağlamaz; eski broker kapandıktan sonra broker IP'yi bağlantıdan ya da güvenilir proxy'den almalı. Header'ı kimin koyduğu soruldu.
+- [x] **Logdaki oturum bilgisi:** `token`, `client_ip` ve `user_agent` eskisi gibi oldukları gibi loglanır. İstek olduğu gibi loglanmalı; broker'ın Elasticsearch'ü ayrı, erişim çok sınırlı ve oturumlar kayıt altında.
+- [ ] **`X-Clientip`:** Frontend'in değil, önündeki proxy'nin koyduğu varsayılıyor; teyit edilmedi. İstemci koyuyorsa IP bağlaması güvenlik sağlamaz ve IP bağlantıdan alınmalı.
+- [ ] **Hatalarda HTTP 200:** Mevcut frontend'ler için eski gövdeler HTTP 200 ile dönüyor. Frontend'ler güncellenince tek bir ayarla ortak formata ve gerçek HTTP status'lara geçilebilir.
