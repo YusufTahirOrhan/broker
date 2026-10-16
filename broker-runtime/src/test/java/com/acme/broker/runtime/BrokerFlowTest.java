@@ -545,6 +545,37 @@ class BrokerFlowTest {
     }
 
     @Test
+    void userPermissionIsTheFirstRoutePermissionTheUserHas() {
+        // the legacy sorgu: SORGU_TEMEL if the user has it, else SORGU_ILERI
+        RuntimeFixture.project("sorgu", backend.baseUrl());
+        RuntimeFixture.route("sorgu", "kisi_sorgula", "POST", "/sorgu", List.of("SORGU_TEMEL", "SORGU_ILERI"), false,
+                null, """
+                {"request": {"fields": [{"name": "tckn", "type": "string", "required": true}],
+                             "headers": {"X-Perm": "${user.permission}"},
+                             "body": {"mode": "TEMPLATE", "template": {"tckn": "${request.tckn}", "perm": "${user.permission}"}}}}
+                """);
+        RuntimeFixture.route("sorgu", "duyuru", "POST", "/duyuru", List.of(), true, null, """
+                {"request": {"body": {"mode": "TEMPLATE", "template": {"perm": "${user.permission}", "sabit": 1}}}}
+                """);
+        cache.reload();
+        backend.json("POST", "/sorgu", 200, "{}");
+        backend.json("POST", "/duyuru", 200, "{}");
+        session("tok-both", "u-both", "SORGU_ILERI", "SORGU_TEMEL");
+        session("tok-advanced", "u-advanced", "SORGU_ILERI");
+        String query = "{\"maintask\": \"sorgu\", \"subtask\": \"kisi_sorgula\", \"tckn\": \"1\"}";
+
+        broker("tok-both", query);
+        broker("tok-advanced", query);
+        broker("no-session", "{\"maintask\": \"sorgu\", \"subtask\": \"duyuru\"}");
+
+        List<FakeHttpServer.Recorded> sent = backend.requests("/sorgu");
+        assertThat(sent.get(0).header("X-Perm")).isEqualTo("SORGU_TEMEL");
+        assertThat(Json.parse(sent.get(0).body()).get("perm").stringValue()).isEqualTo("SORGU_TEMEL");
+        assertThat(sent.get(1).header("X-Perm")).isEqualTo("SORGU_ILERI");
+        assertThat(Json.parse(backend.requests("/duyuru").getFirst().body())).isEqualTo(Json.parse("{\"sabit\": 1}"));
+    }
+
+    @Test
     void anAnonymousRouteKnowsTheUserOnlyWithAValidSession() {
         backend.json("GET", "/ping", 200, "{}");
         RuntimeFixture.project("down-service", backend.baseUrl());

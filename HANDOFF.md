@@ -1,6 +1,6 @@
 # Devir notu
 
-Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; çekirdek ve dört modül yazıldı, `mvn -B verify` yeşil. Bu turun işi "Sıradaki iş" bölümünde: Oracle 19c, yanıt verisinin loglanması, eski broker'la aynı oturum ve yanıtlar, giriş servisi. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
+Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; çekirdek ve beş modül (giriş servisi dahil) yazıldı, `mvn -B verify` yeşil. 2026-10-16 turunda "Sıradaki iş"in 1–6. maddeleri yapıldı: Oracle 19c, yanıt verisinin loglanması, eski broker'la aynı oturum ve yanıtlar, giriş servisi, DEV'e bağlı yerel çalıştırma, `${user.permission}`; alarm (7) sonraki tur. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
 
 Son güncelleme: 2026-10-16.
 
@@ -17,7 +17,7 @@ Son güncelleme: 2026-10-16.
 
 ## Sıradaki iş (2026-10-16)
 
-**Durum:** 1–5 bitti; 6 sırada.
+**Durum:** 1–6 bitti (2026-10-16). 7 (alarm) sonraki tur.
 
 Maddeler sırayla yapılır; her biri kendi commit'leriyle biter ve her push'tan önce `mvn -B verify` yeşildir. 7. madde bu turda yapılmaz. "Bilgi bekleyenler"deki konular işi durdurmaz: o parçalar arayüz arkasında, ayara bağlı ve aşağıdaki varsayılanlarla yazılır; bilgi gelince yalnızca o parça değişir. Eski broker'dan alınan gövdeler, anahtarlar ve alan adları birebir korunur ve testlerle sabitlenir. Bir madde bitince bu nottaki modül bölümleri de güncellenir.
 
@@ -100,7 +100,8 @@ Mevcut frontend'ler bunlara bağlı.
 - **Test:** yanıt gövdelerinin anahtar kümesi ve tipleri; header eşleşme matrisi; application listesi kaynakları ve readiness; public maintask'ler; bilinmeyen route + geçersiz oturum → 301; login ve logout route eşlemesi.
 - **Yapıldı (2026-10-16):** `SessionRecord` + `SessionRecordCodec` core'da (`com.acme.broker.core.session`); broker `SessionStore.find(uid, token, clientIp, userAgent)`, `ApplicationList` (+ `ApplicationsHealthIndicator`) ve `BrokerHandler`'daki yeni sıra. Uygulanırken netleşenler:
   - **Sayaç:** `broker.gelen.istekler`, eski controller'daki gibi `X-Token` kontrolünden sonra ve application kontrolünden önce artar (`X-Token` login/logout değilse).
-  - **Yerel geliştirme bölümü:** Yerel uygulamalar DEV'e bağlanır, Docker kullanılmaz (`docs/local-run.md`). Yerel broker 8083'te, durumunu `broker:loaded-local:*`'a yazar; yerel env-admin ve admin DEV Oracle'daki ayrı şemalarla çalışır. Admin `local` profilinde boş şemaya örnek veri yazar. OpenAPI ve Swagger yalnızca `local` ve `dev` profillerinde.
+  - **Yer tutucu `${user.permission}`:** Tanımlardaki yer tutucu tablosuna eklenir: kullanıcıda olan ilk route yetkisi (önce proje, sonra başka proje yetkileri, tanımdaki sırayla); oturum ya da eşleşen yetki yoksa alan yazılmaz.
+- **Yerel geliştirme bölümü:** Yerel uygulamalar DEV'e bağlanır, Docker kullanılmaz (`docs/local-run.md`). Yerel broker 8083'te, durumunu `broker:loaded-local:*`'a yazar; yerel env-admin ve admin DEV Oracle'daki ayrı şemalarla çalışır. Admin `local` profilinde boş şemaya örnek veri yazar. OpenAPI ve Swagger yalnızca `local` ve `dev` profillerinde.
 - **`legacy-responses: false`:** application izinli değilse 403 `DENIED`, oturum geçersizse (route yoksa da) 401 `DENIED`, ortak formatta.
   - **Route yok + Redis okunamadı:** 503 `TECHNICAL_ERROR` (oturum bilinmeden 301 ya da 404 verilmez).
   - **Oturum işlemleri:** Olaya gövdedeki maintask/subtask yazılır (route'unki değil); REQUEST gövdesi bayraktan bağımsız maskeli yazılır; `client_response` = giriş servisinin gövdesi + `"data": ""` (X-Token açık). Servisin gövdesi RESPONSE olayına (ClickHouse) yalnızca route'un `logResponseBody`'si açıksa yazılır; böylece token ClickHouse'a girmez. `X-User-Context` `userId: null` ile imzalanır. Public maintask'lerde `X-Token` login olsa da istek oturum işlemi sayılmaz.
@@ -158,6 +159,8 @@ Yeni modül, kök `pom.xml`'e eklenir; paket `com.acme.broker.login`, çalışt�
 ### 6. `${user.permission}` yer tutucusu
 
 Kullanıcıda olan ilk route yetkisi: önce `permissions`, sonra `foreignPermissions`, tanımdaki sırayla. Oturum yoksa değeri yoktur, alan yazılmaz. Eski broker `sorgu` isteklerinde `perm`'i böyle seçiyordu (önce `SORGU_TEMEL`, sonra `SORGU_ILERI`); `sorgu` route'ları bu sırayla tanımlanınca aynı davranış elde edilir. Doğrulayıcı, önizleme, rehberin yer tutucu tablosu ve "Değişiklik kaydı" güncellenir.
+
+- **Yapıldı (2026-10-16):** `RequestContext.permission` ve `RequestContext.firstPermission(routePermissions, userPermissions)` core'da; doğrulayıcı `${user.permission}`'ı kabul eder, `definition-rules` listeler. Broker'da route yetkileri artık sıralı (`Route.permissions` `List`; runtime DB'deki dizi zaten önce proje, sonra başka proje yetkilerini sırayla taşıyordu). Önizleme ve test çağrısında kullanıcının formdaki yetkilere sahip olduğu varsayılır: `Trial` ve `TestCallRequest` isteğe bağlı `permissions`/`foreignPermissions` (test çağrısında `permission`) taşır; rehber ve değişiklik kaydı güncellendi. Testler: core (sıra, yokken alanın yazılmaması), broker (`sorgu` örneği, anonim route), admin önizlemesi.
 
 ### 7. Alarm (bu turda yok)
 
@@ -221,7 +224,7 @@ Tasarım dokümanındakilere ek olarak netleşenler:
 
 ## Modüller ve durum
 
-Bu bölüm kodun güncel halini anlatır; "Sıradaki iş"teki maddeler bittikçe güncellenir. Oracle geçişi (1), yanıt verisi logu (2) ve eski broker'la aynı oturum ve yanıtlar (3) bitti.
+Bu bölüm kodun güncel halini anlatır; "Sıradaki iş"teki maddeler bittikçe güncellenir. "Sıradaki iş"in 1–6. maddeleri bitti.
 
 ### broker-core (yeşil)
 

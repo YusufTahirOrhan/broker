@@ -299,7 +299,7 @@ Yanıt aynı alanların yanında `id`, `projectId`, `maintask`, `version`, `stat
 
 ### Örnek: test sonucu
 
-`POST /projects/12/test` gövdesi `environment`, kaydedilmemiş tanım (`httpMethod`, `pathTemplate`, `responseProfileId`, `definition`), örnek frontend gövdesi (`sample`) ve isteğe bağlı `headers` ile `userId` alır. `/routes/preview` aynı gövdeyi alır ve yalnızca `request` ile `errors` döner.
+`POST /projects/12/test` gövdesi `environment`, kaydedilmemiş tanım (`httpMethod`, `pathTemplate`, `responseProfileId`, `definition`), örnek frontend gövdesi (`sample`) ve isteğe bağlı `headers`, `userId`, `permissions` ile `foreignPermissions` alır (formdaki yetki listeleri; `${user.permission}` bunlardan ilki olur). `/routes/preview` aynı gövdeyi alır ve yalnızca `request` ile `errors` döner.
 
 ```json
 {
@@ -450,6 +450,7 @@ Değeri yalnızca bir yer tutucudan oluşan alan değerin tipini korur: `"${requ
 | `${request.<yol>}` | Tanım | Frontend gövdesindeki alan; `fields`'ta tanımlı olmalı. Zarf alanları (`uid`, `application`, `maintask`, `subtask`) tanımlanmadan okunur; anonim route'ta `uid` doğrulanmamıştır |
 | `${header.<ad>}` | Tanım | Frontend isteğinin header'ı; yalnızca `readableHeaders` listesindekiler |
 | `${user.id}` | Tanım | Oturum kaydıyla doğrulanan kullanıcı: kayıt gövdedeki `uid` ile bulunur, token, `X-Clientip` ve `X-User-Agent` eşleşmelidir. Oturum yoksa boş |
+| `${user.permission}` | Tanım | Kullanıcıda olan ilk route yetkisi: önce `permissions`, sonra `foreignPermissions`, tanımdaki sırayla. Oturum yoksa ya da kullanıcıda bu yetkilerden hiçbiri yoksa değeri yoktur, alan yazılmaz. Önizleme ve testte kullanıcının formdaki yetkilere sahip olduğu varsayılır |
 | `${requestId}` | Tanım, profil | İsteğin ID'si |
 | `${backend.status}` | Profil | Servisin HTTP status kodu; timeout'ta null |
 | `${backend.body}` | Profil | Servisin yanıt gövdesi; `error` şablonunda yalnızca 4xx'te dolu |
@@ -524,6 +525,7 @@ Backend geliştirildikçe bu tablo güncellenir; en yeni kayıt en üsttedir. Bi
 
 | Tarih | Değişiklik |
 | --- | --- |
+| 2026-10-16 | Yeni yer tutucu `${user.permission}`: kullanıcıda olan ilk route yetkisi (önce `permissions`, sonra `foreignPermissions`). Önizleme ve test gövdesi isteğe bağlı `permissions` ve `foreignPermissions` alır; `definition-rules`'daki `placeholders.definition` yeni yer tutucuyu listeler |
 | 2026-10-16 | Swagger ve OpenAPI yalnızca `local` ve `dev` profillerinde açık. Yerel çalıştırma `docs/local-run.md`'de: admin API `local` profilinde DEV Oracle'daki yerel bir şemaya bağlanır ve boş şemayı örnek veriyle doldurur |
 | 2026-10-16 | Broker'ın uygulamalara döndüğü yanıtlar, `application` kontrolü, oturum kaydı ve zarf alanlarının `${request.*}` ile okunması uygulandı. `X-User-Agent` route header'ı olarak tanımlanabilir; `X-User-*` yasağının tek istisnası. `GET /meta/definition-rules` yanıtına `forbiddenHeaderExceptions` eklendi, `placeholders.definition` zarf yer tutucularını (`${request.uid}`, `${request.application}`, `${request.maintask}`, `${request.subtask}`) da listeler |
 | 2026-10-16 | Sözleşme güncellendi; backend'de sıradaki geliştirme turunda uygulanacak. `logResponseBody` editörde "Yanıt verisi loglansın" seçeneği oldu; açıkken yanıt verisi Elastic'e de yazılır. Broker'ın uygulamalara döndüğü yanıtlar eski broker'la aynı: `application` kontrolü ve geçersiz oturum HTTP 200 ile eski gövdeleri döner, login ve logout giriş servisinden gelir. Zarf alanları `${request.*}` ile okunur, `${user.id}` oturum kaydıyla doğrulanır. Projeler ve yetkiler tek bir yetki projesinden gelir |

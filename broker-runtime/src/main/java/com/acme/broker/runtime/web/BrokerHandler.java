@@ -255,11 +255,13 @@ public class BrokerHandler {
             return;
         }
         String userId = x.session == null ? null : x.session.userId();
+        String permission = x.session == null ? null
+                : RequestContext.firstPermission(route.permissions(), x.session.permissions());
         BackendRequest backendRequest;
         try {
             backendRequest = BackendRequestBuilder.build(route.method(), route.pathTemplate(), definition,
                     route.baseUrl(), new RequestContext(x.body, validated.effectiveBody(), request::getHeader,
-                            readable, userId, x.requestId));
+                            readable, userId, permission, x.requestId));
         } catch (RequestBuildException e) {
             reject(x, response, 400, Outcome.INVALID_REQUEST, "İstek gövdesi alan tanımına uymuyor.",
                     List.of(e.error()));

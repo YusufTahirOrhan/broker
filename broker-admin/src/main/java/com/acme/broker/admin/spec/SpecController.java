@@ -163,7 +163,7 @@ public class SpecController {
         }
         TestCallRequest call = new TestCallRequest(project.maintask(), null, trial.httpMethod(), trial.pathTemplate(),
                 trial.definition(), profile, trial.sample(), trial.headers(),
-                trial.userId() == null ? user.username() : trial.userId(), user.username());
+                trial.userId() == null ? user.username() : trial.userId(), trial.permission(), user.username());
         JsonNode result = client.call(environment, "POST", "/admin/v1/test", call);
         audit.atInfo()
                 .addKeyValue("operation", "test")

@@ -65,7 +65,8 @@ public final class DefinitionRules {
         ObjectNode placeholders = rules.putObject("placeholders");
         strings(placeholders.putArray("definition"),
                 List.of("${request.<yol>}", "${request.uid}", "${request.application}", "${request.maintask}",
-                        "${request.subtask}", "${header.<ad>}", "${user.id}", "${requestId}"));
+                        "${request.subtask}", "${header.<ad>}", "${user.id}", "${user.permission}",
+                        "${requestId}"));
         strings(placeholders.putArray("profile"),
                 List.of("${backend.status}", "${backend.body}", "${outcome}", "${requestId}"));
         return rules;

@@ -173,8 +173,9 @@ public final class RouteValidator {
                 }
             }
             case Placeholder.USER -> {
-                if (!"id".equals(placeholder.path())) {
-                    errors.add(new FieldError(path, "Kullanıcı için yalnızca ${user.id} kullanılabilir"));
+                if (!"id".equals(placeholder.path()) && !"permission".equals(placeholder.path())) {
+                    errors.add(new FieldError(path,
+                            "Kullanıcı için yalnızca ${user.id} ve ${user.permission} kullanılabilir"));
                 }
             }
             case Placeholder.REQUEST_ID -> {

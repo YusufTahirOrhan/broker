@@ -83,7 +83,8 @@ class RouteValidatorTest {
                 {"request": {"fields": [{"name": "adres", "type": "object", "required": true}],
                              "queryParams": {"il": "${request.adres.il}", "x": "${request.yok}",
                                              "lang": "${header.Accept-Language}", "secret": "${header.X-Token}",
-                                             "who": "${user.name}", "status": "${backend.status}"}}}
+                                             "who": "${user.name}", "status": "${backend.status}",
+                                             "perm": "${user.permission}"}}}
                 """;
         List<FieldError> errors = validate("GET", "/a", definition);
         assertThat(errors).extracting(FieldError::field).containsExactlyInAnyOrder(
