@@ -16,6 +16,11 @@ jobs:
           java-version: '25'
           cache: maven
 
+      # Testlerin Oracle XE imajı büyük (açılmış hali ~6 GB); ayrı adımda çekilir ki süresi derlemeden ayrı görünsün.
+      # Docker Hub anonim çekişleri sınırladığı için imaj GitHub registry'sinden gelir (OracleDatabase.IMAGE).
+      - name: Pull Oracle XE image
+        run: docker pull -q ghcr.io/gvenzl/oracle-xe:21-slim-faststart
+
       - name: Build and test
         run: mvn -B -ntp verify
 

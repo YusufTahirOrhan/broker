@@ -17,6 +17,8 @@ Son güncelleme: 2026-10-16.
 
 ## Sıradaki iş (2026-10-16)
 
+**Durum:** 1 bitti; 2–6 sırada.
+
 Maddeler sırayla yapılır; her biri kendi commit'leriyle biter ve her push'tan önce `mvn -B verify` yeşildir. 7. madde bu turda yapılmaz. "Bilgi bekleyenler"deki konular işi durdurmaz: o parçalar arayüz arkasında, ayara bağlı ve aşağıdaki varsayılanlarla yazılır; bilgi gelince yalnızca o parça değişir. Eski broker'dan alınan gövdeler, anahtarlar ve alan adları birebir korunur ve testlerle sabitlenir. Bir madde bitince bu nottaki modül bölümleri de güncellenir.
 
 ### 1. Oracle 19c
@@ -35,6 +37,16 @@ Maddeler sırayla yapılır; her biri kendi commit'leriyle biter ve her push'tan
 - **Snapshot okuması:** Oracle `REPEATABLE READ` desteklemez (yalnızca READ COMMITTED ve SERIALIZABLE). `RouteRepository.loadSnapshot()` `SET TRANSACTION READ ONLY` ile okur; Oracle'da bu, işlem boyunca tutarlı okuma verir. Örneğin `DataSourceTransactionManager#setEnforceReadOnly(true)` ve izolasyon seviyesi vermeden `readOnly = true`.
 - **CLOB:** 32 KB'tan büyük bir tanımla yazma ve okuma test edilir.
 - **Bitti sayılır:** Bütün DB testleri Oracle XE'de geçer; `local` profili ve CI Oracle ile çalışır; bu nottaki PostgreSQL anlatımları güncellenir.
+- **Yapıldı (2026-10-16):** Üç modül Oracle'da; PostgreSQL bağımlılığı kalmadı. Uygulanırken verilen kararlar:
+  - **Test imajı:** `ghcr.io/gvenzl/oracle-xe:21-slim-faststart` (Docker Hub anonim çekişte 429 veriyor; aynı imaj GitHub registry'sinde). Ortak yardımcı core test-jar'da `OracleDatabase`: şema sahibi container'ın uygulama kullanıcısı, diğer kullanıcılar yalnızca `CREATE SESSION` ile açılır; yetkileri migration'daki GRANT bloğundan gelir. Testler böylece gerçek kullanıcı ayrımıyla çalışır: env-admin `broker_runtime_writer`, broker `broker_runtime_reader`, admin `broker_admin_app`; Flyway ve test temizliği şema sahibiyle. CI'da imaj ayrı bir adımda çekilir.
+  - **Merkezde yetkiler:** `route_permission (definition_id, kind OWN/FOREIGN, sort_order, code)`, `code` indeksli; kayıtta liste silinip sırasıyla yeniden yazılır (uygulama kullanıcısının tek DELETE yetkisi burada). Okumada `JSON_ARRAYAGG`. `trg_route_permissions` bu tablonun satırlarında çalışır. `ck_route_permission` (anonim değilse en az bir yetki) tablo dışına çıktığı için yalnızca uygulamada (`RouteService`) kalır.
+  - **History snapshot'ı** Java'da kurulur (`RouteSnapshots.stored`, `ProfileRepository.history`); anahtarlar `to_jsonb`'nin verdiği snake_case adlar, zaman damgaları ISO metni.
+  - **`comment` kolonları** `change_note` oldu; API alanı `comment` kaldı. Diğer adlar `V$RESERVED_WORDS`'e karşı testle denetlenir (`OracleDatabase.reservedNames`).
+  - **Metinler:** Serbest metinler (açıklama, not, gerekçe, hata nedeni) `CLOB`; JSON'lar `CLOB` + `IS JSON` ve CLOB olarak bağlanır (`SqlParameterValue(Types.CLOB)`). Runtime `permissions` `VARCHAR2(4000 CHAR)` JSON dizisi, `ck_runtime_permission` `JSON_EXISTS(permissions, '$[0]')` ile.
+  - **Arama** `LOWER(..) LIKE .. ESCAPE '\'`; `%`, `_` ve `\` metin olarak aranır. `p.maintask || ' / ' || r.subtask` Oracle'da NULL vermediği için talep adı `CASE` ile seçilir.
+  - **Runtime yazımı:** `MERGE` (eşleşirse yalnızca `promotion_id` daha yeniyse günceller) + aynı transaction'da versiyon artışı; ORA-00001'de MERGE bir kez tekrarlanır. Eşzamanlı ilk yazma testi var.
+  - **Snapshot okuması:** `RouteRepository` kendi `DataSourceTransactionManager`'ını `enforceReadOnly` ile kurar (`SET TRANSACTION READ ONLY`); arada commit edilen yazmayı görmediği testle doğrulandı.
+  - **32 KB'tan büyük tanım** (Türkçe karakterli 40 KB'lık şablon) env-admin, broker ve merkezde yazılıp okunur.
 
 ### 2. Yanıt verisinin loglanması ve küçük log düzeltmeleri
 
@@ -156,7 +168,7 @@ Tasarım dokümanındakilere ek olarak netleşenler:
 
 - **Platform:** Java 25, Spring Boot 4.1.1, Maven çok modüllü proje. Paket kökü `com.acme.broker` (şirket adına göre toplu değiştirilebilir).
 - **JSON:** Jackson 3 (`tools.jackson.*`; anotasyonlar `com.fasterxml.jackson.annotation.*`). Ağaç API'si yalnızca `broker-core/.../json/Json.java` içinden kullanılır; Jackson metot adı hatası çıkarsa tek yerde düzeltilir.
-- **Veri erişimi:** JPA yok; `JdbcClient` ve SQL, şemalar Flyway ile. Veritabanı Oracle 19c (merkezi ve runtime); kod şu an PostgreSQL'de, geçiş "Sıradaki iş" 1.
+- **Veri erişimi:** JPA yok; `JdbcClient` ve SQL, şemalar Flyway ile. Veritabanı Oracle 19c (merkezi ve runtime); şema = şema sahibi kullanıcı (`BROKER_ADMIN`, `BROKER_RUNTIME`), uygulamalar kendi kullanıcılarıyla `CURRENT_SCHEMA` (Hikari `schema`) üzerinden şemasız SQL yazar. Testler Oracle XE 21 ile; 19c'de olmayan özellik kullanılmaz.
 - **Broker'ın ortak hata formatı:** `{"result": false, "status": 403, "outcome": "DENIED", "message": "...", "requestId": "...", "errors": []}`. Durumlar: `X-Token` yok 400 `INVALID_REQUEST`, oturum yok 401 `DENIED`, yetki yok 403 `DENIED`, route yok 404 `UNKNOWN_TASK`, gövde `fields`'a uymuyor 400 `INVALID_REQUEST` (alan bazında `errors`). Eski broker'ın gövdeleriyle dönecek durumlar (application, oturum, login, logout) "Sıradaki iş" 3 ve 4'te.
 - **Log yazılamazsa:** `500` ve `{"result": false}`, outcome `LOG_UNAVAILABLE`; olaylar spool'a yazılır. Profil uygulanmaz.
 - **Logdaki oturum bilgisi:** `token`, `client_ip`, `user_agent` ve login yanıtındaki `X-Token` eskisi gibi olduğu gibi loglanır. Kullanıcı kararı: istek olduğu gibi loglanmalı; broker'ın Elasticsearch'ü ayrı, erişim çok sınırlı ve oturumlar kayıt altında.
@@ -177,7 +189,7 @@ Tasarım dokümanındakilere ek olarak netleşenler:
 
 ## Modüller ve durum
 
-Bu bölüm kodun 2026-10-13'teki halini anlatır (PostgreSQL, token anahtarlı oturum); "Sıradaki iş"teki maddeler bittikçe güncellenir.
+Bu bölüm kodun güncel halini anlatır; "Sıradaki iş"teki maddeler bittikçe güncellenir. Oracle geçişi (1) bitti; oturum hâlâ token anahtarlı eski varsayımla (3'te değişecek).
 
 ### broker-core (yeşil)
 
@@ -224,13 +236,14 @@ Paket `com.acme.broker.runtime`. Tek endpoint `POST /broker`; akış `web/Broker
 
 - **`status_code`:** Servis yanıt verdiyse servisin status'u; vermediyse (broker hataları, timeout, bağlantı hatası) frontend'e dönen status. ClickHouse kolonu böylece boş kalmaz.
 - **Log isteği gövdesi:** `logRequestBody=false` ise REQUEST olayında yalnızca zarf alanları yazılır (eski ana doküman zarfı yine taşır).
-- **RouteCache:** `RouteRepository.loadSnapshot()` REPEATABLE READ READ ONLY; bozuk route/profil atlanır (`broker.routes.skipped`). `broker:routes-changed` aboneliği, `broker.cache.verify-interval` (15 sn) kontrolü, her kontrolde `broker:loaded:{instanceId}` (60 sn TTL). İlk yükleme ve Kafka metadata ısınması `ApplicationRunner` (ısınma önce).
+- **RouteCache:** `RouteRepository.loadSnapshot()` tek bir `SET TRANSACTION READ ONLY` transaction'ında okur (Oracle'da REPEATABLE READ yok); bozuk route/profil atlanır (`broker.routes.skipped`). `broker:routes-changed` aboneliği, `broker.cache.verify-interval` (15 sn) kontrolü, her kontrolde `broker:loaded:{instanceId}` (60 sn TTL). İlk yükleme ve Kafka metadata ısınması `ApplicationRunner` (ısınma önce).
 - **Spool:** istek başına bir `.jsonl` dosyası (atomik taşıma), `broker.spool.resend-interval` ile eskiden yeniye gönderilir; ilk hatada durur. Gauge `broker.log.spool.files`.
 - **Metrikler:** `broker.requests` (maintask, subtask, outcome; bilinmeyen subtask `UNKNOWN`), `broker.gelen.istekler` (tag anahtarları ve "Bilinmeyen ..." değerleri `broker.legacy-counter.*`), `broker.log.ack`, `broker.log.unavailable`, `broker.routes.config.version`.
 - **İç test endpoint'i:** `POST /internal/v1/test`, yalnızca `broker.test.enabled=true` iken oluşur; `X-Broker-Test-Secret` sabit zamanlı karşılaştırılır. Kafka'ya yazmaz.
 - **`local` profili:** `LocalOverrides` (`broker-local.json`, `baseUrls` + `routes`, dosya değişince 2 sn içinde uygulanır), `log-sink: console`, `broker.local.skip-permission-check-for-overrides`.
 - **Flyway kapalı** (`spring.flyway.enabled=false`): broker şemaya hiç yazmaz.
-- **Testler:** env-admin'in migration'ı ve `RuntimeStore`'u ile runtime DB, Testcontainers PostgreSQL ve Redis, EmbeddedKafka, `FakeHttpServer`. Log kapısı topic'i olmayan bir Kafka ile denenir (servis çağrılmaz, 500, spool; topic açılınca spool gönderilir).
+- **Veritabanı:** `broker_runtime_reader` kullanıcısıyla, `spring.datasource.hikari.schema` (varsayılan `BROKER_RUNTIME`) ile şemasız okur; Hikari havuzu `read-only`.
+- **Testler:** env-admin'in migration'ı ve `RuntimeStore`'u ile runtime DB, Testcontainers Oracle XE (broker okuyucu kullanıcıyla bağlanır) ve Redis, EmbeddedKafka, `FakeHttpServer`. Log kapısı topic'i olmayan bir Kafka ile denenir (servis çağrılmaz, 500, spool; topic açılınca spool gönderilir).
 - **Tracing:** span adı ve attribute'lar OTel Java agent'ına bırakıldı; broker `traceparent`'ı taşır. Span'ı `maintask/subtask` diye adlandırmak için agent'ın API'si eklenmeli (açık).
 
 ### broker-env-admin (yeşil)
@@ -249,11 +262,11 @@ Paket `com.acme.broker.envadmin`. Uçlar `/admin/v1` altında; hatalar merkezle 
 | `POST /probe` | `{"maintask", "httpMethod", "pathTemplate", "pathVariables"}` → `{"result", "status", "allow", "url", "message"}`; değeri verilmeyen path değişkeni `1` olur; redirect izlenmez; ulaşılamazsa `INCONCLUSIVE`, `status: null` |
 | `POST /test` | `TestCallRequest`'e kayıtlı base URL'i koyup broker'ın iç endpoint'ine iletir; kapalıysa 403 `TEST_NOT_ALLOWED`, broker'a ulaşılamazsa 502 `BROKER_UNREACHABLE` |
 
-- **Şema:** `db/migration/broker_runtime/V1__runtime_schema.sql` (tasarımdaki DDL; rol yoksa GRANT atlanır). Flyway şema sahibiyle (`BROKER_RUNTIME_DB_OWNER_*`), uygulama `broker_runtime_writer` ile çalışır.
+- **Şema:** `db/migration/broker_runtime/V1__runtime_schema.sql`, Oracle 19c (tasarımdaki modelin Oracle karşılığı; kullanıcı yoksa GRANT atlanır, ORA-01917). Flyway şema sahibiyle (`BROKER_RUNTIME_DB_OWNER_*`, `create-schemas: false`), uygulama `broker_runtime_writer` ile `BROKER_RUNTIME_DB_SCHEMA` (varsayılan `BROKER_RUNTIME`) üzerinden çalışır. Yazmalar `MERGE` + versiyon artışı, tek transaction.
 - **mTLS:** `server.ssl.bundle=env-admin`, `client-auth=need`; bundle `mtls` profilinde (`application-mtls.yml`). Profil açılmazsa uygulama başlamaz. `broker.env-admin.allowed-client-subjects` doluysa sertifika konusu da kontrol edilir (403 `CLIENT_NOT_ALLOWED`). Actuator ayrı portta (9090), TLS'siz.
 - **Audit:** `broker.audit` logger'ı; `operation`, `actor` (gövdeden ya da `X-Actor`), `promotion_id`, `client` alanları.
-- **Paketleme:** çalıştırılabilir jar `-exec` ekiyle; düz jar ve test-jar (`RuntimeContainers`: PostgreSQL + Redis) broker-runtime testlerinde kullanılır.
-- **Testler:** Testcontainers PostgreSQL ve Redis, `FakeHttpServer`; mTLS keytool ile üretilen sertifikalarla uçtan uca denenir.
+- **Paketleme:** çalıştırılabilir jar `-exec` ekiyle; düz jar ve test-jar (`RuntimeContainers`: Oracle XE + Redis, okuyucu ve yazıcı kullanıcılar, şema sahibiyle temizlik) broker-runtime testlerinde kullanılır.
+- **Testler:** Testcontainers Oracle XE ve Redis, `FakeHttpServer`; mTLS keytool ile üretilen sertifikalarla uçtan uca denenir. 32 KB'tan büyük tanım, eşzamanlı ilk yazma ve ayrılmış kelime kontrolü dahil.
 
 ### broker-admin (yeşil)
 
@@ -264,14 +277,14 @@ Paket `com.acme.broker.admin`. Sözleşme `docs/frontend-guide.md`; uygulama sı
 | `security` | `!local`: OAuth2 resource server (JWT); roller `broker.admin.security.roles-claim` claim'inden, rol adı değilse `group-roles` ile eşlenir; kullanıcı adı `preferred_username` (yoksa `sub`). `local`: HTTP Basic, `viewer`/`editor`/`approver`/`lead`. Rol kontrolleri serviste (`User.require`); rolü olmayan kullanıcı her uçta 403. 401/403 problem formatında |
 | `environment` | `EnvironmentRepository` (sıra, onay, test ayarı DB'den), `EnvironmentClient` (Admin API; `ssl-bundle` ile mTLS, redirect yok). Bağlanamama `UnreachableException` (hiçbir şey değişmedi), istek gitti ama yanıt yok `NoAnswerException` (uygulanmış olabilir) |
 | `project`, `catalog`, `authz` | Proje kaydı (önek çakışması `PREFIX_OVERLAP`, harf duyarsız `DUPLICATE`), ortam ayarı önce ortama, sonra merkeze. Proje ve yetkilendirme servisleri `mode: http` (varsayılan API'ler sınıf yorumlarında) ya da `memory` |
-| `route`, `profile` | Güncel satır + aynı transaction'da history (`to_jsonb`), iyimser kilit (`VERSION_CONFLICT` + `currentVersion`), geri alma, arşiv (`ROUTE_DEPLOYED`), karşılaştırma, doğrulama, önizleme (`BackendRequestBuilder`) |
+| `route`, `profile` | Güncel satır + aynı transaction'da history (snapshot Java'da kurulur, snake_case anahtarlar), iyimser kilit (`VERSION_CONFLICT` + `currentVersion`), geri alma, arşiv (`ROUTE_DEPLOYED`), karşılaştırma, doğrulama, önizleme (`BackendRequestBuilder`) |
 | `promotion` | Ön kontroller, onay kuralı (hedef `requires_approval` ya da versiyon anonim erişimi açıyorsa), dört göz (`FOUR_EYES` + `ck_four_eyes`), uygulama: yoklama → Admin API (`promotionId` = talep ID'si) → `route_deployment`/`response_profile_deployment`. Yanıt kaybolursa talep `APPLYING`'de kalır, `RETRY` aynı ID ile tamamlar |
 | `spec` | Spec karşılaştırma (method + path, değişken adları yok sayılır; `CHANGED` saklanan `spec_fingerprint`'ten), istekten şablon, test (yalnızca `test_calls_allowed`; `broker.audit` logu), yoklama |
 | `jobs` | `DriftCheck` (gece; ortamın listesiyle karşılaştırma + her ACTIVE route'a yoklama, `broker.admin.drift` sayacı, `last_probe_status`), `CatalogSync` (ad yenileme, servisten kalkan proje `MISSING`). Birden çok instance'ta aynı anda çalışmaları zararsız (idempotent) |
 
-- **Şema:** `db/migration/broker_admin/V1__central_schema.sql` tasarımdaki DDL'in birebir kopyası (rol yoksa GRANT atlanır); `V2__environments.sql` ortamları `dev/test/prod_admin_api_url` placeholder'larıyla seed eder. Trigger fonksiyonları tabloları şemasız çağırdığı için bağlantının `search_path`'i `broker_admin` olmalı (`spring.datasource.hikari.schema`).
+- **Şema:** `db/migration/broker_admin/V1__central_schema.sql`, tasarımdaki modelin Oracle 19c karşılığı (yukarıda "Sıradaki iş" 1'deki kararlar: `route_permission`, tablo başına PL/SQL trigger'lar, `CASE`'li açık talep index'leri, `change_note`; kullanıcı yoksa GRANT atlanır). `V2__environments.sql` ortamları `dev/test/prod_admin_api_url` placeholder'larıyla `MERGE` ile seed eder. Uygulama `broker_admin_app` ile `BROKER_ADMIN_DB_SCHEMA` (varsayılan `BROKER_ADMIN`) üzerinden şemasız çalışır.
 - **Ayar:** SSO issuer'ı `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUERURI` ile verilir (boş varsayılan yok; boş issuer her token'ı reddeder). mTLS istemci sertifikası `mtls` profilinde (`application-mtls.yml`, bundle `env-client`).
-- **Testler:** Testcontainers PostgreSQL, `local` profili ve bellek içi `FakeEnvironments` (üç ortamın Admin API'si; promotion ID idempotency'si, eski talebin reddi, proje/profil yokluğu, sessiz kalma). SSO testi gerçek imzalı JWT ile; ortam istemcisinin mTLS'i istemci sertifikası isteyen bir `HttpsServer`'a karşı.
+- **Testler:** Testcontainers Oracle XE (`CentralDatabase`: uygulama `broker_admin_app` ile, temizlik şema sahibiyle; history trigger'ları temizlik sırasında kapatılır), `local` profili ve bellek içi `FakeEnvironments` (üç ortamın Admin API'si; promotion ID idempotency'si, eski talebin reddi, proje/profil yokluğu, sessiz kalma). SSO testi gerçek imzalı JWT ile; ortam istemcisinin mTLS'i istemci sertifikası isteyen bir `HttpsServer`'a karşı.
 
 ### broker-log-sink (yeşil)
 
@@ -289,7 +302,8 @@ Paket `com.acme.broker.sink`. İki `@KafkaListener` (toplu), her biri kendi cons
 
 Derlemede doğrulandı (Boot 4.1.1, Spring Framework 7.0, Jackson 3.1, Kafka 4.2, Testcontainers 2.0).
 
-- Starter'lar: `spring-boot-starter-webmvc`, `-jdbc`, `-flyway` (+ `flyway-database-postgresql`), `-data-redis`, `-kafka`, `-actuator`, `-security`, `-security-oauth2-resource-server`. Test: `spring-boot-starter-test`, `spring-kafka-test`, `testcontainers-postgresql`, `testcontainers-junit-jupiter`; `@LocalServerPort` `org.springframework.boot.test.web.server` paketinde. Yeni `org.testcontainers.postgresql.PostgreSQLContainer` generic değil.
+- Starter'lar: `spring-boot-starter-webmvc`, `-jdbc`, `-flyway` (+ `flyway-database-oracle`), `-data-redis`, `-kafka`, `-actuator`, `-security`, `-security-oauth2-resource-server`; sürücü `ojdbc17` (Boot'un yönettiği 23.x, 19c'yi destekler). Test: `spring-boot-starter-test`, `spring-kafka-test`, `testcontainers-oracle-xe` (sınıfı hâlâ `org.testcontainers.containers.OracleContainer`), `testcontainers-junit-jupiter`; `@LocalServerPort` `org.springframework.boot.test.web.server` paketinde.
+- Oracle ile Spring: `JdbcClient.update(keyHolder, "id")` identity kolonunu döner (`Number`); 4000 karakterden uzun metin `SqlParameterValue(Types.CLOB, ...)` ile bağlanır; `BadSqlGrammarException`'ın mesajında ORA kodu yok, kökteki istisnada var. Oracle `NUMBER` kolonları `getObject`'te `BigDecimal` döner.
 - springdoc `3.0.0` Boot 4.1.1 ile çalışıyor (`/v3/api-docs`, `/swagger-ui.html`).
 - `spring-boot-maven-plugin` `repackage` execution'ının id'si `repackage` olmalı; yoksa parent'ın execution'ı da çalışıp düz jar'ı çalıştırılabilir jar'la ezer. Modüllerde çalıştırılabilir jar `-exec` ekiyle.
 - JKS SSL bundle'ları açılışta yüklenir; dosyası olmayan bundle `server.ssl.enabled=false` olsa da uygulamayı düşürür. Bundle tanımları bu yüzden `mtls` profilinde.
@@ -308,7 +322,10 @@ Derlemede doğrulandı (Boot 4.1.1, Spring Framework 7.0, Jackson 3.1, Kafka 4.2
 
 Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya yazılır; canlı doküman buradan güncellenir.
 
-- Henüz yok.
+- **Kısıtlar listesi (merkezi veri modeli):** `ck_route_permission` artık bir DB kısıtı değil; yetkiler `route_permission` tablosunda olduğu için "anonim olmayan route en az bir yetki taşır" kuralı uygulamada (`RouteService`) uygulanır. `trg_route_permissions` `route_permission` satırlarında çalışır. Yeni satır: `route_permission (definition_id, kind, sort_order, code)`, `code` indeksli; uygulama kullanıcısı yalnızca bu tabloda silebilir.
+- **History kolonları:** `comment` (Oracle'da ayrılmış) `change_note` oldu; API'de alan adı `comment` kaldı. History snapshot'ı DB'de `to_jsonb` ile değil uygulamada kurulur, anahtarlar aynı.
+- **Runtime'a uygulama ("tek ifadeyle uygular" paragrafı ve SQL'i):** Oracle'da DML'li CTE yok. `MERGE` (eşleşen satırı yalnızca `promotion_id` daha yeniyse günceller) ve versiyon artışı aynı transaction'da; eşzamanlı ilk eklemede ORA-00001 gelirse MERGE bir kez tekrarlanır. Davranış aynı: eski ya da tekrar gelen talep yazamaz, değişiklik yoksa versiyon artmaz.
+- **Runtime şeması:** `runtime_route.permissions` JSON dizisi metni; kısıt `JSON_EXISTS(permissions, '$[0]')`.
 
 ## Açık noktalar
 

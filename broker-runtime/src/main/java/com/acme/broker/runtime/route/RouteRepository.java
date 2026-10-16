@@ -1,27 +1,27 @@
 package com.acme.broker.runtime.route;
 
-import java.sql.Array;
-import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
+
+import javax.sql.DataSource;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.acme.broker.core.json.Json;
 import com.acme.broker.runtime.metrics.BrokerMetrics;
 
 /**
- * Reads the runtime DB. The version, profiles and routes come from one REPEATABLE READ snapshot, so a broker never
- * serves routes of one version with profiles of another.
+ * Reads the runtime DB. The version, profiles and routes come from one read-only transaction: Oracle answers every
+ * query of a {@code SET TRANSACTION READ ONLY} transaction as of its start, so a broker never serves routes of one
+ * version with profiles of another. (Oracle has no REPEATABLE READ; SERIALIZABLE would do the same with more locking.)
  */
 @Repository
 public class RouteRepository {
@@ -32,16 +32,17 @@ public class RouteRepository {
     private final TransactionTemplate snapshotTransaction;
     private final BrokerMetrics metrics;
 
-    public RouteRepository(JdbcClient jdbc, PlatformTransactionManager transactions, BrokerMetrics metrics) {
+    public RouteRepository(JdbcClient jdbc, DataSource dataSource, BrokerMetrics metrics) {
         this.jdbc = jdbc;
         this.metrics = metrics;
+        DataSourceTransactionManager transactions = new DataSourceTransactionManager(dataSource);
+        transactions.setEnforceReadOnly(true);
         this.snapshotTransaction = new TransactionTemplate(transactions);
-        snapshotTransaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
         snapshotTransaction.setReadOnly(true);
     }
 
     public long currentVersion() {
-        return jdbc.sql("SELECT version FROM broker_runtime.runtime_config_version WHERE id = 1")
+        return jdbc.sql("SELECT version FROM runtime_config_version WHERE id = 1")
                 .query(Long.class)
                 .single();
     }
@@ -59,29 +60,29 @@ public class RouteRepository {
      * broken profile; the rest still load.
      */
     public RouteSnapshot loadSnapshot() {
-        return snapshotTransaction.execute(status -> {
+        return inSnapshot(() -> {
             long version = currentVersion();
             List<ProfileRow> profileRows = jdbc.sql("""
-                            SELECT name, version, definition::text AS definition
-                              FROM broker_runtime.runtime_response_profile
+                            SELECT name, version, definition
+                              FROM runtime_response_profile
                             """)
                     .query((rs, row) -> new ProfileRow(rs.getString("name"), rs.getInt("version"),
                             rs.getString("definition")))
                     .list();
             List<RouteRow> routeRows = jdbc.sql("""
                             SELECT r.maintask, r.subtask, r.version, r.http_method, r.path_template, r.permissions,
-                                   r.anonymous, r.response_profile, r.definition::text AS definition, p.base_url
-                              FROM broker_runtime.runtime_route r
-                              JOIN broker_runtime.runtime_project p ON p.maintask = r.maintask
-                             WHERE r.status = 'ACTIVE' AND p.enabled
+                                   r.anonymous, r.response_profile, r.definition, p.base_url
+                              FROM runtime_route r
+                              JOIN runtime_project p ON p.maintask = r.maintask
+                             WHERE r.status = 'ACTIVE' AND p.enabled = 1
                             """)
                     .query((rs, row) -> new RouteRow(rs.getString("maintask"), rs.getString("subtask"),
                             rs.getInt("version"), rs.getString("http_method"), rs.getString("path_template"),
-                            strings(rs.getArray("permissions")), rs.getBoolean("anonymous"),
+                            Json.stringList(rs.getString("permissions")), rs.getBoolean("anonymous"),
                             rs.getString("response_profile"), rs.getString("definition"), rs.getString("base_url")))
                     .list();
             List<RouteSnapshot.Project> projects = jdbc.sql("""
-                            SELECT maintask, base_url, enabled FROM broker_runtime.runtime_project
+                            SELECT maintask, base_url, enabled FROM runtime_project
                             """)
                     .query((rs, row) -> new RouteSnapshot.Project(rs.getString("maintask"), rs.getString("base_url"),
                             rs.getBoolean("enabled")))
@@ -117,12 +118,13 @@ public class RouteRepository {
         });
     }
 
+    /** Runs the reads in one read-only transaction: every query sees the database as of the transaction's start. */
+    public <T> T inSnapshot(Supplier<T> reads) {
+        return snapshotTransaction.execute(status -> reads.get());
+    }
+
     private void skip(String kind, String name, String reason) {
         log.error("Bozuk kayıt atlandı: {} {} ({})", kind, name, reason);
         metrics.skipped(kind);
-    }
-
-    private static List<String> strings(Array array) throws SQLException {
-        return array == null ? List.of() : Arrays.asList((String[]) array.getArray());
     }
 }

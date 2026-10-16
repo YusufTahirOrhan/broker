@@ -73,14 +73,13 @@ class AdminApiTest {
     @BeforeEach
     void reset() {
         http = new JsonHttp("http://localhost:" + port);
-        jdbc.sql("TRUNCATE broker_runtime.runtime_route, broker_runtime.runtime_response_profile, "
-                + "broker_runtime.runtime_project").update();
+        RuntimeContainers.reset();
         redis.delete(redis.keys(RuntimeSignals.LOADED_KEY_PREFIX + "*"));
         service.reset();
     }
 
     private long configVersion() {
-        return jdbc.sql("SELECT version FROM broker_runtime.runtime_config_version").query(Long.class).single();
+        return jdbc.sql("SELECT version FROM runtime_config_version").query(Long.class).single();
     }
 
     private void project(String maintask, String baseUrl) {
@@ -131,13 +130,14 @@ class AdminApiTest {
         await().atMost(Duration.ofSeconds(5)).until(() -> signals.contains(Long.toString(before + 1)));
 
         Map<String, Object> row = jdbc.sql("""
-                        SELECT version, status, applied_by, promotion_id, permissions::text AS permissions,
-                               definition->'request'->'pathVariables'->>'id' AS id
-                          FROM broker_runtime.runtime_route WHERE maintask = 'order-service'
+                        SELECT version, status, applied_by, promotion_id, permissions,
+                               JSON_VALUE(definition, '$.request.pathVariables.id') AS id
+                          FROM runtime_route WHERE maintask = 'order-service'
                         """).query().singleRow();
-        assertThat(row).containsEntry("version", 3).containsEntry("status", "ACTIVE")
-                .containsEntry("applied_by", "sec.zeynep").containsEntry("promotion_id", 100L)
-                .containsEntry("permissions", "{ORDER_WRITE}").containsEntry("id", "${request.siparisNo}");
+        assertThat(((Number) row.get("version")).intValue()).isEqualTo(3);
+        assertThat(((Number) row.get("promotion_id")).longValue()).isEqualTo(100L);
+        assertThat(row).containsEntry("status", "ACTIVE").containsEntry("applied_by", "sec.zeynep")
+                .containsEntry("permissions", "[\"ORDER_WRITE\"]").containsEntry("id", "${request.siparisNo}");
     }
 
     @Test
@@ -184,6 +184,47 @@ class AdminApiTest {
     }
 
     @Test
+    void definitionsLargerThanAVarcharAreStoredWhole() {
+        project("order-service", service.baseUrl());
+        String definition = CoreFixtures.largeAddOrderNote(40_000);
+        String body = route(100, 3, null).replace(CoreFixtures.ADD_ORDER_NOTE, definition);
+
+        JsonHttp.Response applied = http.put("/admin/v1/routes/order-service/add_order_note", body);
+
+        assertThat(applied.status()).as(applied.text()).isEqualTo(200);
+        String stored = jdbc.sql("SELECT definition FROM runtime_route").query(String.class).single();
+        assertThat(stored.getBytes(StandardCharsets.UTF_8).length).isGreaterThan(32 * 1024);
+        assertThat(Json.parse(stored)).isEqualTo(Json.parse(definition));
+    }
+
+    @Test
+    void concurrentFirstWritesOfTheSameRouteSettleOnOneRow() throws Exception {
+        project("order-service", service.baseUrl());
+        long before = configVersion();
+
+        List<JsonHttp.Response> responses = new java.util.ArrayList<>();
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(8)) {
+            List<java.util.concurrent.Future<JsonHttp.Response>> calls = new java.util.ArrayList<>();
+            for (int i = 0; i < 8; i++) {
+                calls.add(executor.submit(() -> new JsonHttp("http://localhost:" + port)
+                        .put("/admin/v1/routes/order-service/add_order_note", route(100, 3, null))));
+            }
+            for (java.util.concurrent.Future<JsonHttp.Response> call : calls) {
+                responses.add(call.get());
+            }
+        }
+
+        assertThat(responses).allSatisfy(response -> assertThat(response.status()).as(response.text()).isEqualTo(200));
+        assertThat(responses).filteredOn(response -> !response.json().get("alreadyApplied").booleanValue()).hasSize(1);
+        assertThat(configVersion()).isEqualTo(before + 1);
+    }
+
+    @Test
+    void theSchemaUsesNoReservedWords() {
+        assertThat(RuntimeContainers.ORACLE.reservedNames()).isEmpty();
+    }
+
+    @Test
     void anOlderPromotionCannotOverwriteANewerOne() {
         project("order-service", service.baseUrl());
         http.put("/admin/v1/routes/order-service/add_order_note", route(120, 4, null));
@@ -195,7 +236,7 @@ class AdminApiTest {
         assertThat(late.json().get("code").stringValue()).isEqualTo("STALE_PROMOTION");
         assertThat(late.json().get("currentPromotionId").longValue()).isEqualTo(120);
         assertThat(configVersion()).isEqualTo(version);
-        assertThat(jdbc.sql("SELECT version FROM broker_runtime.runtime_route").query(Integer.class).single())
+        assertThat(jdbc.sql("SELECT version FROM runtime_route").query(Integer.class).single())
                 .isEqualTo(4);
     }
 
@@ -258,7 +299,7 @@ class AdminApiTest {
 
         assertThat(disabled.status()).as(disabled.text()).isEqualTo(200);
         assertThat(disabled.json().get("configVersion").longValue()).isEqualTo(before + 1);
-        assertThat(jdbc.sql("SELECT status FROM broker_runtime.runtime_route").query(String.class).single())
+        assertThat(jdbc.sql("SELECT status FROM runtime_route").query(String.class).single())
                 .isEqualTo("DISABLED");
 
         JsonHttp.Response replay = http.post("/admin/v1/routes/order-service/add_order_note/disable",
@@ -272,7 +313,7 @@ class AdminApiTest {
 
         JsonHttp.Response enabled = http.put("/admin/v1/routes/order-service/add_order_note", route(103, 3, null));
         assertThat(enabled.status()).isEqualTo(200);
-        assertThat(jdbc.sql("SELECT status FROM broker_runtime.runtime_route").query(String.class).single())
+        assertThat(jdbc.sql("SELECT status FROM runtime_route").query(String.class).single())
                 .isEqualTo("ACTIVE");
     }
 

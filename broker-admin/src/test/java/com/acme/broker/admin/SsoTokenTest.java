@@ -20,6 +20,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 import com.acme.broker.admin.support.AdminTestBase;
+import com.acme.broker.admin.support.CentralDatabase;
 import com.acme.broker.core.testing.JsonHttp;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
@@ -47,9 +48,7 @@ class SsoTokenTest {
         Files.writeString(pem, "-----BEGIN PUBLIC KEY-----\n"
                 + Base64.getMimeEncoder().encodeToString(KEYS.getPublic().getEncoded()) + "\n-----END PUBLIC KEY-----\n");
         registry.add("spring.security.oauth2.resourceserver.jwt.public-key-location", () -> pem.toUri().toString());
-        registry.add("spring.datasource.url", AdminTestBase.POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", AdminTestBase.POSTGRES::getUsername);
-        registry.add("spring.datasource.password", AdminTestBase.POSTGRES::getPassword);
+        CentralDatabase.register(registry);
         registry.add("spring.flyway.placeholders.dev_admin_api_url", () -> AdminTestBase.ENVIRONMENTS.url("dev"));
         registry.add("spring.flyway.placeholders.test_admin_api_url", () -> AdminTestBase.ENVIRONMENTS.url("test"));
         registry.add("spring.flyway.placeholders.prod_admin_api_url", () -> AdminTestBase.ENVIRONMENTS.url("prod"));

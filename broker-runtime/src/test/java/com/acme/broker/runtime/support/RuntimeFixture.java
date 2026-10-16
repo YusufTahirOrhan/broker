@@ -8,11 +8,12 @@ import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.acme.broker.core.json.Json;
+import com.acme.broker.core.testing.OracleDatabase;
 import com.acme.broker.envadmin.runtime.ApplyResult;
 import com.acme.broker.envadmin.runtime.RuntimeStore;
 import com.acme.broker.envadmin.testing.RuntimeContainers;
@@ -29,17 +30,20 @@ public final class RuntimeFixture {
     private static final JdbcClient JDBC;
 
     static {
-        String url = RuntimeContainers.POSTGRES.getJdbcUrl();
-        String user = RuntimeContainers.POSTGRES.getUsername();
-        String password = RuntimeContainers.POSTGRES.getPassword();
+        OracleDatabase oracle = RuntimeContainers.ORACLE;
         Flyway.configure()
-                .dataSource(url, user, password)
-                .schemas("broker_runtime")
-                .defaultSchema("broker_runtime")
+                .dataSource(oracle.url(), oracle.owner(), OracleDatabase.PASSWORD)
+                .defaultSchema(oracle.schema())
+                .createSchemas(false)
                 .locations("classpath:db/migration/broker_runtime")
                 .load()
                 .migrate();
-        DATA_SOURCE = new DriverManagerDataSource(url, user, password);
+        // the Admin API's user, as in an environment; the broker reads as broker_runtime_reader
+        SingleConnectionDataSource writer = new SingleConnectionDataSource(oracle.url(), RuntimeContainers.WRITER,
+                OracleDatabase.PASSWORD, true);
+        writer.setAutoCommit(true);
+        writer.setSchema(oracle.schema());
+        DATA_SOURCE = writer;
         JDBC = JdbcClient.create(DATA_SOURCE);
         STORE = new RuntimeStore(JDBC, new TransactionTemplate(new DataSourceTransactionManager(DATA_SOURCE)));
     }
@@ -47,14 +51,15 @@ public final class RuntimeFixture {
     private RuntimeFixture() {
     }
 
+    /** The broker's connection: the read-only user of the environment, tables through {@code CURRENT_SCHEMA}. */
     public static void register(DynamicPropertyRegistry registry) {
         RuntimeContainers.register(registry);
+        registry.add("spring.datasource.username", () -> RuntimeContainers.READER);
     }
 
     /** Empties the runtime tables; the config version keeps growing so brokers see the next write as new. */
     public static void reset() {
-        JDBC.sql("TRUNCATE broker_runtime.runtime_route, broker_runtime.runtime_response_profile, "
-                + "broker_runtime.runtime_project").update();
+        RuntimeContainers.reset();
     }
 
     public static long project(String maintask, String baseUrl) {

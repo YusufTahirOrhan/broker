@@ -5,18 +5,19 @@ spring:
     virtual:
       enabled: true
   datasource:
-    url: ${BROKER_ADMIN_DB_URL:jdbc:postgresql://localhost:5432/broker}
+    # Oracle 19c; şema = şema sahibi kullanıcı (BROKER_ADMIN), DBA açar
+    url: ${BROKER_ADMIN_DB_URL:jdbc:oracle:thin:@//localhost:1521/XEPDB1}
     username: ${BROKER_ADMIN_DB_USER:broker_admin_app}
     password: ${BROKER_ADMIN_DB_PASSWORD:}
     hikari:
-      # Tasarımdaki trigger fonksiyonları tabloları şemasız çağırır; bağlantının search_path'i broker_admin olmalı
-      schema: broker_admin
+      # tablolar şemasız yazılır; bağlantının CURRENT_SCHEMA'sı şema sahibi olur
+      schema: ${BROKER_ADMIN_DB_SCHEMA:BROKER_ADMIN}
   flyway:
-    # DDL şema sahibiyle çalışır; uygulama broker_admin_app ile yazar
+    # DDL şema sahibiyle çalışır; uygulama broker_admin_app ile yazar. Şemayı Flyway açmaz.
     user: ${BROKER_ADMIN_DB_OWNER_USER:${spring.datasource.username}}
     password: ${BROKER_ADMIN_DB_OWNER_PASSWORD:${spring.datasource.password}}
-    schemas: broker_admin
-    default-schema: broker_admin
+    default-schema: ${BROKER_ADMIN_DB_SCHEMA:BROKER_ADMIN}
+    create-schemas: false
     locations: classpath:db/migration/broker_admin
     placeholders:
       dev_admin_api_url: ${BROKER_DEV_ADMIN_API_URL:https://broker-env-admin.dev.internal:8443}

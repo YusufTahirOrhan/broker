@@ -5,15 +5,19 @@ spring:
     virtual:
       enabled: true
   datasource:
-    url: ${BROKER_RUNTIME_DB_URL:jdbc:postgresql://localhost:5432/broker}
+    # Oracle 19c; şema = şema sahibi kullanıcı (BROKER_RUNTIME), DBA açar
+    url: ${BROKER_RUNTIME_DB_URL:jdbc:oracle:thin:@//localhost:1521/XEPDB1}
     username: ${BROKER_RUNTIME_DB_USER:broker_runtime_writer}
     password: ${BROKER_RUNTIME_DB_PASSWORD:}
+    hikari:
+      # tablolar şemasız yazılır; bağlantının CURRENT_SCHEMA'sı şema sahibi olur
+      schema: ${BROKER_RUNTIME_DB_SCHEMA:BROKER_RUNTIME}
   flyway:
-    # DDL şema sahibiyle çalışır; uygulama broker_runtime_writer ile yazar
+    # DDL şema sahibiyle çalışır; uygulama broker_runtime_writer ile yazar. Şemayı Flyway açmaz.
     user: ${BROKER_RUNTIME_DB_OWNER_USER:${spring.datasource.username}}
     password: ${BROKER_RUNTIME_DB_OWNER_PASSWORD:${spring.datasource.password}}
-    schemas: broker_runtime
-    default-schema: broker_runtime
+    default-schema: ${BROKER_RUNTIME_DB_SCHEMA:BROKER_RUNTIME}
+    create-schemas: false
     locations: classpath:db/migration/broker_runtime
   data:
     redis:

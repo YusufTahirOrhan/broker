@@ -39,6 +39,16 @@ public final class CoreFixtures {
                            "maskFields": ["password", "cardNo", "tckn"], "maxBodyBytes": 65536 }
             }
             """;
+    /**
+     * add_order_note with a constant text of at least {@code bytes} UTF-8 bytes in its body template: larger than any
+     * VARCHAR2 bind, and with Turkish letters so that bytes and characters differ.
+     */
+    public static String largeAddOrderNote(int bytes) {
+        String unit = "çağrı merkezi notu şablonu; ";
+        String text = unit.repeat(bytes / unit.getBytes(java.nio.charset.StandardCharsets.UTF_8).length + 1);
+        return ADD_ORDER_NOTE.replace("\"source\": \"WEB\" }", "\"source\": \"WEB\", \"terms\": \"" + text + "\" }");
+    }
+
 
     /** The {@code log-project} profile, the counterpart of {@code LogProjectResponse}. */
     public static final String LOG_PROJECT_PROFILE = """

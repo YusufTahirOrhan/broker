@@ -8,6 +8,8 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
 import com.acme.broker.admin.db.Rows;
@@ -45,14 +47,14 @@ public class ProjectRepository {
 
     public List<Row> list(String query, String catalogStatus) {
         return jdbc.sql("SELECT " + COLUMNS + FROM + """
-                         WHERE (CAST(:query AS text) IS NULL
-                                OR lower(p.maintask COLLATE "C") LIKE '%' || lower(CAST(:query AS text) COLLATE "C") || '%'
-                                OR lower(p.name COLLATE "C") LIKE '%' || lower(CAST(:query AS text) COLLATE "C") || '%')
-                           AND (CAST(:status AS text) IS NULL OR p.catalog_status = :status)
+                         WHERE (:pattern IS NULL
+                                OR LOWER(p.maintask) LIKE LOWER(:pattern) ESCAPE '\\'
+                                OR LOWER(p.name) LIKE LOWER(:pattern) ESCAPE '\\')
+                           AND (:status IS NULL OR p.catalog_status = :status)
                          ORDER BY p.maintask
                         """)
-                .param("query", query == null || query.isBlank() ? null : query)
-                .param("status", catalogStatus == null || catalogStatus.isBlank() ? null : catalogStatus)
+                .param("pattern", Rows.contains(query))
+                .param("status", Rows.text(catalogStatus == null || catalogStatus.isBlank() ? null : catalogStatus))
                 .query(ProjectRepository::row).list();
     }
 
@@ -74,25 +76,26 @@ public class ProjectRepository {
 
     public long insert(String externalProjectId, String maintask, String name, String prefix, String ownerTeam,
                        String description, Long defaultProfileId, String user) {
-        return jdbc.sql("""
+        KeyHolder keys = new GeneratedKeyHolder();
+        jdbc.sql("""
                         INSERT INTO project (external_project_id, maintask, name, permission_prefix, catalog_status,
                                              catalog_synced_at, owner_team, description, default_response_profile_id,
                                              created_by)
                         VALUES (:external, :maintask, :name, :prefix, :status,
-                                CASE WHEN CAST(:external AS text) IS NULL THEN NULL ELSE now() END,
+                                CASE WHEN :external IS NULL THEN NULL ELSE SYSTIMESTAMP END,
                                 :ownerTeam, :description, :profile, :user)
-                        RETURNING id
                         """)
-                .param("external", externalProjectId)
+                .param("external", Rows.text(externalProjectId))
                 .param("maintask", maintask)
                 .param("name", name)
                 .param("prefix", prefix)
                 .param("status", externalProjectId == null ? "UNLINKED" : "LINKED")
                 .param("ownerTeam", ownerTeam)
-                .param("description", description)
+                .param("description", Rows.clob(description))
                 .param("profile", defaultProfileId)
                 .param("user", user)
-                .query(Long.class).single();
+                .update(keys, "id");
+        return Rows.key(keys);
     }
 
     public void update(long id, String name, String ownerTeam, String description, Long defaultProfileId) {
@@ -104,7 +107,7 @@ public class ProjectRepository {
                 .param("id", id)
                 .param("name", name)
                 .param("ownerTeam", ownerTeam)
-                .param("description", description)
+                .param("description", Rows.clob(description))
                 .param("profile", defaultProfileId)
                 .update();
     }
@@ -113,7 +116,7 @@ public class ProjectRepository {
     public void catalog(long id, String externalProjectId, String name, String status) {
         jdbc.sql("""
                         UPDATE project SET external_project_id = :external, name = :name, catalog_status = :status,
-                                           catalog_synced_at = now()
+                                           catalog_synced_at = SYSTIMESTAMP
                          WHERE id = :id
                         """)
                 .param("id", id)
@@ -144,27 +147,29 @@ public class ProjectRepository {
     }
 
     public void upsertEnvironment(long projectId, String environment, String baseUrl, String specPath, boolean enabled) {
-        jdbc.sql("""
-                        INSERT INTO project_environment (project_id, environment, base_url, spec_path, enabled)
-                        VALUES (:id, :environment, :baseUrl, :specPath, :enabled)
-                        ON CONFLICT (project_id, environment) DO UPDATE
-                           SET base_url = EXCLUDED.base_url, spec_path = EXCLUDED.spec_path, enabled = EXCLUDED.enabled
+        Rows.merge(() -> jdbc.sql("""
+                        MERGE INTO project_environment pe
+                        USING dual ON (pe.project_id = :id AND pe.environment = :environment)
+                         WHEN MATCHED THEN UPDATE
+                              SET pe.base_url = :baseUrl, pe.spec_path = :specPath, pe.enabled = :enabled
+                         WHEN NOT MATCHED THEN INSERT (project_id, environment, base_url, spec_path, enabled)
+                              VALUES (:id, :environment, :baseUrl, :specPath, :enabled)
                         """)
                 .param("id", projectId)
                 .param("environment", environment)
                 .param("baseUrl", baseUrl)
                 .param("specPath", specPath)
-                .param("enabled", enabled)
-                .update();
+                .param("enabled", Rows.flag(enabled))
+                .update());
     }
 
     /** How many subtasks (not archived, any project) use each permission with this prefix. */
     public Map<String, Long> permissionUsage(String prefix) {
         return jdbc.sql("""
-                        SELECT code, count(*) AS uses
-                          FROM route_definition r, unnest(r.permissions || r.foreign_permissions) AS code
-                         WHERE r.status = 'ACTIVE' AND starts_with(code, :prefix || '_')
-                         GROUP BY code
+                        SELECT rp.code, COUNT(DISTINCT rp.definition_id) AS uses
+                          FROM route_permission rp JOIN route_definition r ON r.id = rp.definition_id
+                         WHERE r.status = 'ACTIVE' AND SUBSTR(rp.code, 1, LENGTH(:prefix) + 1) = :prefix || '_'
+                         GROUP BY rp.code
                         """)
                 .param("prefix", prefix)
                 .query((rs, index) -> Map.entry(rs.getString("code"), rs.getLong("uses")))

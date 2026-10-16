@@ -119,6 +119,16 @@ public final class Json {
         return names;
     }
 
+    /** The values of a JSON array of strings, as stored in a text column; empty for null text or a non-array. */
+    public static List<String> stringList(String text) {
+        List<String> values = new ArrayList<>();
+        JsonNode node = text == null ? null : parse(text);
+        if (node != null && node.isArray()) {
+            node.forEach(value -> values.add(text(value)));
+        }
+        return values;
+    }
+
     public static Iterable<Map.Entry<String, JsonNode>> fields(JsonNode node) {
         if (node == null || !node.isObject()) {
             return List.of();

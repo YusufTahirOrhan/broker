@@ -33,6 +33,7 @@ import com.acme.broker.core.testing.CoreFixtures;
 import com.acme.broker.core.testing.FakeHttpServer;
 import com.acme.broker.core.testing.JsonHttp;
 import com.acme.broker.runtime.route.RouteCache;
+import com.acme.broker.runtime.route.RouteRepository;
 import com.acme.broker.runtime.support.EventCollector;
 import com.acme.broker.runtime.support.RuntimeFixture;
 
@@ -69,6 +70,9 @@ class BrokerFlowTest {
 
     @Autowired
     RouteCache cache;
+
+    @Autowired
+    RouteRepository routes;
 
     @Autowired
     StringRedisTemplate redis;
@@ -145,6 +149,36 @@ class BrokerFlowTest {
             headers.put("X-Token", token);
         }
         return http.send("POST", "/broker", body, headers);
+    }
+
+    @Test
+    void definitionsLargerThanAVarcharLoadAndForward() {
+        String definition = CoreFixtures.largeAddOrderNote(40_000);
+        RuntimeFixture.route("order-service", "add_long_note", "POST", "/orders/{id}/notes", List.of("ORDER_WRITE"),
+                false, null, definition);
+        cache.reload();
+        backend.json("POST", "/orders/981/notes", 201, "{\"noteId\": 56}");
+
+        JsonHttp.Response response = broker("tok-1", """
+                {"maintask": "order-service", "subtask": "add_long_note", "siparisNo": 981, "notMetni": "Uzun"}
+                """);
+
+        assertThat(response.status()).as(response.text()).isEqualTo(201);
+        JsonNode sent = Json.parse(backend.requests("/orders/981/notes").getFirst().body());
+        assertThat(sent.get("terms")).isEqualTo(Json.parse(definition).at("/request/body/template/terms"));
+    }
+
+    @Test
+    void aSnapshotReadsOneStateOfTheDatabase() {
+        long[] seen = routes.inSnapshot(() -> {
+            long before = routes.currentVersion();
+            long written = RuntimeFixture.project("order-service", "http://moved.example:8080");
+            return new long[] {before, written, routes.currentVersion()};
+        });
+
+        assertThat(seen[1]).isGreaterThan(seen[0]);
+        assertThat(seen[2]).isEqualTo(seen[0]);
+        assertThat(routes.currentVersion()).isEqualTo(seen[1]);
     }
 
     @Test
