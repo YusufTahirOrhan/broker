@@ -1,6 +1,6 @@
 # Devir notu
 
-Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; çekirdek ve beş modül (giriş servisi dahil) yazıldı, `mvn -B verify` yeşil. 2026-10-16 turunda "Sıradaki iş"in 1–6. maddeleri yapıldı: Oracle 19c, yanıt verisinin loglanması, eski broker'la aynı oturum ve yanıtlar, giriş servisi, DEV'e bağlı yerel çalıştırma, `${user.permission}`; alarm (7) sonraki tur. Aynı dalda PR #1 incelemesinin düzeltmeleri yapıldı: yerel giriş servisi DEV'in ortak Redis anahtarlarına yazmaz (madde 5), giriş servisinin imza kontrolü `/actuator/` ve `/internal/` dışındaki her yolda ve imza anahtarı `local` dışında zorunlu, boşluklu şifre LDAP'a gitmez, yetki listesiz Koordinatör cevabı hata (madde 4). `mvn -B verify`: 203 test. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
+Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; çekirdek ve beş modül (giriş servisi dahil) yazıldı, `mvn -B verify` yeşil. 2026-10-16 turunda "Sıradaki iş"in 1–6. maddeleri yapıldı: Oracle 19c, yanıt verisinin loglanması, eski broker'la aynı oturum ve yanıtlar, giriş servisi, DEV'e bağlı yerel çalıştırma, `${user.permission}`; alarm (7) sonraki tur. Hepsi PR #1 ile, inceleme düzeltmeleriyle birlikte main'e merge edildi (2026-10-16). Düzeltmeler: yerel giriş servisi DEV'in ortak Redis anahtarlarına yazmaz (madde 5), giriş servisinin imza kontrolü `/actuator/` ve `/internal/` dışındaki her yolda ve imza anahtarı `local` dışında zorunlu, boşluklu şifre LDAP'a gitmez, yetki listesiz Koordinatör cevabı hata (madde 4). `mvn -B verify`: 203 test. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
 
 Son güncelleme: 2026-10-16.
 
@@ -377,17 +377,7 @@ Derlemede doğrulandı (Boot 4.1.1, Spring Framework 7.0, Jackson 3.1, Kafka 4.2
 
 Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya yazılır; canlı doküman buradan güncellenir.
 
-- **Kısıtlar listesi (merkezi veri modeli):** `ck_route_permission` artık bir DB kısıtı değil; yetkiler `route_permission` tablosunda olduğu için "anonim olmayan route en az bir yetki taşır" kuralı uygulamada (`RouteService`) uygulanır. `trg_route_permissions` `route_permission` satırlarında çalışır. Yeni satır: `route_permission (definition_id, kind, sort_order, code)`, `code` indeksli; uygulama kullanıcısı yalnızca bu tabloda silebilir.
-- **History kolonları:** `comment` (Oracle'da ayrılmış) `change_note` oldu; API'de alan adı `comment` kaldı. History snapshot'ı DB'de `to_jsonb` ile değil uygulamada kurulur, anahtarlar aynı.
-- **Runtime'a uygulama ("tek ifadeyle uygular" paragrafı ve SQL'i):** Oracle'da DML'li CTE yok. `MERGE` (eşleşen satırı yalnızca `promotion_id` daha yeniyse günceller) ve versiyon artışı aynı transaction'da; eşzamanlı ilk eklemede ORA-00001 gelirse MERGE bir kez tekrarlanır. Davranış aynı: eski ya da tekrar gelen talep yazamaz, değişiklik yoksa versiyon artmaz.
-- **Runtime şeması:** `runtime_route.permissions` JSON dizisi metni; kısıt `JSON_EXISTS(permissions, '$[0]')`.
-- **Tanımda `X-User-Agent`:** `request.headers` kuralında (`X-User-*` tanımlanamaz) `X-User-Agent` istisna; giriş servisinin route'u onu iletir.
-- **`legacy-responses: false`:** application izinli değilse 403 `DENIED`, oturum geçersizse 401 `DENIED` (ortak format).
-- **Readiness:** Broker, application listesi Redis'ten bir kez okunmadan hazır görünmez; sonra okunamazsa son liste kullanılır.
-- **Giriş servisi:** İmzasız ya da geçersiz imzalı çağrıya 403 `{"response": false, "status": 403, "message": ...}`; Koordinatör'ün iç ucu (`/internal/v1/sessions/{uid}/logout`) imzadan bağımsız. Admin'in proje ve yetki çağrıları Koordinatör'ün tek base URL'ine gider (ortam başına adres isteğe bağlı).
-- **Giriş servisinin imza kuralı:** İmza yalnızca login ve logout'ta değil, `/actuator/` ve `/internal/` ile başlayanlar dışındaki her yolda istenir (yeni uçlar varsayılan olarak korunur). Yol, container'ın çözdüğü ve normalize ettiği haliyle karşılaştırılır (`;` parametreleri ve yüzde kodlaması imzayı atlatamaz). İmza anahtarı `local` dışındaki her ortamda zorunludur; boşsa servis başlamaz.
-- **Oturum işlemlerinin logu:** `client_response` giriş servisinin gövdesi + `"data": ""`; servisin gövdesi ClickHouse'a yalnızca route'un `logResponseBody`'si açıksa yazılır (token ClickHouse'a girmez). Olayın maintask/subtask'i gövdeden.
-- **`logResponseBody` açıkken `client_response` (log hattı):** profil zarfının tamamı maskelenir, `data` JSON metni olur (string ise olduğu gibi). Profilsiz yanıtta maskeli gövde yazılır; gövde JSON nesnesi değilse `{"status": <kod>, "data": "<metin>"}`. `maxBodyBytes` aşılırsa metin UTF-8'i bölmeden kırpılır ve `broker.body_truncated: true`.
+- Henüz yok. 2026-10-16 turunun maddeleri (Oracle şemasının modelden ayrıldığı yerler, runtime'a `MERGE` ile uygulama, `X-User-Agent` istisnası, `legacy-responses`, readiness, giriş servisinin imza kuralı, oturum işlemlerinin ve `logResponseBody`'nin logu, DEV'e yazmayan yerel çalıştırma) canlı dokümana işlendi (rev 180) ve `docs/design.md`'ye aktarıldı.
 
 ## Açık noktalar
 

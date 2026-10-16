@@ -81,7 +81,8 @@ Login eskisi gibi broker üzerinden yapılır, ama işi ayrı bir giriş servisi
 - **Oturum kaydı:** Anahtar `user:session:{uid}`, değer `{"uid", "X-Token", "X-Clientip", "X-User-Agent", "permissions"}`, süre 1 gün; broker süreyi uzatmaz. Değer, eski broker'daki gibi tip bilgisi olmayan JSON'dur. Yeni login aynı kullanıcının eski oturumunu ezer.
 - **Kontrol:** Kayıt gövdedeki `uid` ile okunur; token ve iki header kayıttakiyle aynıysa oturum geçerlidir. Servislere giden `X-uid` ve `${user.id}` bu doğrulanmış `uid`'dir.
 - **Logout:** `X-Token: logout` isteği kaydı siler. Kayıttaki `X-Clientip` ve `X-User-Agent` istekteki header'larla aynı olmalıdır; eski broker yalnızca `uid`'e baktığı için herkes herkesin oturumunu kapatabiliyordu. Frontend bu header'ları zaten gönderdiği için frontend'de değişiklik gerekmez. Koordinatör bir oturumu giriş servisinden doğrudan kapatabilir.
-- **Application listesi:** Giriş servisi izinli application'ları Koordinatör'den 5 dakikada bir alıp Redis'e yazar; broker listeyi oradan okur ve liste yüklenmeden trafik almaz.
+- **Application listesi:** Giriş servisi izinli application'ları Koordinatör'den 5 dakikada bir alıp Redis'e yazar; broker listeyi oradan okur ve liste bir kez yüklenmeden trafik almaz; sonra okunamazsa son listeyle devam eder.
+- **İmza:** Giriş servisi yalnızca broker'ın imzaladığı çağrıları kabul eder. `/actuator/` ve `/internal/` ile başlayanlar dışındaki her yolda `X-User-Context` istenir; yol container'ın çözüp normalize ettiği haliyle karşılaştırılır, `;` parametresi ya da yüzde kodlaması imzayı atlatamaz. İmzasız çağrı 403 ve `{"response": false, "status": 403, "message": ...}` alır. İmza anahtarı `local` dışındaki her ortamda zorunludur, yoksa servis başlamaz. Koordinatör'ün iç ucu (`POST /internal/v1/sessions/{uid}/logout`) imzaya tabi değildir, kendi gizli anahtarıyla çağrılır.
 
 | Durum | HTTP | Gövde |
 | --- | --- | --- |
@@ -94,6 +95,8 @@ Login eskisi gibi broker üzerinden yapılır, ama işi ayrı bir giriş servisi
 | Oturum geçersiz | 200 | `{"response": false, "status": 301, "reason": "check X-Token"}` |
 
 Başarıda `LDAP`, hatada `Ldap` yazılır; eski kod böyle olduğu için korunur. Bilinmeyen subtask ve yetkisiz kullanıcı için eski projelerde ortak bir gövde yoktu (özel exception), bu yüzden bu ikisinde yeni ortak format kalır.
+
+`application` ve oturum hataları da frontend'ler güncellenince ortak formata geçer: `broker.compat.legacy-responses: false` iken izinli olmayan application 403, geçersiz oturum 401 alır; ikisinin outcome'u da `DENIED`'dır.
 
 ## Proje kaydı
 
@@ -187,7 +190,7 @@ Kurallar kayıt anında doğrulanır; tanımsız bir alana ya da bilinmeyen bir 
 | request.fields | name, type, required, default | name, gövdedeki noktalı yoldur; type: string, integer, number, boolean, object, array |
 | request.pathVariables | ad → değer | Path şablonundaki her `{değişken}` tam bir kez eşlenir; yalnızca zorunlu ya da varsayılanı olan alana bağlanır |
 | request.queryParams | ad → değer | Değeri olmayan parametre gönderilmez |
-| request.headers | ad → değer | `Authorization`, `X-User-*`, `X-uid`, `Host`, `Content-Length`, `Connection`, `Transfer-Encoding` tanımlanamaz |
+| request.headers | ad → değer | `Authorization`, `X-User-*`, `X-uid`, `Host`, `Content-Length`, `Connection`, `Transfer-Encoding` tanımlanamaz. `X-User-Agent` istisnadır: frontend'in header'ıdır, giriş servisinin route'u onu `${header.X-User-Agent}` ile iletir |
 | request.body.mode | NONE, PASS\_THROUGH, TEMPLATE, MULTIPART | GET ve DELETE'te yalnızca NONE; PASS\_THROUGH zarf alanları dışındaki gövdeyi olduğu gibi gönderir |
 | request.body.template | JSON şablonu | Yalnızca TEMPLATE'te; tek bir yer tutucu da olabilir (`"${request.payload}"`) |
 | response.type | JSON, TEXT, BINARY | BINARY stream edilir, body'si loglanmaz ve yanıt profili uygulanmaz. Servis `Content-Disposition` header'ı döndürürse route'un yanıt tipi ne olursa olsun aynısı yapılır |
@@ -273,9 +276,9 @@ Yetkiler projeye özeldir: her yetki projenin önekiyle başlar (`LOGPROJECT_TEM
 - **Önek:** Projenin yetki öneki kayıtta belirlenir (`project.permission_prefix`) ve değiştirilemez. Proje ekranında yeni yetkinin yalnızca son eki girilir: `MODERATOR` yazılınca `LOGPROJECT_MODERATOR` açılır. Bir önek başka bir önekin başı olamaz (`HR` ile `HR_PORTAL` gibi); olursa iki projenin yetkileri karışır.
 - **Proje yetkileri:** Subtask formu varsayılan olarak yalnızca o projenin yetkilerini listeler (`permissions`). Bu listeye başka projenin yetkisi giremez; DB'de bir trigger da korur.
 - **Başka projeden yetki:** Bazı subtask'lere başka projelerin yetkileriyle de erişilir. Formdaki "Başka projeden yetki ekle" seçeneği önce projeyi, sonra o projenin yetkisini seçtirir; bu yetkiler ayrı bir alanda durur (`foreign_permissions`). Ekranda ve onay farkında ayrıca işaretlenir, böylece bir subtask'in başka projenin kullanıcılarına açıldığı gözden kaçmaz. Seçilen proje broker'a kayıtlı olmalıdır, çünkü öneki oradan bilinir.
-- **Katalog:** Yetkilerin ve projelerin sahibi yetki projesidir; yetki onun API'siyle açılır, kullanıcıya da orada atanır. Kayıtta ve promote öncesinde her yetkinin hedef ortamda tanımlı olduğu kontrol edilir.
+- **Katalog:** Yetkilerin ve projelerin sahibi yetki projesidir; yetki onun API'siyle açılır, kullanıcıya da orada atanır. Admin projeler ve yetkiler için Koordinatör'ün tek base URL'ine gider; bir ortamın ayrı adresi varsa ayarla verilir. Kayıtta ve promote öncesinde her yetkinin hedef ortamda tanımlı olduğu kontrol edilir.
 - **Varsayılan olarak reddet:** Kimseye atanmamış bir yetki, kimsenin çağıramadığı bir subtask demektir. Yeni subtask'ler böylece kapalı doğar.
-- **Anonim erişim:** `anonymous = true` yalnızca onaylı bir değişiklikle açılır. Anonim olmayan her route için en az bir yetki DB seviyesinde zorunludur (`ck_route_permission`).
+- **Anonim erişim:** `anonymous = true` yalnızca onaylı bir değişiklikle açılır. Anonim olmayan her route için en az bir yetki zorunludur: merkezde kayıt bunu reddeder, runtime DB'de `ck_runtime_permission` kısıtı korur.
 - **perm\_list:** Bugün broker'daki projeye özel sınıflar subtask yetkisini bu listeyle kontrol ediyor. Yeni düzende kontrolü route'taki yetkilerle genel motor yapar; projeye ya da subtask'e özel kod kalmaz. Liste servise iletilmez, log dokümanına bugünkü gibi kullanıcının tüm yetkileriyle yazılır.
 - **Kontrolün yeri:** Endpoint seviyesindeki kontrol broker'da, veri seviyesindeki kontrol servistedir. Broker kullanıcı bağlamını imzalı bir header ile iletir; servisler dışarıdan doğrudan erişilemez.
 
@@ -304,8 +307,8 @@ Oklar FK'den referans verilen tabloya gider. Deployment ve talepler tanımın ke
 
 Kısıtlar, kuralları uygulama hatalarına karşı DB seviyesinde de korur:
 
-- **`ck_route_permission`:** Anonim olmayan bir route en az bir yetki olmadan kaydedilemez.
-- **`trg_route_permissions`:** `permissions` listesindeki her yetki projenin önekiyle, `foreign_permissions` listesindekiler kayıtlı başka bir projenin önekiyle başlar.
+- **`ck_route_permission`:** Anonim olmayan bir route en az bir yetki olmadan kaydedilemez. Oracle şemasında yetkiler ayrı tabloda durduğu için bu kural DB kısıtı değildir: merkezde uygulama (`RouteService`) uygular, runtime DB'de `ck_runtime_permission` korur.
+- **`trg_route_permissions`:** `permissions` listesindeki her yetki projenin önekiyle, `foreign_permissions` listesindekiler kayıtlı başka bir projenin önekiyle başlar. Oracle şemasında `route_permission` satırlarında çalışır.
 - **`uq_project_maintask`, `uq_route_definition`:** maintask ve proje içindeki subtask adı büyük/küçük harf fark etmeden tekildir.
 - **`ck_project_prefix`:** Yetki öneki büyük harf, rakam ve alt çizgiyle yazılır.
 - **`trg_route_history_append_only`, `trg_profile_history_append_only` + yalnızca INSERT yetkisi:** Geçmiş, tablo sahibi tarafından bile değiştirilemez.
@@ -316,6 +319,12 @@ Kısıtlar, kuralları uygulama hatalarına karşı DB seviyesinde de korur:
 - **`ck_four_eyes`:** Talep eden kendi talebini onaylayamaz.
 
 **Oracle 19c kararı (2026-10-16):** Merkezi DB ve ortam runtime DB'leri Oracle 19c olacak. Aşağıdaki DDL PostgreSQL 16'da çalıştırılıp örnek verilerle denendi ve mantıksal modeli gösterir; geçerli şema repodaki Oracle migration'larıdır. Dönüşümde `JSONB` → `CLOB` + `IS JSON`, `BOOLEAN` → `NUMBER(1)`, diziler → ayrı tablo ya da JSON dizisi, kısmi unique index → `CASE`'li fonksiyon tabanlı index, `ON CONFLICT` → `MERGE` ve PL/pgSQL trigger'ları → PL/SQL olur. Oracle `REPEATABLE READ` desteklemediği için snapshot okuması `SET TRANSACTION READ ONLY` ile yapılır.
+
+Oracle şemasının modelden ayrıldığı yerler:
+
+- **Yetkiler:** Merkezde route'un yetkileri `route_permission (definition_id, kind, sort_order, code)` tablosunda durur: `kind` projenin kendi (`OWN`) ya da başka projenin (`FOREIGN`) yetkisidir, sıra tanımdaki sıradır, `code` indekslidir. Kayıtta liste silinip yeniden yazılır; uygulama kullanıcısının silme yetkisi yalnızca bu tablodadır.
+- **History:** Açıklama kolonu `change_note`'tur, çünkü `comment` Oracle'da ayrılmış kelimedir; API'deki alan adı `comment` kalır. Snapshot `to_jsonb` ile değil uygulamada kurulur, anahtarları aynıdır.
+- **Runtime:** `runtime_route.permissions` JSON dizisi metnidir; kısıtı `JSON_EXISTS(permissions, '$[0]')`. Snapshot'ın uygulanışı "Ortam runtime DB'si" bölümünde.
 
 ```sql
 -- Merkezi yönetim veritabanı (control plane), PostgreSQL 14+
@@ -610,6 +619,8 @@ SELECT id, version, 'UPDATE', to_jsonb(rd), updated_by, :comment
 COMMIT;
 ```
 
+Oracle şemasında snapshot uygulamada kurulur ve açıklama `change_note` kolonuna yazılır; davranış aynıdır.
+
 ## Ortam runtime DB'si ve cache senkronizasyonu
 
 Her ortamın kendi runtime DB'si vardır. Bu DB'yi broker'lar yalnızca okur, yalnızca ortamın Admin API'si yazar. Merkez çökse bile routing çalışmaya devam eder, yalnızca değişiklik yapılamaz.
@@ -673,63 +684,53 @@ GRANT SELECT ON ALL TABLES IN SCHEMA broker_runtime TO broker_runtime_reader;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA broker_runtime TO broker_runtime_writer;
 ```
 
-Admin API bir snapshot'ı tek ifadeyle uygular. Daha eski ya da tekrar gelen bir talep yazamaz, çünkü `promotion_id` sırayla artar. Hiçbir şey değişmezse versiyon da artmaz ve ifade satır döndürmez.
+Admin API bir snapshot'ı tek transaction'da uygular: satırı `MERGE` ile yazar, bir satır değiştiyse config versiyonunu artırır. Daha eski ya da tekrar gelen bir talep yazamaz, çünkü `promotion_id` sırayla artar ve eşleşen satır yalnızca daha yeni bir taleple güncellenir. Hiçbir şey değişmezse versiyon da artmaz. Aynı route'un ilk eklemesi iki talepte eşzamanlı gelirse ikinci `MERGE` ORA-00001 alır; bir kez tekrarlanınca güncelleme koluna düşer.
 
 ```sql
-WITH applied AS (
-    INSERT INTO runtime_route AS r (maintask, subtask, definition_id, version, http_method, path_template,
-                                    permissions, anonymous, response_profile, definition, status,
-                                    applied_by, promotion_id)
-    VALUES (:maintask, :subtask, :definition_id, :version, :method, :path,
-            :permissions, :anonymous, :response_profile, :definition, 'ACTIVE', :user, :promotion_id)
-    ON CONFLICT (maintask, subtask) DO UPDATE
-       SET definition_id = EXCLUDED.definition_id, version = EXCLUDED.version,
-           http_method = EXCLUDED.http_method, path_template = EXCLUDED.path_template,
-           permissions = EXCLUDED.permissions, anonymous = EXCLUDED.anonymous,
-           response_profile = EXCLUDED.response_profile, definition = EXCLUDED.definition,
-           status = EXCLUDED.status, applied_by = EXCLUDED.applied_by,
-           promotion_id = EXCLUDED.promotion_id, applied_at = now()
-     WHERE EXCLUDED.promotion_id > r.promotion_id          -- eski ya da tekrar gelen talep yazamaz
-    RETURNING 1
-)
-UPDATE runtime_config_version
-   SET version = version + 1, updated_at = now()
- WHERE id = 1 AND EXISTS (SELECT 1 FROM applied)
-RETURNING version;
--- Satır dönerse commit sonrası: PUBLISH broker:routes-changed <version>
+MERGE INTO runtime_route r
+USING dual ON (r.maintask = :maintask AND r.subtask = :subtask)
+ WHEN MATCHED THEN UPDATE
+      SET r.definition_id = :definition_id, r.version = :version, r.http_method = :method,
+          r.path_template = :path, r.permissions = :permissions, r.anonymous = :anonymous,
+          r.response_profile = :response_profile, r.definition = :definition, r.status = 'ACTIVE',
+          r.applied_by = :user, r.promotion_id = :promotion_id, r.applied_at = SYSTIMESTAMP
+    WHERE r.promotion_id < :promotion_id               -- eski ya da tekrar gelen talep yazamaz
+ WHEN NOT MATCHED THEN INSERT
+      (maintask, subtask, definition_id, version, http_method, path_template, permissions,
+       anonymous, response_profile, definition, status, applied_by, promotion_id)
+      VALUES (:maintask, :subtask, :definition_id, :version, :method, :path, :permissions,
+              :anonymous, :response_profile, :definition, 'ACTIVE', :user, :promotion_id);
+
+-- MERGE bir satır yazdıysa aynı transaction'da:
+UPDATE runtime_config_version SET version = version + 1, updated_at = SYSTIMESTAMP WHERE id = 1;
+-- Commit sonrası: PUBLISH broker:routes-changed <version>
 ```
 
 Profiller de aynı desenle uygulanır. `runtime_route`'taki FK ortamda olmayan bir profile referans verilmesini engeller; bu yüzden profil, onu kullanan route'lardan önce uygulanır.
 
 ```sql
-WITH applied AS (
-    INSERT INTO runtime_response_profile AS p (name, profile_id, version, definition, applied_by, promotion_id)
-    VALUES (:name, :profile_id, :version, :definition, :user, :promotion_id)
-    ON CONFLICT (name) DO UPDATE
-       SET profile_id = EXCLUDED.profile_id, version = EXCLUDED.version,
-           definition = EXCLUDED.definition, applied_by = EXCLUDED.applied_by,
-           promotion_id = EXCLUDED.promotion_id, applied_at = now()
-     WHERE EXCLUDED.promotion_id > p.promotion_id
-    RETURNING 1
-)
-UPDATE runtime_config_version
-   SET version = version + 1, updated_at = now()
- WHERE id = 1 AND EXISTS (SELECT 1 FROM applied)
-RETURNING version;
--- Satır dönerse commit sonrası: PUBLISH broker:routes-changed <version>
+MERGE INTO runtime_response_profile p
+USING dual ON (p.name = :name)
+ WHEN MATCHED THEN UPDATE
+      SET p.profile_id = :profile_id, p.version = :version, p.definition = :definition,
+          p.applied_by = :user, p.promotion_id = :promotion_id, p.applied_at = SYSTIMESTAMP
+    WHERE p.promotion_id < :promotion_id
+ WHEN NOT MATCHED THEN INSERT (name, profile_id, version, definition, applied_by, promotion_id)
+      VALUES (:name, :profile_id, :version, :definition, :user, :promotion_id);
+-- Satır yazıldıysa versiyon route'taki gibi artar, commit sonrası sinyal gider
 ```
 
 Kill switch aynı deseni kullanır: `status = 'DISABLED'` yazar ve versiyonu artırır. Broker'lar versiyonu, profilleri ve route'ları tek bir tutarlı snapshot'tan okur:
 
 ```sql
-BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SET TRANSACTION READ ONLY;   -- Oracle'da REPEATABLE READ yok; sorgular işlemin başındaki veriyi görür
 SELECT version FROM runtime_config_version WHERE id = 1;
 SELECT name, version, definition FROM runtime_response_profile;
 SELECT r.maintask, r.subtask, r.version, r.http_method, r.path_template, r.permissions,
        r.anonymous, r.response_profile, r.definition, p.base_url
   FROM runtime_route r
   JOIN runtime_project p ON p.maintask = r.maintask
- WHERE r.status = 'ACTIVE' AND p.enabled;
+ WHERE r.status = 'ACTIVE' AND p.enabled = 1;
 COMMIT;
 ```
 
@@ -753,7 +754,7 @@ public void verify() {
 }
 
 private synchronized void reload() {
-    RouteSnapshot fresh = repository.loadSnapshot();           // yukarıdaki REPEATABLE READ okuması
+    RouteSnapshot fresh = repository.loadSnapshot();           // yukarıdaki salt okunur snapshot okuması
     if (fresh.version() > snapshot.version()) snapshot = fresh; // atomik referans değişimi
 }
 ```
@@ -849,7 +850,7 @@ Bir versiyon yalnızca bir önceki ortamda aktifken bir sonrakine taşınır. PR
    - Proje hedef ortamda tanımlı ve açık mı (`project_environment.enabled`)?
 3. **Onay:** Hedef ortamda `requires_approval = true` ise talep `PENDING_APPROVAL` olur. Onaylayan, hedef ortamdaki mevcut versiyonla taşınan versiyonun farkını görür (başka projeden eklenen yetkiler ayrıca işaretlenir) ve talep edenden farklı biri olmak zorundadır (`ck_four_eyes`). Onay gerekmeyen ortamlarda talep doğrudan `APPLYING` olur.
 4. **Yoklama:** Merkez, hedef ortamın Admin API'sinden OPTIONS yoklaması ister. Sonuç OK değilse talep `FAILED` olur, örneğin backend henüz o ortama deploy edilmemiştir. Hedef ortamda hiçbir şey değişmez.
-5. **Uygulama:** Merkez snapshot'ı `promotion_id` ile Admin API'ye gönderir. Admin API runtime tablosunu ve config versiyonunu tek ifadeyle yazar, commit sonrası Redis'e sinyal verir.
+5. **Uygulama:** Merkez snapshot'ı `promotion_id` ile Admin API'ye gönderir. Admin API runtime tablosunu ve config versiyonunu tek transaction'da yazar, commit sonrası Redis'e sinyal verir.
 6. **Yayılım:** Broker'lar yeni snapshot'ı yükler. Merkez instance'ların yüklediği versiyonu izler ve yetişmeyen instance'ı uyarı olarak gösterir.
 7. **Kayıt:** `route_deployment` (profilde `response_profile_deployment`) hedef ortam için yeni versiyona güncellenir. Talep `APPLIED` olur ve oluşan `config_version` yazılır; talep eden ve onaylayan bilgilendirilir.
 
@@ -980,12 +981,12 @@ Bugünkü "yanıt logu yazılamazsa yanıt dönmez" kuralı böylece korunur ve 
 ```
 
 - **request\_id:** UUIDv7; zaman sıralı olduğu için Elastic ve ClickHouse'ta verimlidir. Frontend'e `X-Request-Id` header'ıyla döner; Elastic'teki ana dokümanın `_id`'si de budur.
-- **maintask, subtask:** Route'un kayıtlı yazımıdır; metrikler ve ClickHouse bunu kullanır. Frontend'in gönderdiği yazım `body`'de kalır ve eski dokümana o yazılır.
+- **maintask, subtask:** Route'un kayıtlı yazımıdır; metrikler ve ClickHouse bunu kullanır. Frontend'in gönderdiği yazım `body`'de kalır ve eski dokümana o yazılır. Oturum işlemlerinde (`login`, `logout`) giriş servisinin route'u değil, gövdedeki maintask ve subtask yazılır.
 - **route\_version, response\_profile, response\_profile\_version:** İsteği işleyen tanım ve zarf. Bir promote'tan sonra davranış değiştiyse hangi versiyonların çalıştığı buradan görülür. Profil yoksa iki alan boş kalır.
 - **uid, user\_id:** `uid` frontend'in gövdede gönderdiği, `user_id` oturumdaki kullanıcıdır. Oturum kaydı gövdedeki `uid` ile bulunduğu için doğrulanmış isteklerde ikisi aynıdır; anonim route'ta oturum yoksa `user_id` boş kalır.
 - **query\_id, perm\_list, token:** Eski dokümanlara bugünkü gibi yazılır. `query_id` broker'ın her istekte ürettiği rastgele UUID'dir ve yalnızca parametre dokümanlarına gider; `perm_list` kullanıcının tüm yetkileridir; `token`, `X-Token`'ın kendisidir.
-- **body:** REQUEST olayında frontend'in gövdesi, maskelenmiş ve kırpılmamış olarak; eski Elastic dokümanları bundan üretilir. RESPONSE olayında yalnızca `logResponseBody` açıksa servisin yanıtı.
-- **client\_response:** Frontend'e dönen gövde; `data` alanı bugünkü gibi boş string'e çevrilir. Route'ta `logResponseBody` açıksa `data` boşaltılmaz, maskelenip `maxBodyBytes`'a kadar kırpılan JSON metni olarak yazılır; alan string kaldığı için Elastic'teki eşleme değişmez. Eski broker'ın gövdeleriyle dönen yanıtlara (login, logout, `{"response": false}`) eskisi gibi `"data": ""` eklenir. Elastic'teki `data_response` bundan yazılır; log yazılamadıysa `data_response` bugünkü gibi yazılmaz.
+- **body:** REQUEST olayında frontend'in gövdesi, maskelenmiş ve kırpılmamış olarak; eski Elastic dokümanları bundan üretilir. RESPONSE olayında yalnızca `logResponseBody` açıksa servisin yanıtı. Oturum işlemlerinde de böyledir: giriş route'larında seçenek kapalı tutulduğu için login'in döndürdüğü token ClickHouse'a girmez.
+- **client\_response:** Frontend'e dönen gövde; `data` alanı bugünkü gibi boş string'e çevrilir. Route'ta `logResponseBody` açıksa zarfın tamamı maskelenir ve `data` boşaltılmaz: JSON metni olarak yazılır, zaten string ise olduğu gibi. Profil yoksa maskeli gövde yazılır; gövde JSON nesnesi değilse `{"status": <kod>, "data": "<metin>"}`. Metin `maxBodyBytes`'ı aşarsa UTF-8 karakteri bölünmeden kırpılır ve `body_truncated` işaretlenir. Alan string kaldığı için Elastic'teki eşleme değişmez. Eski broker'ın gövdeleriyle dönen yanıtlara (login, logout, `{"response": false}`) eskisi gibi `"data": ""` eklenir. Elastic'teki `data_response` bundan yazılır; log yazılamadıysa `data_response` bugünkü gibi yazılmaz.
 - **Maskeleme:** Broker'da, Kafka'dan önce yapılır. Şifre ve route'ta tanımlanan alanlar `xxxx` olur; dosya yanıtlarında gövde yerine yalnızca boyut yazılır. `X-Token` eski loglarla aynı kalsın diye maskelenmez.
 
 ### Kafka
@@ -1211,7 +1212,7 @@ Merkezi admin her ortama erişim verebildiği için sistemin en hassas yüzeyidi
 Roller şirketin SSO'su ya da yetkilendirme servisindeki gruplardan gelir.
 
 - **Dört göz:** PROD'a her taşıma ve anonim erişimin açılması, talep edenden farklı bir onaylayıcı ister. Kural DB'de `ck_four_eyes` ile de korunur.
-- **Audit:** Tanım değişiklikleri `route_definition_history`'de, taşımalar `promotion_request`'te durur. Uygulama kullanıcısının hiçbir tabloda silme yetkisi yoktur; history'yi bir trigger tablo sahibine karşı da korur.
+- **Audit:** Tanım değişiklikleri `route_definition_history`'de, taşımalar `promotion_request`'te durur. Uygulama kullanıcısı yalnızca route'ların yetki satırlarını silebilir (kayıtta liste yeniden yazılır); başka hiçbir tabloda silme yetkisi yoktur; history'yi bir trigger tablo sahibine karşı da korur.
 - **SSRF:** Test ve yoklama istekleri yalnızca kayıtlı projelerin base URL'lerine gider. URL `UriComponentsBuilder` ile kurulur ve redirect izlenmez.
 - **Header kısıtları:** Kimlik taşıyan header'ları yalnızca broker doldurur (Route tanımı bölümündeki liste).
 - **Servislere erişim:** Servisler yalnızca broker'dan ve ortam Admin API'sinden gelen isteği kabul eder (network policy). Broker kullanıcı bağlamını imzalı bir header ile iletir.
@@ -1287,6 +1288,7 @@ broker:
 - **`baseUrls`:** Eski "dev IP'sini localhost yap" adımının karşılığı. Listelenen projeye giden istekler geliştiricinin makinesine, diğerleri DEV'e gider. Dosya izlendiği için değişiklik restart gerektirmez.
 - **`routes`:** DEV'de henüz olmayan bir subtask'i yerelde tanımlar ya da mevcut birini geçersiz kılar. Format merkezi tanımla aynıdır; çalışan JSON, merkezi admindeki "JSON'dan içe aktar" ile ekrana yüklenir ve kimse tanımı yeniden yazmaz.
 - **Oturum ve yetki:** Login ve yetkiler DEV'in Redis'i ve yetkilendirme servisi üzerinden çalışır. Henüz kimseye atanmamış yeni bir yetki için, local profilde yalnızca override route'larında yetki kontrolü atlanabilir.
+- **DEV'e yazmaz:** Yerel uygulamalar DEV'e bağlanır ve DEV'den okur, ama DEV'in ortak verisine yazmaz: broker durumunu `broker:loaded-local:`'a yazar, env-admin ayrı bir runtime şemasına ve sinyal kanalına yazar, giriş servisi oturumları `local:user:session:{uid}`'e ve application listesini `broker:applications:local`'a yazar. Giriş servisini yerelde geliştiren, broker'ı `BROKER_SESSION_KEY_PREFIX=local:` ile açar. Ayrıntılar repodaki `docs/local-run.md`'de.
 - **Güvenlik:** Override katmanı `@Profile("local")` ile tanımlandığı için DEV, TEST ve PROD'da hiç oluşmaz. Runtime DB'ye salt okunur bağlanıldığından yerel broker DEV'deki tanımları değiştiremez.
 
 Broker'ı yerelde çalıştırmak istemeyenler için iki seçenek daha var:
@@ -1330,4 +1332,5 @@ Path tabanlı bir sözleşme (`POST /api/{maintask}/{subtask}`) ileride hazır g
 - [x] **Logout:** Kayıttaki `X-Clientip` ve `X-User-Agent` eşleşmesi isteniyor; eski broker yalnızca `uid`'e bakıyordu. Frontend'de değişiklik gerekmez.
 - [x] **Logdaki oturum bilgisi:** `token`, `client_ip` ve `user_agent` eskisi gibi oldukları gibi loglanır. İstek olduğu gibi loglanmalı; broker'ın Elasticsearch'ü ayrı, erişim çok sınırlı ve oturumlar kayıt altında.
 - [ ] **`X-Clientip`:** Frontend'in değil, önündeki proxy'nin koyduğu varsayılıyor; teyit edilmedi. İstemci koyuyorsa IP bağlaması güvenlik sağlamaz ve IP bağlantıdan alınmalı.
-- [ ] **Hatalarda HTTP 200:** Mevcut frontend'ler için eski gövdeler HTTP 200 ile dönüyor. Frontend'ler güncellenince tek bir ayarla ortak formata ve gerçek HTTP status'lara geçilebilir.
+- [ ] **Hatalarda HTTP 200:** Mevcut frontend'ler için eski gövdeler HTTP 200 ile dönüyor. Frontend'ler güncellenince tek bir ayarla (`broker.compat.legacy-responses: false`) ortak formata ve gerçek HTTP status'lara geçilir: izinli olmayan application 403, geçersiz oturum 401 alır.
+- [x] **Yerel çalıştırma:** İntranette Docker yok; `local` profilleri DEV'e (Oracle, Redis, servisler) bağlanır ve DEV'in ortak verisine yazmaz (2026-10-16). Ayrıntılar "Yerel geliştirme"de.
