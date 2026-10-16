@@ -19,8 +19,11 @@ Broker `X-Token: login` ve `X-Token: logout` isteklerini gövdedeki maintask'a b
 
 - Boş `uid` ya da şifre her zaman başarısızdır (anonim bind'e düşmez). LDAP başarısızsa Koordinatör'e sorulmaz.
 - Logout kaydı yalnızca onu açan istemci kapatabilir (`login.logout.require-client-match`, varsayılan true).
-- `login.user-context-secret` (broker'ın `broker.forward.user-context-secret`'ı) ayarlıysa login ve logout yalnızca
-  broker'ın imzaladığı, en fazla 60 sn önce verilmiş `X-User-Context` ile kabul edilir; değilse 403.
+- `/actuator/` ve `/internal/` ile başlayanlar dışındaki her uç (yeni uçlar dahil) yalnızca broker'ın imzaladığı, en
+  fazla 60 sn önce verilmiş `X-User-Context` ile kabul edilir; değilse 403. Yol, container'ın çözdüğü ve normalize
+  ettiği haliyle karşılaştırılır (`/login;x=1`, `/%6Cogin` de `/login` sayılır). Anahtar `login.user-context-secret`
+  (broker'ın `broker.forward.user-context-secret`'ı); boşken kontrol kapalıdır ve bu yalnızca `local` profilinde
+  olabilir, başka profilde servis başlamaz.
 - Şifre hiçbir yerde loglanmaz.
 - 5 dakikada bir Koordinatör'ün proje listesindeki `code`'lar broker'ın application listesine
   (`broker:applications`, süresiz JSON dizisi) yazılır; liste boşsa ya da alınamazsa eski değer kalır
@@ -36,6 +39,7 @@ Broker `X-Token: login` ve `X-Token: logout` isteklerini gövdedeki maintask'a b
 | `login.ldap.connect-timeout`, `read-timeout` | 3 sn, 5 sn | |
 | `login.session.key-pattern`, `ttl` | `user:session:{uid}`, 86400 sn | Alan adları da ayarlanabilir; broker'ınkilerle aynı olmalı. `local` profilinde `local:user:session:{uid}` (DEV'in oturumlarına yazmaz) |
 | `login.applications.key`, `refresh-interval` | `broker:applications`, 5 dk | `local` profilinde `broker:applications:local` |
+| `login.user-context-secret` | — | `BROKER_USER_CONTEXT_SECRET`; `local` dışında zorunlu |
 | `login.koordinator-secret` | — | `LOGIN_KOORDINATOR_SECRET` |
 | `koordinator.url`, `auth-header`, `auth-value` | — | Tek base URL ve sabit kimlik header'ı; admin de aynılarını kullanır |
 | `koordinator.permissions-path`, `permissions-field` | `/users/{uid}/permissions`, `yetkiler` | Gerçek API gelince değişir |

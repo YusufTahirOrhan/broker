@@ -41,7 +41,9 @@ login:
     require-client-match: true
   # Koordinatör'ün zorla çıkışı (X-Koordinator-Secret); boşken uç her çağrıyı reddeder
   koordinator-secret: ${LOGIN_KOORDINATOR_SECRET:}
-  # broker'ın X-User-Context anahtarı (broker.forward.user-context-secret); ayarlıysa imzasız çağrı 403
+  # broker'ın X-User-Context anahtarı (broker.forward.user-context-secret): /actuator/ ve /internal/ dışındaki her uç
+  # imza ister, imzasız çağrı 403. Boşken kontrol kapalı; bu yalnızca local profilinde olabilir, başka profilde
+  # servis başlamaz.
   user-context-secret: ${BROKER_USER_CONTEXT_SECRET:}
   user-context-max-age: 60s
   applications:

@@ -221,8 +221,17 @@ class LoginApiTest {
             assertThat(refused.status()).isEqualTo(403);
             assertThat(call("/logout", "{\"uid\": \"ali\"}", headers).status()).isEqualTo(403);
         }
+        // other spellings Spring MVC maps to the same handlers, and paths no handler has yet
+        for (String path : List.of("/login;x=1", "/%6Cogin", "/logout;x=1", "/;x=1/login", "/internal/../login",
+                "/actuator/../login", "/nope")) {
+            assertThat(call(path, body, unsigned).status()).as(path).isEqualTo(403);
+        }
         assertThat(koordinator.requests()).isEmpty();
+        assertThat(stored("ali")).isNull();
+
         assertThat(call("/login", body, Map.of()).status()).isEqualTo(200);
+        assertThat(call("/nope", body, Map.of()).status()).isEqualTo(404);
+        assertThat(new JsonHttp("http://localhost:" + port).get("/actuator/health").status()).isEqualTo(200);
     }
 
     @Test
