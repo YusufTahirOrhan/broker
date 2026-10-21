@@ -34,7 +34,8 @@ Oklar çağrıyı başlatanı gösterir. Runtime DB'ye yalnızca Admin API yazar
 | Redis | Her ortam | Kullanıcı oturumları, izinli application listesi, değişiklik sinyalleri |
 | Broker | Her ortam | Route'u bellekten çözer; application'ı, oturumu ve yetkiyi kontrol eder, logu Kafka'ya yazıp onayını bekler, isteği iletir, yanıtı profile göre zarflar |
 | Giriş servisi | Her ortam | LDAP'ta doğrular, token üretir, oturumu Redis'e yazar ve logout'ta siler; kullanıcı yetkilerini ve application listesini yetki projesinden alır |
-| Kafka, Elastic, ClickHouse | Log hattı | Log olaylarını taşır; aranabilir ve analiz edilebilir şekilde saklar |
+| Log sink | Her ortam | Ortamın Kafka'sındaki log olaylarını okur; o ortamın Elastic'ine eski doküman yapısıyla, ClickHouse'a satır olarak yazar |
+| Kafka, Elastic, ClickHouse | Her ortam | Log olaylarını taşır; aranabilir ve analiz edilebilir şekilde saklar. ClickHouse ortamlar arasında ortak da olabilir, satırlar ortamı taşır |
 | Koordinatör (yetki projesi) | Mevcut | Projeler (application'lar), yetkiler ve kullanıcılara atanmaları |
 
 ## Broker'da istek işleme
@@ -1319,7 +1320,7 @@ Path tabanlı bir sözleşme (`POST /api/{maintask}/{subtask}`) ileride hazır g
 - [ ] **Saklama süreleri:** ClickHouse TTL'i, Elastic ILM ve Kafka retention'ı KVKK'ya ve iç politikaya göre belirlenmeli.
 - [ ] **Elastic ve ClickHouse'un rolü:** Uzun vadede Elastic yalnızca arama için mi kalacak, yoksa tek depo ClickHouse mu olacak?
 - [ ] **Acil durum politikası:** PROD'da DISABLE ve ROLLBACK önceden onay mı istesin, yoksa sonradan gözden geçirme mi yeterli?
-- [ ] **Çalışma ortamı:** Kubernetes mi, VM mi? Servis keşfi ve spool'un diski buna göre seçilir.
+- [x] **Çalışma ortamı:** Dağıtımı DevOps yapar; Kubernetes ya da VM kararı onlarda (2026-10-16). Broker'ın spool'u için instance başına kalıcı disk gerekir.
 - [x] **ClickHouse DDL'i:** ClickHouse 24.8'de çalıştırıldı ve sink'in satırlarıyla doğrulandı (`broker-log-sink`, `RealTargetsTest`).
 - [x] **Spring Boot sürümü:** Java 25 ve Spring Boot 4.1.1. ECS formatında loglama Spring Boot'un yapılandırılmış loglamasıyla (`logging.structured.format.console=ecs`) gelir; OTel Java agent'ı bundan bağımsız eklenir.
 - [x] **`perm_list`:** Bugünkü gibi kullanıcının tüm yetkileri yazılır. Yalnızca erişimi sağlayan yetkilerle süzmek şimdilik yapılmayacak; ileride eklenebilir.
