@@ -184,21 +184,26 @@ Kullanıcının paylaştığı eski kod ekran görüntülerinden (2026-10-12 ve 
 - **`sorgu` yetkisi:** Kullanıcıda `SORGU_TEMEL` varsa `perm = "SORGU_TEMEL"`, yoksa `SORGU_ILERI` varsa o; ardından `sorguService.execute(params)`.
 - **Bilinmeyen subtask ve yetkisiz kullanıcı:** Proje sınıfları özel exception atıyordu; ortak bir gövde yok, yeni ortak format kalır.
 - **Application listesi:** Eski broker'da sabit kodlu; yeni düzende yetki projesinden gelir (projeler = application'lar).
-- **Koordinatör:** Yetki projesinin adı. Projeleri ve yetkileri yönetir, `koordinator.secret` ile kullanıcı oturumu kapatabilir. API'leri sonra gelecek.
+- **Koordinatör:** Yetki projesinin adı; her ortamda ayrı çalışır (DEV, PREPROD, PROD). Projeleri ve yetkileri yönetir, `koordinator.secret` ile kullanıcı oturumu kapatabilir; giriş servisindeki yeni ucu (`POST /internal/v1/sessions/{uid}/logout`) ve gizli anahtarı Koordinatör ekibine kullanıcı iletecek. Gerçek uçlar (2026-10-21):
+  - `GET /api/koordinator/projeler-ve-yetkileri` → `[{"projeId", "projeAdi", "yetkiList": [{"id", "yetki", "ozelYetki", "durum"}], "projeDurum"}]`. Projeleri ya da bir projenin yetkilerini ayrı veren uç yok; gerekirse Koordinatör ekibi ekleyebilir.
+  - `GET /api/koordinator/personel-yetki/aktif-yetkiler/{sicil}` → bir map: `{"<anahtar>": [{"id", "projeId", "projeIsim", "yetkiIsim", "yetkiAciklama", "baslangicTarihi", "bitisTarihi", "askidaMi", "yetkiTalepDurum", "yetkiId"}]}` (Swagger anahtarları `additionalProp1…` diye gösteriyor).
+  - Giriş servisi ve admin Koordinatör'e ayardaki ortam adresiyle doğrudan gider, broker route'u üzerinden değil. Koordinatör ayrıca frontend'ler için broker'a sıradan bir proje olarak eklenir.
 - **`PublicApisService`:** Broker'daki bütün proje servislerine referans tutuyor; `refresh_permissions` ve `giris_public` subtask'leri bu servislere sabit yazılmış. Yeni düzende özel bir karşılığı yok.
 - **Saat dilimi:** Eski broker sunucusu TSİ'de çalışıyor (kullanıcı teyidi).
 - **`RedisTemplate<String, Object>` bean'i:** `setKeySerializer(new StringRedisSerializer())`, `setValueSerializer(new JacksonJsonRedisSerializer<>(Object.class))`, hash anahtar ve değerleri de `JacksonJsonRedisSerializer`, `setEnableTransactionSupport(true)`. Değerler tip bilgisi olmayan JSON.
-- **LDAP (`LdapPreprod.check_user`):** `uid`, şifre boş değilse `ldapTemplate.getContextSource().getContext(uid + "@test.com.tr", password)`; başarılıysa true, exception olursa false. Sınıf `@ConditionalOnProperty(name = "spring.profiles.active", havingValue = "preprod")` ile yalnızca preprod'da yükleniyor; diğer ortamların sınıfları görülmedi.
+- **LDAP (`LdapPreprod.check_user`):** `uid`, şifre boş değilse `ldapTemplate.getContextSource().getContext(uid + "@test.com.tr", password)`; başarılıysa true, exception olursa false. Sınıf `@ConditionalOnProperty(name = "spring.profiles.active", havingValue = "preprod")` ile yalnızca preprod'da yükleniyor. PROD sınıfı bununla aynı, yalnızca profil koşulu `prod`; alan adını kullanıcı ayarda verir (fotoğraftaki `@test.com.tr` değiştirilmişti). DEV'de giriş belirlenmiş bir magic key ile yapılıyor: herkes herkesin hesabına girebiliyor (2026-10-21).
+- **Alarm (kullanıcı, 2026-10-21):** Şu an çalışmıyor. Akış: isteğin bütün parametre değerleri liste yapılıp başka bir projeye (alarm servisi) gönderilir; yanıtta alarm olan değerlerin listesi döner; alarm varsa Elastic'teki `alarm` indeksine yazılır ve servise gitmeden 500 döner. İndeks kullanılmış; istek doğrudan basıldığı için mapping çok geniş.
 - **Java sürümü:** Eski kod `catch (Exception _)` kullanıyor (Java 22+) ve spring-data-redis 4.0.3 ile çalışıyor (Boot 4.0); JSON aynı Jackson 3 ile yazılıyor.
 
 ## Bilgi bekleyenler
 
 Kullanıcıdan istendi; gelince ilgili madde güncellenir:
 
-1. Koordinatör'ün gerçek uçları; şimdilik madde 4'teki varsayılanlar.
-2. Diğer ortamların `Ldap` sınıfları (dev ve test'te farklı bir alan adı ya da her şifreyi kabul eden bir sınıf olabilir). Şimdilik her ortamda gerçek bind, fark yalnızca ayarda.
-3. Dashboard yerleşimini ve hızlı bağlantıları kullanan subtask'ler (maintask/subtask ve gövdeler) → yeni yerleri (sonraki tur).
-4. Alarm: `alarmService.checkAlarm` ve `alarm_log` kodu, `alarm` indeksinden örnek bir doküman (madde 7).
+1. Koordinatör: servislerimiz çağırırken kimlik bilgisi (header ya da anahtar) gerekiyor mu; frontend'lerin gönderdiği `application` değeri `projeler-ve-yetkileri`'nde hangi alan (`projeAdi`?); `projeDurum` ve `durum` hangi değerde aktif; eski login'in `aktif-yetkiler` cevabını oturumdaki `permissions`'a çevirdiği kod (hangi alan, `askidaMi` süzülüyor mu, `uid` ile `sicil` aynı mı). Oturum kaydı eski broker'la birebir aynı kalmalı.
+2. Admin'den yetki açma (`POST /projects/{id}/permissions`): Koordinatör'de karşılığı yok. Öneri: özellik kalksın, yetkiler Koordinatör'ün ekranından açılır; ya da Koordinatör ekibi uç ekler.
+3. Merkezi admin'e giriş: şirkette SSO var mı? Yoksa öneri: LDAP ile giriş, roller PROD Koordinatör'ünde "Broker Admin" projesinin üç yetkisi.
+4. Dashboard yerleşimi ve hızlı bağlantılar: öneri giriş servisinde okuma/kaydetme uçları (aynı Redis anahtarları ve biçim), route'ları kullanıcı tanımlar; eski koddaki bu işlemlerin fotoğrafı bekleniyor.
+5. Alarm: eski kodda `alarm` dokümanını yazan kısım (alanları birebir korumak için); alarm servisini route olarak seçme önerisi kullanıcı onayı bekliyor.
 
 ## Verilmiş kararlar
 
@@ -225,6 +230,8 @@ Tasarım dokümanındakilere ek olarak netleşenler:
 - **Ortam ayarı:** `PUT /projects/{id}/environments/{env}` ortama hemen uygulanır; ortama ulaşılamazsa merkezde de değişmez (502 `ENV_UNREACHABLE`). Onay isteyen ortamda yalnızca `APPROVER` değiştirir (açık nokta).
 - **Arşiv:** Yalnızca hiçbir ortamda `ACTIVE` olmayan subtask arşivlenir (409 `ROUTE_DEPLOYED`).
 - **Dağıtım (kullanıcı kararı, 2026-10-16):** DevOps yapar; Kubernetes ya da VM kararı onlarda. Her ortamda broker, giriş servisi, env-admin ve log sink çalışır, merkezde admin. Log sink o ortamın Kafka'sını okur ve o ortamın Elastic'ine yazar (eski broker'ın Elastic'i ortam başına; `requests_` indeksinde ortam yok); ClickHouse ortak da olabilir, satırlar `environment` taşır.
+- **Alarm (kullanıcı kararı, 2026-10-21):** İsteğe bağlı; proje ve subtask düzeyinde açılır, hangi subtask'lerin kontrol edileceği kodda yazılmaz. Gövdedeki bütün değerler gönderilir. Alarm servisi yanıt vermezse istek reddedilir ve Kafka'ya loglanır.
+- **DEV'de giriş:** Eski DEV sınıfı gibi magic key; giriş servisinde yalnızca `dev` profilinde açılan bir mod olacak, anahtar ayardan.
 
 ## Modüller ve durum
 
@@ -369,8 +376,8 @@ Derlemede doğrulandı (Boot 4.1.1, Spring Framework 7.0, Jackson 3.1, Kafka 4.2
 ## Sonraki turlar
 
 1. Dağıtımı DevOps yapar ("Verilmiş kararlar"); imaj ve manifest bu repoda yazılmaz. Gerekirse onlar için bir devir notu: uygulamaların yerleri, portlar, ayarlar ve gizli anahtarlar, DB kullanıcıları; env-admin ve admin `mtls` profiliyle, broker'da kalıcı spool volume'u; Kafka topic'i ve DLQ tasarımdaki ayarlarla; ClickHouse DDL'i ve Elastic bileşen şablonu `broker-log-sink/src/main/resources` altında.
-2. Geçiş planı adım 1–2 (tasarım "Geçiş planı"): DEV'de eski broker ile sink'in Elastic dokümanlarını alan alan karşılaştırma; statik subtask'leri `runtime_route`'a ve merkezi history'ye aktaran tek seferlik script.
-3. Eski broker'ın Redis'te tuttuğu kullanıcı verileri (dashboard yerleşimi `user:layout:{sicil}`, hızlı bağlantılar `user:quick_link:{sicil}`), "Bilgi bekleyenler" 3 gelince. Değerleri de tip bilgisi olmayan JSON; anahtar ve biçim korunursa veri taşımadan yeni servise geçilir.
+2. Geçiş planı adım 1 (tasarım "Geçiş planı"): DEV'de eski broker ile sink'in Elastic dokümanlarını alan alan karşılaştırma. Eski sabit subtask'leri ve projeye özel response sınıflarını kullanıcı admin ekranından kendisi tanımlar; aktarım script'i yazılmaz (2026-10-21).
+3. Eski broker'ın Redis'te tuttuğu kullanıcı verileri (dashboard yerleşimi `user:layout:{sicil}`, hızlı bağlantılar `user:quick_link:{sicil}`), "Bilgi bekleyenler" 4 gelince. Değerleri de tip bilgisi olmayan JSON; anahtar ve biçim korunursa veri taşımadan yeni servise geçilir.
 4. Alarm ("Sıradaki iş" 7).
 5. Frontend: sözleşme `docs/frontend-guide.md`'de; canlı sürüm (artifact) bu dosyadan eşitlenir.
 
@@ -382,8 +389,9 @@ Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya ya
 
 ## Açık noktalar
 
-- SSO sağlayıcısı ve rol claim'i.
-- **`X-Clientip`:** Kullanıcı bu header'ı frontend'in değil, önündeki proxy'nin koyduğunu düşünüyor; teyit edilmedi. İstemci koyuyorsa IP bağlaması güvenlik sağlamaz; o durumda eski broker kapandıktan sonra IP bağlantıdan ya da güvenilir proxy'nin header'ından alınmalı.
+- Merkezi admin'e giriş ("Bilgi bekleyenler" 3).
+- **Ortam adları:** Kullanıcı DEV, PREPROD, PROD diyor; kodda ve tasarımda TEST yazıyor. PREPROD'a çevrilmesi önerildi.
+- **`alarm_list`:** Alarm yoksa eski kod servise giden gövdeye `alarm_list` ekliyordu. Alarm şu an kullanılmadığı için eklenmiyor; kullanıcı ileride eklenebileceğini not ettirdi.- **`X-Clientip`:** Kullanıcı bu header'ı frontend'in değil, önündeki proxy'nin koyduğunu düşünüyor; teyit edilmedi. İstemci koyuyorsa IP bağlaması güvenlik sağlamaz; o durumda eski broker kapandıktan sonra IP bağlantıdan ya da güvenilir proxy'nin header'ından alınmalı.
 - **Hata yanıtlarında HTTP 200 (ileride):** Mevcut frontend'ler için korunuyor. Frontend'ler güncellenince `broker.compat.legacy-responses: false` ile ortak formata ve gerçek HTTP status'lara geçilebilir; kullanıcı açık kalmasını istedi.
 - Kullanıcı başına tek oturum ve 1 günlük sabit süre (eski davranış): yeni login eskisini ezer, kullanılsa da oturum 1 günde biter.
 - PROD'da base URL değişikliğinin onay akışına alınması; PROD'da `DISABLE`/`ROLLBACK` için acil durum politikası (şimdilik onay istiyor).
