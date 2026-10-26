@@ -55,6 +55,9 @@ yapi:
     upstream:
       connect-timeout: 2s
       request-timeout: 10s
+    session:
+      # Merkezi admin'in giriş kontrolü (POST /admin/v1/sessions/verify): giriş servisinin kaydı, broker'ınkiyle aynı
+      key-pattern: "user:session:{uid}"
     test:
       # yalnızca test çağrısına açık ortamlarda (DEV, PREPROD); PROD'da kapalı kalır
       enabled: ${YAPI_ENV_ADMIN_TEST_ENABLED:false}

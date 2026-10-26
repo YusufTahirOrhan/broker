@@ -18,7 +18,7 @@ Yapi Admin, DevOps'un subtask'leri, yetkileri ve yanıt profillerini kod yazmada
 | Düzenleyen (`ROUTE_EDITOR`) | Proje, subtask ve profil tanımlar; test eder; DEV'e doğrudan uygular, PREPROD ve PROD için taşıma talebi açar; kendi talebini iptal eder |
 | Onaylayan (`APPROVER`) | Onay isteyen talepleri (PROD'a her taşıma, hangi ortamda olursa olsun anonim erişimin açılması) onaylar ya da reddeder; kendi açtığı talebi onaylayamaz |
 
-Roller şirketin SSO'sundaki ya da yetkilendirme servisindeki gruplardan gelir; bir kullanıcı birden fazla role sahip olabilir. Ekran, hangi düğmelerin görüneceğine `GET /api/v1/me` yanıtındaki rollere bakarak karar verir; backend aynı kuralı ayrıca uygular.
+Roller, kullanıcının şirketin giriş uygulamasındaki oturumunda taşıdığı Yapi yetkilerinden gelir: `YAPI_DEVELOPER` İzleyici ve Düzenleyen, `YAPI_ADMIN` üç rolü de verir (eşleme backend ayarındadır; yetki adları değişebilir). Bir kullanıcı birden fazla role sahip olabilir. Ekran, hangi düğmelerin görüneceğine `GET /api/v1/me` yanıtındaki rollere bakarak karar verir; backend aynı kuralı ayrıca uygular.
 
 | Ortam | Taşıma sırası | Onay | Test çağrısı |
 | --- | --- | --- | --- |
@@ -40,9 +40,9 @@ Uygulama dört ana bölümden oluşur: Projeler, Yanıt profilleri, Talepler ve 
 
 ### Açılış
 
-1. Kullanıcı şirketin SSO'suyla giriş yapar. Ekran aldığı access token'ı her istekte `Authorization: Bearer` header'ıyla gönderir.
+1. Kullanıcı şirketin giriş uygulamasından girer. Ekran her istekte o oturumun dört header'ını gönderir: `X-Token`, `X-Uid` (sicil), `X-Clientip` ve `X-User-Agent` (broker'a giden isteklerdeki gibi). `X-Clientip`'i ekranın önündeki proxy koyar.
 2. Açılışta üç çağrı yapılır ve oturum boyunca saklanır: `GET /me` (kullanıcı ve roller), `GET /environments` (ortam sırası, onay ve test ayarları), `GET /meta/definition-rules` (enum'lar, sınırlar, okunabilir header'lar).
-3. 401 gelirse token yenilenir ya da girişe dönülür. 403 gelirse işlem için rolün olmadığı gösterilir.
+3. 401 gelirse oturum yok ya da geçersizdir; giriş uygulamasına dönülür. 403 gelirse işlem için rolün olmadığı gösterilir.
 
 ### Projeler
 
@@ -135,9 +135,9 @@ Ortam başına config versiyonu ve her broker instance'ının yüklediği versiy
 
 Backend REST ve JSON konuşur; bütün yollar `/api/v1` altındadır ve alan adları camelCase'tir. Swagger arayüzü `/swagger-ui.html`, OpenAPI tanımı `/v3/api-docs` adresindedir; ikisi yalnızca `local` ve `dev` profillerinde açıktır. API'yi yerelde örnek veriyle tek komutla açmak için `docs/local-run.md`.
 
-- **Kimlik:** Her istek `Authorization: Bearer <SSO access token>` taşır. Token yoksa ya da geçersizse 401, rol yetmiyorsa 403 döner. `ROUTE_EDITOR` ve `APPROVER` rolleri okuma iznini de kapsar.
-- **Yerel geliştirme:** Backend `local` profiliyle çalışınca SSO yerine HTTP Basic kabul eder. Hazır kullanıcılar `viewer`, `editor`, `approver` ve üç role birden sahip `lead`'dir; şifre kullanıcı adıyla aynıdır. Dört göz kuralı `lead` ile talep açıp `approver` ile onaylayarak denenir.
-- **CORS:** İzinli adresler `yapi.admin.cors.allowed-origins` ayarındadır; yerelde varsayılan `http://localhost:5173`'tür.
+- **Kimlik:** Her istek giriş uygulamasının oturumunu taşır: `X-Token`, `X-Uid`, `X-Clientip`, `X-User-Agent`. Backend oturumu PROD ortamında, broker'ın kuralıyla (token, IP ve tarayıcı girişteki gibi) doğrular ve sonucu 30 saniye tutar. Header'lardan biri yoksa ya da oturum geçersizse 401, oturum geçerli ama Yapi yetkisi yoksa ya da rol yetmiyorsa 403 döner. Oturum doğrulanamazsa (PROD'un Admin API'sine ulaşılamadı) 502 `ENV_UNREACHABLE`. `ROUTE_EDITOR` ve `APPROVER` rolleri okuma iznini de kapsar.
+- **Yerel geliştirme:** Backend `local` profiliyle çalışınca oturum yerine HTTP Basic kabul eder. Hazır kullanıcılar `viewer`, `editor`, `approver` ve üç role birden sahip `lead`'dir; şifre kullanıcı adıyla aynıdır. Dört göz kuralı `lead` ile talep açıp `approver` ile onaylayarak denenir.
+- **CORS:** İzinli adresler `yapi.admin.cors.allowed-origins` ayarındadır; yerelde varsayılan `http://localhost:5173`'tür. İzinli header'lar `Content-Type`, `Authorization` (yerel) ve oturumun dört header'ı.
 - **Zaman:** ISO 8601 ve UTC: `2026-10-13T13:04:00Z`.
 - **Kimlikler:** Sayısal ID'ler JSON number olarak gelir.
 - **Büyük/küçük harf:** maintask ve subtask tekliliği harf duyarsızdır; `LogProject` varken `logproject` 409 `DUPLICATE` alır. Ekran her zaman kayıtlı yazımı gösterir.
@@ -166,7 +166,7 @@ Hatalar RFC 9457 problem detail olarak (`application/problem+json`) döner. `cod
 | code | HTTP | Ne zaman |
 | --- | --- | --- |
 | `VALIDATION_FAILED` | 400 | Gövde ya da tanım kurallara uymuyor; `errors` alan bazında gelir |
-| `UNAUTHENTICATED` | 401 | Token yok ya da geçersiz |
+| `UNAUTHENTICATED` | 401 | Oturum header'ları yok ya da oturum geçersiz |
 | `FORBIDDEN` | 403 | Kullanıcının rolü işlem için yetmiyor |
 | `FOUR_EYES` | 403 | Talep eden kendi talebini onaylamaya ya da reddetmeye çalıştı |
 | `TEST_NOT_ALLOWED` | 403 | Ortam test çağrısına kapalı |
@@ -523,6 +523,7 @@ Backend geliştirildikçe bu tablo güncellenir; en yeni kayıt en üsttedir. Bi
 
 | Tarih | Değişiklik |
 | --- | --- |
+| 2026-10-26 | Admin'e giriş: SSO ve `Authorization: Bearer` kalktı. Ekran her istekte giriş uygulamasının oturumunu gönderir (`X-Token`, `X-Uid`, `X-Clientip`, `X-User-Agent`); oturum geçersizse 401, Yapi yetkisi (`YAPI_DEVELOPER`, `YAPI_ADMIN`) yoksa ya da rol yetmezse 403. `GET /me`'de `username` ve `displayName` sicil. `local` profilinde HTTP Basic aynı. |
 | 2026-10-26 | Koordinatör'ün gerçek uçları: proje kataloğu (`/catalog/projects`) Koordinatör'ün Yapi projeleri (`is_yapi`), ID `projeId`, ad `projeAdi`; projenin yetkileri ortamın Koordinatör'ündeki projesinin listesi (`UNLINKED` projede boş), `description` `null`, `suffix` önekle başlamayan kodda `null`. Yetki açma kalktı: `POST /projects/{id}/permissions` yok (405), ekranda "yetki ekle" yok; yetkiler Koordinatör'de açılır. Hata ve ön kontrol mesajlarında "yetkilendirme servisi" yerine "Koordinatör". |
 | 2026-10-26 | Ortamlar DEV, PREPROD, PROD: TEST'in kodu `PREPROD` oldu (`GET /environments`, `env` parametreleri, taşıma talepleri, rozetler). Ön kontrol mesajı "v4 PREPROD ortamında aktif" biçiminde. |
 | 2026-10-26 | Ad değişikliği: proje Yapi, ekranın adı Yapi Admin. Merkezi admin `yapi-admin`, yerel broker'ın dosyası `yapi-local.json`, CORS ayarı `yapi.admin.cors.allowed-origins`. Admin API'nin yolları, gövdeleri ve hata kodları değişmedi. |
@@ -535,7 +536,7 @@ Backend geliştirildikçe bu tablo güncellenir; en yeni kayıt en üsttedir. Bi
 
 ### Netleşmemiş noktalar
 
-- [ ] **SSO:** Hangi OIDC sağlayıcısı kullanılıyor ve roller token'ın hangi claim'inde geliyor?
+- [x] **Giriş:** SSO yok; admin ekranı şirketin giriş uygulamasının oturumuyla açılır (2026-10-26).
 - [x] **Yetki projesi:** Koordinatör'ün gerçek uçlarına bağlandı (2026-10-26): katalog, projenin yetkileri ve yetkinin varlığı her ortamın `projeler-ve-yetkileri` ucundan; ekranın gördüğü yollar değişmedi, yetki açma ucu kalktı.
 - [ ] **PROD base URL'i:** Şimdilik yalnızca `APPROVER` değiştirebiliyor; ileride onay akışına alınabilir.
 - [ ] **Acil durum:** PROD'da `DISABLE` ve `ROLLBACK` de onay istiyor; tasarım dokümanında açık bir karar.

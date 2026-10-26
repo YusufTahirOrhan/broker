@@ -23,9 +23,6 @@ spring:
       dev_admin_api_url: ${YAPI_DEV_ADMIN_API_URL:https://yapi-env-admin.dev.internal:8443}
       preprod_admin_api_url: ${YAPI_PREPROD_ADMIN_API_URL:https://yapi-env-admin.preprod.internal:8443}
       prod_admin_api_url: ${YAPI_PROD_ADMIN_API_URL:https://yapi-env-admin.prod.internal:8443}
-  # Şirket SSO'su (OIDC): SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUERURI ortam değişkeniyle verilir.
-  # Burada boş varsayılan yok: boş issuer her token'ı reddeder, hiç verilmezse uygulama başlamaz.
-  # Rollerin geldiği claim yapi.admin.security altında.
 
 server:
   port: ${YAPI_ADMIN_PORT:8080}
@@ -54,12 +51,17 @@ yapi:
       - X-User-Agent
     cors:
       allowed-origins: ${YAPI_ADMIN_CORS_ORIGINS:}
-    security:
-      roles-claim: ${YAPI_ADMIN_ROLES_CLAIM:roles}
-      username-claim: preferred_username
-      display-name-claim: name
-      # SSO grubu → rol; token'da rol adları doğrudan geliyorsa boş kalır
-      group-roles: {}
+    # Giriş: şirketin giriş uygulamasının oturumu. Ekran her istekte X-Token, X-Uid, X-Clientip, X-User-Agent gönderir;
+    # oturum bu ortamın env-admin'ine sorulur (POST /admin/v1/sessions/verify), sonuç cache-ttl boyunca tutulur.
+    # local profilinde HTTP Basic.
+    session:
+      environment: ${YAPI_ADMIN_SESSION_ENVIRONMENT:PROD}
+      cache-ttl: 30s
+      # admin rolü ← oturumdaki Koordinatör yetkileri (biri yeterli)
+      roles:
+        VIEWER: [YAPI_DEVELOPER, YAPI_ADMIN]
+        ROUTE_EDITOR: [YAPI_DEVELOPER, YAPI_ADMIN]
+        APPROVER: [YAPI_ADMIN]
     environments:
       connect-timeout: 3s
       timeout: 30s

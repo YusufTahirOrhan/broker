@@ -6,21 +6,16 @@ import java.util.Set;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Component;
 
-import com.acme.yapi.admin.config.AdminProperties;
 import com.acme.yapi.admin.web.ApiException;
 
-/** Resolves the user of the current request; a user without any role is refused everywhere. */
+/**
+ * Resolves the user of the current request: the session's uid (the sicil) or the local user. A user without any
+ * role is refused everywhere.
+ */
 @Component
 public class CurrentUser {
-
-    private final AdminProperties.Security settings;
-
-    public CurrentUser(AdminProperties properties) {
-        this.settings = properties.security();
-    }
 
     public User get() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -35,12 +30,7 @@ public class CurrentUser {
                 Role.parse(name.substring(5)).ifPresent(roles::add);
             }
         }
-        String username = authentication.getName();
-        String displayName = null;
-        if (authentication instanceof JwtAuthenticationToken jwt) {
-            displayName = jwt.getToken().getClaimAsString(settings.displayNameClaim());
-        }
-        User user = User.of(username, displayName, roles);
+        User user = User.of(authentication.getName(), null, roles);
         if (user.roles().isEmpty()) {
             throw ApiException.forbidden("Yapi Admin için rolünüz yok.");
         }

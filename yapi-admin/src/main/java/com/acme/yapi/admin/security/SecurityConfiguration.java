@@ -1,5 +1,7 @@
 package com.acme.yapi.admin.security;
 
+import java.time.Clock;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.context.annotation.Bean;
@@ -15,23 +17,28 @@ import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import com.acme.yapi.admin.config.AdminProperties;
+import com.acme.yapi.admin.environment.EnvironmentClient;
+import com.acme.yapi.admin.environment.EnvironmentRepository;
 import com.acme.yapi.admin.web.Problems;
 
 /**
- * Every {@code /api/v1} call carries the SSO access token ({@code Authorization: Bearer}). In the {@code local}
- * profile HTTP Basic replaces SSO with the users {@code viewer}, {@code editor}, {@code approver} and {@code lead}
- * (password = user name; {@code lead} has all three roles).
+ * Every {@code /api/v1} call carries the session of the company's login application ({@code X-Token}, {@code X-Uid},
+ * {@code X-Clientip}, {@code X-User-Agent}), checked through the session environment's Admin API; roles come from the
+ * session's Yapi permissions ({@code yapi.admin.session.roles}). In the {@code local} profile HTTP Basic replaces it
+ * with the users {@code viewer}, {@code editor}, {@code approver} and {@code lead} (password = user name; {@code lead}
+ * has all three roles).
  */
 @Configuration(proxyBeanMethods = false)
 public class SecurityConfiguration {
 
     private static final AuthenticationEntryPoint UNAUTHENTICATED = (request, response, exception) ->
-            Problems.write(response, HttpStatus.UNAUTHORIZED, "UNAUTHENTICATED", "Token yok ya da geçersiz.");
+            Problems.write(response, HttpStatus.UNAUTHORIZED, "UNAUTHENTICATED", "Oturum yok ya da geçersiz.");
     private static final AccessDeniedHandler FORBIDDEN = (request, response, exception) ->
             Problems.write(response, HttpStatus.FORBIDDEN, "FORBIDDEN", "Bu işlem için rolünüz yetmiyor.");
 
@@ -52,11 +59,18 @@ public class SecurityConfiguration {
 
     @Bean
     @Profile("!local")
-    SecurityFilterChain sso(HttpSecurity http, AdminProperties properties) throws Exception {
+    SessionVerifier sessionVerifier(EnvironmentClient client, EnvironmentRepository environments,
+                                    AdminProperties properties) {
+        return new SessionVerifier(client, environments, properties, Clock.systemUTC());
+    }
+
+    @Bean
+    @Profile("!local")
+    SecurityFilterChain session(HttpSecurity http, SessionVerifier verifier, AdminProperties properties)
+            throws Exception {
         return common(http)
-                .oauth2ResourceServer(server -> server
-                        .authenticationEntryPoint(UNAUTHENTICATED)
-                        .jwt(jwt -> jwt.jwtAuthenticationConverter(new JwtRoles(properties.security()))))
+                .addFilterBefore(new SessionAuthenticationFilter(verifier, properties.session()),
+                        AnonymousAuthenticationFilter.class)
                 .build();
     }
 
@@ -89,7 +103,9 @@ public class SecurityConfiguration {
         CorsConfiguration cors = new CorsConfiguration();
         cors.setAllowedOrigins(properties.cors().allowedOrigins());
         cors.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        cors.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+        List<String> headers = new ArrayList<>(List.of("Authorization", "Content-Type"));
+        headers.addAll(SessionAuthenticationFilter.HEADERS);
+        cors.setAllowedHeaders(headers);
         cors.setMaxAge(3600L);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/api/**", cors);

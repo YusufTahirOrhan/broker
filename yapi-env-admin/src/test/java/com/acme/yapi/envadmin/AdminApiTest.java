@@ -27,6 +27,8 @@ import org.springframework.test.context.DynamicPropertySource;
 
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.runtime.RuntimeSignals;
+import com.acme.yapi.core.session.SessionRecord;
+import com.acme.yapi.core.session.SessionRecordCodec;
 import com.acme.yapi.core.testcall.TestCallRequest;
 import com.acme.yapi.core.testing.CoreFixtures;
 import com.acme.yapi.core.testing.FakeHttpServer;
@@ -458,5 +460,27 @@ class AdminApiTest {
         assertThat(response.json().get("type").stringValue()).isEqualTo("about:blank");
 
         assertThat(http.get("/admin/v1/nothing").json().get("code").stringValue()).isEqualTo("NOT_FOUND");
+    }
+
+    @Test
+    void theCentralAdminChecksASessionWithTheBrokersRule() {
+        redis.opsForValue().set("user:session:12345", SessionRecordCodec.DEFAULT.write(new SessionRecord("12345",
+                "tok-1", "10.1.1.1", "Mozilla/5.0", List.of("YAPI_DEVELOPER", "ORDER_READ"))));
+        String request = "{\"uid\": \"%s\", \"token\": \"%s\", \"clientIp\": \"%s\", \"userAgent\": \"%s\"}";
+
+        JsonHttp.Response valid = http.post("/admin/v1/sessions/verify",
+                request.formatted("12345", "tok-1", "10.1.1.1", "Mozilla/5.0"));
+        assertThat(valid.status()).isEqualTo(200);
+        assertThat(valid.json()).isEqualTo(Json.parse("{\"valid\": true, \"permissions\": [\"YAPI_DEVELOPER\", \"ORDER_READ\"]}"));
+
+        for (String[] wrong : new String[][]{{"12345", "tok-2", "10.1.1.1", "Mozilla/5.0"},
+                {"12345", "tok-1", "10.1.1.2", "Mozilla/5.0"}, {"12345", "tok-1", "10.1.1.1", "curl"},
+                {"12345", "TOK-1", "10.1.1.1", "Mozilla/5.0"}, {"67890", "tok-1", "10.1.1.1", "Mozilla/5.0"},
+                {"", "tok-1", "10.1.1.1", "Mozilla/5.0"}}) {
+            assertThat(http.post("/admin/v1/sessions/verify", request.formatted((Object[]) wrong)).json())
+                    .as(String.join(" ", wrong))
+                    .isEqualTo(Json.parse("{\"valid\": false, \"permissions\": []}"));
+        }
+        redis.delete("user:session:12345");
     }
 }

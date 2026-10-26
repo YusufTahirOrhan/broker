@@ -1,23 +1,28 @@
 package com.acme.yapi.admin.config;
 
 import java.time.Duration;
+import java.util.Collection;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+
+import com.acme.yapi.admin.security.Role;
 
 /**
  * @param readableHeaders frontend headers {@code ${header.*}} may read; must match the brokers' list
  */
 @ConfigurationProperties("yapi.admin")
-public record AdminProperties(List<String> readableHeaders, Cors cors, Security security, Environments environments,
+public record AdminProperties(List<String> readableHeaders, Cors cors, Session session, Environments environments,
                               Catalog catalog, Authorization authorization, Drift drift) {
 
     public AdminProperties {
         readableHeaders = readableHeaders == null ? List.of("Accept-Language", "X-Clientip", "X-User-Agent")
                 : List.copyOf(readableHeaders);
         cors = cors == null ? new Cors(null) : cors;
-        security = security == null ? new Security(null, null, null, null) : security;
+        session = session == null ? new Session(null, null, null) : session;
         environments = environments == null ? new Environments(null, null, null, null) : environments;
         catalog = catalog == null ? new Catalog(null, null, null, null) : catalog;
         authorization = authorization == null ? new Authorization(null, null) : authorization;
@@ -31,16 +36,31 @@ public record AdminProperties(List<String> readableHeaders, Cors cors, Security 
     }
 
     /**
-     * Where roles come from in the SSO token. A claim value that is a role name is taken as is; any other value is
-     * looked up in {@code groupRoles} (group → roles).
+     * Sign-in with the session of the company's login application: the screen sends {@code X-Token}, {@code X-Uid},
+     * {@code X-Clientip} and {@code X-User-Agent}, {@code environment}'s Admin API checks the record and its answer is
+     * kept for {@code cacheTtl}.
+     *
+     * @param roles admin role → the Koordinatör permissions of the session that give it (any one is enough)
      */
-    public record Security(String rolesClaim, String usernameClaim, String displayNameClaim,
-                           Map<String, List<String>> groupRoles) {
-        public Security {
-            rolesClaim = rolesClaim == null ? "roles" : rolesClaim;
-            usernameClaim = usernameClaim == null ? "preferred_username" : usernameClaim;
-            displayNameClaim = displayNameClaim == null ? "name" : displayNameClaim;
-            groupRoles = groupRoles == null ? Map.of() : Map.copyOf(groupRoles);
+    public record Session(String environment, Duration cacheTtl, Map<String, List<String>> roles) {
+        public Session {
+            environment = environment == null ? "PROD" : environment;
+            cacheTtl = cacheTtl == null ? Duration.ofSeconds(30) : cacheTtl;
+            roles = roles == null || roles.isEmpty() ? Map.of(
+                    "VIEWER", List.of("YAPI_DEVELOPER", "YAPI_ADMIN"),
+                    "ROUTE_EDITOR", List.of("YAPI_DEVELOPER", "YAPI_ADMIN"),
+                    "APPROVER", List.of("YAPI_ADMIN")) : Map.copyOf(roles);
+        }
+
+        /** The admin roles the session's permissions give. */
+        public Set<Role> rolesOf(Collection<String> permissions) {
+            Set<Role> granted = EnumSet.noneOf(Role.class);
+            roles.forEach((role, needed) -> {
+                if (needed.stream().anyMatch(permissions::contains)) {
+                    Role.parse(role).ifPresent(granted::add);
+                }
+            });
+            return granted;
         }
     }
 

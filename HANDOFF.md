@@ -83,6 +83,14 @@ SSO ve JWT kalkar. Kullanıcılar şirketin giriş uygulamasından girer; Yapi y
 - **Roller (ayardan):** `VIEWER` ← `YAPI_DEVELOPER` ya da `YAPI_ADMIN`; `ROUTE_EDITOR` ← `YAPI_DEVELOPER`, `YAPI_ADMIN`; `APPROVER` ← `YAPI_ADMIN`. Yetki adları değişebilir. Dört göz kuralı aynen.
 - **Hatalar:** Oturum geçersizse 401, rol yetmezse 403. `local` profilinde HTTP Basic kalır.
 - Rehberin "Kimlik" bölümü ve değişiklik kaydı. DevOps notu: admin API'ye gelen isteklere `X-Clientip`'i broker'dakiyle aynı proxy koymalı.
+- **Yapıldı (2026-10-26):** SSO/JWT kaldırıldı (`spring-boot-starter-security-oauth2-resource-server`, `JwtRoles`, `SsoTokenTest`). Uygulanırken netleşenler ve varsayımlar:
+  - **env-admin:** `POST /admin/v1/sessions/verify` (`SessionController`); kayıt `yapi.env-admin.session.key-pattern` (varsayılan `user:session:{uid}`) ve core'daki codec'le okunur, `SessionRecord.matches` ile eşleştirilir. Geçersizse `{"valid": false, "permissions": []}`; Redis okunamazsa 503 `SESSION_UNAVAILABLE`.
+  - **Admin:** `SessionAuthenticationFilter` (yalnızca `!local`) dört header'ı okur; biri eksikse istek anonim kalır, `/api/**` 401 `UNAUTHENTICATED` ("Oturum yok ya da geçersiz."). `SessionVerifier` oturum ortamının env-admin'ine `EnvironmentClient` (mTLS) ile sorar. Ayarlar `yapi.admin.session.environment` (`YAPI_ADMIN_SESSION_ENVIRONMENT`, varsayılan `PROD`), `cache-ttl` (30 sn), `roles` (rol → yetkiler; biri yeterli).
+  - **Önbellek:** Anahtar dört header'ın tamamı; geçerli ve geçersiz cevaplar 30 sn tutulur (geçersizin de tutulması env-admin'i yanlış token tekrarlarından korur; yeni login yeni token demek), başarısız çağrı tutulmaz. En çok 10.000 kayıt; dolunca süresi geçenler atılır.
+  - **Hatalar:** Oturum geçersiz → 401; geçerli ama `roles`'taki yetkilerden hiçbiri yok → 403 `FORBIDDEN` ("Yapi Admin için rolünüz yok."); env-admin'e ulaşılamadı → 502 `ENV_UNREACHABLE`; env-admin'in hatası kodu ve status'uyla (`SESSION_UNAVAILABLE` 503).
+  - **Kullanıcı:** `username` ve `displayName` uid (sicil); oturum kaydında ad yok. Dört göz kuralı uid ile, aynen.
+  - **CORS:** izinli header'lara `X-Token`, `X-Uid`, `X-Clientip`, `X-User-Agent` eklendi.
+  - **Testler:** `SessionLoginTest` (`!local`: roller yetkilerden ve ayardan, yalnızca PROD'a sorulur, eksik header/yanlış token/başka tarayıcı 401, Yapi yetkisi yok 403, önbellek, ulaşılamayan ortam 502, Swagger kapalı), env-admin `AdminApiTest` (eşleşme matrisi).
 
 ### 6. Giriş servisi: kullanıcı ayarları
 
@@ -318,7 +326,7 @@ Tasarım dokümanındakilere ek olarak netleşenler:
 - **Test çağrıları** Kafka'ya log yazmaz; merkezi admin bunları kendisi audit eder.
 - **Eski sayaç:** Eski broker'ın `broker.gelen.istekler`'i Yapi'de `yapi.gelen.istekler` (2026-10-26 kararı). Tag anahtarları ayarla verilir; eski controller'la teyit edildi (`maintask`, `subtask`). Bilinmeyenler "Bilinmeyen Proje" / "Bilinmeyen Endpoint".
 - **Elastic aylık indeks:** Ay, request ID'deki (UUIDv7) zamandan, ayarlanabilir saat diliminde hesaplanır. Eski kod sunucunun saat dilimini (TSİ) kullanıyor; varsayılan `Europe/Istanbul`. Parametre dokümanı `_id`'si `UUID.nameUUIDFromBytes(requestId|alan|sıra)`.
-- **Admin kimliği:** OAuth2 resource server (JWT); rollerin geldiği claim ve grup→rol eşlemesi ayardan. `local` profilinde HTTP Basic: `viewer`, `editor`, `approver`, `lead` (şifre = kullanıcı adı; `lead` üç role de sahip).
+- **Admin kimliği:** Şirketin giriş uygulamasının oturumu (`X-Token`, `X-Uid`, `X-Clientip`, `X-User-Agent`), oturum ortamının env-admin'inde doğrulanır; roller oturumdaki Yapi yetkilerinden (ayardan). `local` profilinde HTTP Basic: `viewer`, `editor`, `approver`, `lead` (şifre = kullanıcı adı; `lead` üç role de sahip).
 - **Roller:** `VIEWER`, `ROUTE_EDITOR`, `APPROVER`. `ROUTE_EDITOR` DEV'e doğrudan uygular (talep onaysız uygulanır), PREPROD ve PROD için talep açar.
 - **Taşıma kuralları:** Onay gerekir = hedef ortam `requires_approval` **ya da** versiyon anonim erişimi açıyorsa (hangi ortam olursa olsun). Onay gerekenlerde gerekçe zorunlu. `ROLLBACK` yalnızca hedef ortama daha önce `APPLIED` olmuş bir versiyona; `DISABLE`/`ENABLE` hedefteki mevcut versiyonla. Profil önce, route sonra uygulanır. Ön kontroller ve adları `docs/frontend-guide.md`'de.
 - **Ortam ayarı:** `PUT /projects/{id}/environments/{env}` ortama hemen uygulanır; ortama ulaşılamazsa merkezde de değişmez (502 `ENV_UNREACHABLE`). Onay isteyen ortamda yalnızca `APPROVER` değiştirir (açık nokta).
@@ -408,6 +416,7 @@ Paket `com.acme.yapi.envadmin`. Uçlar `/admin/v1` altında; hatalar merkezle ay
 | `GET /projects/{maintask}/spec?path=` | Base URL runtime DB'den; yol doğrulanır (`..`, `//`, şema, ters bölü reddedilir). Hata: 502 `UPSTREAM_ERROR` (`upstreamStatus`) |
 | `POST /probe` | `{"maintask", "httpMethod", "pathTemplate", "pathVariables"}` → `{"result", "status", "allow", "url", "message"}`; değeri verilmeyen path değişkeni `1` olur; redirect izlenmez; ulaşılamazsa `INCONCLUSIVE`, `status: null` |
 | `POST /test` | `TestCallRequest`'e kayıtlı base URL'i koyup broker'ın iç endpoint'ine iletir; kapalıysa 403 `TEST_NOT_ALLOWED`, broker'a ulaşılamazsa 502 `YAPI_UNREACHABLE` |
+| `POST /sessions/verify` | Merkezi admin'in giriş kontrolü: `{"uid", "token", "clientIp", "userAgent"}` → `{"valid", "permissions"}`; kayıt core'daki codec'le, eşleşme broker'ın kuralıyla; Redis okunamazsa 503 `SESSION_UNAVAILABLE` |
 
 - **Şema:** `db/migration/yapi_runtime/V1__runtime_schema.sql`, Oracle 19c (tasarımdaki modelin Oracle karşılığı; kullanıcı yoksa GRANT atlanır, ORA-01917). Flyway şema sahibiyle (`YAPI_RUNTIME_DB_OWNER_*`, `create-schemas: false`), uygulama `yapi_runtime_writer` ile `YAPI_RUNTIME_DB_SCHEMA` (varsayılan `YAPI_RUNTIME`) üzerinden çalışır. Yazmalar `MERGE` + versiyon artışı, tek transaction.
 - **mTLS:** `server.ssl.bundle=env-admin`, `client-auth=need`; bundle `mtls` profilinde (`application-mtls.yml`). Profil açılmazsa uygulama başlamaz. `yapi.env-admin.allowed-client-subjects` doluysa sertifika konusu da kontrol edilir (403 `CLIENT_NOT_ALLOWED`). Actuator ayrı portta (9090), TLS'siz.
@@ -421,7 +430,7 @@ Paket `com.acme.yapi.admin`. Sözleşme `docs/frontend-guide.md`; uygulama sıra
 
 | Paket | İçerik |
 | --- | --- |
-| `security` | `!local`: OAuth2 resource server (JWT); roller `yapi.admin.security.roles-claim` claim'inden, rol adı değilse `group-roles` ile eşlenir; kullanıcı adı `preferred_username` (yoksa `sub`). `local`: HTTP Basic, `viewer`/`editor`/`approver`/`lead`. Rol kontrolleri serviste (`User.require`); rolü olmayan kullanıcı her uçta 403. 401/403 problem formatında |
+| `security` | `!local`: `SessionAuthenticationFilter` + `SessionVerifier` (oturum ortamının env-admin'i, 30 sn önbellek), roller `yapi.admin.session.roles`'tan; kullanıcı adı uid. `local`: HTTP Basic, `viewer`/`editor`/`approver`/`lead`. Rol kontrolleri serviste (`User.require`); rolü olmayan kullanıcı her uçta 403. 401/403 problem formatında |
 | `environment` | `EnvironmentRepository` (sıra, onay, test ayarı DB'den), `EnvironmentClient` (Admin API; `ssl-bundle` ile mTLS, redirect yok). Bağlanamama `UnreachableException` (hiçbir şey değişmedi), istek gitti ama yanıt yok `NoAnswerException` (uygulanmış olabilir) |
 | `project`, `catalog`, `authz` | Proje kaydı (önek çakışması `PREFIX_OVERLAP`, harf duyarsız `DUPLICATE`), ortam ayarı önce ortama, sonra merkeze. Katalog ve yetkiler `mode: http` (her ortamın Koordinatör'ü, `koordinator/KoordinatorProjects`, ortam başına önbellek) ya da `memory`; yetkiler salt okunur |
 | `route`, `profile` | Güncel satır + aynı transaction'da history (snapshot Java'da kurulur, snake_case anahtarlar), iyimser kilit (`VERSION_CONFLICT` + `currentVersion`), geri alma, arşiv (`ROUTE_DEPLOYED`), karşılaştırma, doğrulama, önizleme (`BackendRequestBuilder`) |
@@ -430,8 +439,8 @@ Paket `com.acme.yapi.admin`. Sözleşme `docs/frontend-guide.md`; uygulama sıra
 | `jobs` | `DriftCheck` (gece; ortamın listesiyle karşılaştırma + her ACTIVE route'a yoklama, `yapi.admin.drift` sayacı, `last_probe_status`), `CatalogSync` (ad yenileme, servisten kalkan proje `MISSING`). Birden çok instance'ta aynı anda çalışmaları zararsız (idempotent) |
 
 - **Şema:** `db/migration/yapi_admin/V1__central_schema.sql`, tasarımdaki modelin Oracle 19c karşılığı (yukarıda "Sıradaki iş" 1'deki kararlar: `route_permission`, tablo başına PL/SQL trigger'lar, `CASE`'li açık talep index'leri, `change_note`; kullanıcı yoksa GRANT atlanır). `V2__environments.sql` ortamları `dev/preprod/prod_admin_api_url` placeholder'larıyla `MERGE` ile seed eder. Uygulama `yapi_admin_app` ile `YAPI_ADMIN_DB_SCHEMA` (varsayılan `YAPI_ADMIN`) üzerinden şemasız çalışır.
-- **Ayar:** SSO issuer'ı `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUERURI` ile verilir (boş varsayılan yok; boş issuer her token'ı reddeder). mTLS istemci sertifikası `mtls` profilinde (`application-mtls.yml`, bundle `env-client`).
-- **Testler:** Testcontainers Oracle XE (`CentralDatabase`: uygulama `yapi_admin_app` ile, temizlik şema sahibiyle; history trigger'ları temizlik sırasında kapatılır), `local` profili ve bellek içi `FakeEnvironments` (üç ortamın Admin API'si; promotion ID idempotency'si, eski talebin reddi, proje/profil yokluğu, sessiz kalma). SSO testi gerçek imzalı JWT ile; ortam istemcisinin mTLS'i istemci sertifikası isteyen bir `HttpsServer`'a karşı.
+- **Ayar:** Oturum ortamı `YAPI_ADMIN_SESSION_ENVIRONMENT` (varsayılan PROD); Koordinatör adresleri `YAPI_KOORDINATOR_<ENV>_URL`. mTLS istemci sertifikası `mtls` profilinde (`application-mtls.yml`, bundle `env-client`).
+- **Testler:** Testcontainers Oracle XE (`CentralDatabase`: uygulama `yapi_admin_app` ile, temizlik şema sahibiyle; history trigger'ları temizlik sırasında kapatılır), `local` profili ve bellek içi `FakeEnvironments` (üç ortamın Admin API'si; promotion ID idempotency'si, eski talebin reddi, proje/profil yokluğu, sessiz kalma). `SessionLoginTest` oturumla giriş (`!local`); ortam istemcisinin mTLS'i istemci sertifikası isteyen bir `HttpsServer`'a karşı.
 
 ### yapi-login (yeşil)
 
@@ -475,7 +484,7 @@ Derlemede doğrulandı (Boot 4.1.1, Spring Framework 7.0, Jackson 3.1, Kafka 4.2
 
 ## Sonraki turlar
 
-1. Dağıtımı DevOps yapar ("Verilmiş kararlar"); imaj ve manifest bu repoda yazılmaz. Gerekirse onlar için bir devir notu: uygulamaların yerleri, portlar, ayarlar ve gizli anahtarlar, DB kullanıcıları; env-admin ve admin `mtls` profiliyle, broker'da kalıcı spool volume'u; Kafka topic'i ve DLQ tasarımdaki ayarlarla; ClickHouse DDL'i ve Elastic bileşen şablonu `yapi-log-sink/src/main/resources` altında.
+1. Dağıtımı DevOps yapar ("Verilmiş kararlar"); imaj ve manifest bu repoda yazılmaz. Gerekirse onlar için bir devir notu: uygulamaların yerleri, portlar, ayarlar ve gizli anahtarlar, DB kullanıcıları; env-admin ve admin `mtls` profiliyle, broker'da kalıcı spool volume'u; Kafka topic'i ve DLQ tasarımdaki ayarlarla; ClickHouse DDL'i ve Elastic bileşen şablonu `yapi-log-sink/src/main/resources` altında. Admin API'nin önündeki proxy de gelen isteklere `X-Clientip`'i broker'dakiyle aynı biçimde koymalı (admin girişi oturumu broker'ın kuralıyla doğrular).
 2. Geçiş planı adım 1 (tasarım "Geçiş planı"): DEV'de eski broker ile sink'in Elastic dokümanlarını alan alan karşılaştırma. Eski sabit subtask'leri ve projeye özel response sınıflarını kullanıcı admin ekranından kendisi tanımlar; aktarım script'i yazılmaz (2026-10-21).
 3. Frontend: sözleşme `docs/frontend-guide.md`'de; canlı sürüm (artifact) bu dosyadan eşitlenir.
 
@@ -485,6 +494,7 @@ Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya ya
 
 - 2026-10-16 turunun maddeleri canlı dokümana işlendi (rev 180).
 - **Koordinatör (3):** Admin'in proje kataloğu tek ortamın Koordinatör'ünden (`yapi.admin.catalog.environment`, varsayılan PROD); projenin yetkileri ve yetkinin varlığı her ortamın kendi Koordinatör'ünden, ortam başına 5 dk önbellek. Yetkinin ortamda "var" sayılması: o ortamdaki herhangi bir Yapi projesinin `yetkiList`'inde olması. `UNLINKED` projenin yetki listesi boş. Evet/hayır alanları `true`/`1`/`"true"`/`"1"`. Yetki listesinde `description` yok (`null`).
+- **Admin girişi (5):** env-admin'de yeni uç `POST /admin/v1/sessions/verify`; admin geçerli ve geçersiz cevapları 30 sn tutar (başarısız çağrıyı tutmaz); `username` ve `displayName` uid; dört header'dan biri eksikse 401; oturum doğrulanamazsa 502 `ENV_UNREACHABLE`.
 - **Magic key (4):** Başarısız denemeler de loglanır; anahtar boşsa servis başlamaz; `dev` profilinin varsayılan modu `magic-key`.
 - **Ortamlar (2):** Ön kontrol mesajları ortam kodunu "X ortamında ..." diye yazar, koda ek yapıştırılmaz ("v4 PREPROD ortamında aktif").
 - **Ad (1):** Listede olmayan, kuralla değişen adlar: olay alanı ve ClickHouse kolonu `broker_instance` → `yapi_instance`; ClickHouse `yapi_logs.yapi_metrics_1m` ve view'ı; consumer group'lar `yapi-logs-elastic`, `yapi-logs-clickhouse`; DLQ header'ları `yapi.dlq.*`; Elastic bileşen şablonu `yapi-fields`; test çağrısı header'ı `X-Yapi-Test-Secret`; audit logger'ı `yapi.audit`; yerel override dosyası `yapi-local.json`. 2026-10-26 turunun kararlarını (ad, ortamlar, Koordinatör, magic key, admin girişi, kullanıcı ayarları, alarm) Claude tur bitince tasarım dokümanına işler; buraya yalnızca uygulanırken netleşenler yazılır.

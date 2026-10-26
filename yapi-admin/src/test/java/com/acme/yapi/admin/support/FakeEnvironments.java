@@ -36,6 +36,9 @@ public final class FakeEnvironments implements AutoCloseable {
         public final List<JsonNode> testCalls = new CopyOnWriteArrayList<>();
         public volatile JsonNode spec = CoreFixtures.sampleSpec();
         public volatile boolean silent;
+        /** Session records by uid, as the giriş service wrote them: token, client IP, user agent, permissions. */
+        public final Map<String, List<String>> sessions = new ConcurrentHashMap<>();
+        public final AtomicLong sessionChecks = new AtomicLong();
 
         void reset() {
             configVersion.set(0);
@@ -46,6 +49,15 @@ public final class FakeEnvironments implements AutoCloseable {
             testCalls.clear();
             spec = CoreFixtures.sampleSpec();
             silent = false;
+            sessions.clear();
+            sessionChecks.set(0);
+        }
+
+        /** Stores a session record; the first three values are token, client IP and user agent. */
+        public void session(String uid, String token, String clientIp, String userAgent, String... permissions) {
+            List<String> record = new java.util.ArrayList<>(List.of(token, clientIp, userAgent));
+            record.addAll(List.of(permissions));
+            sessions.put(uid, record);
         }
     }
 
@@ -167,6 +179,20 @@ public final class FakeEnvironments implements AutoCloseable {
                 result.put("status", 200);
                 result.put("message", "test");
                 json(exchange, 200, result);
+            }
+            case "POST sessions" -> {
+                environment.sessionChecks.incrementAndGet();
+                List<String> record = environment.sessions.get(Json.stringField(body, "uid"));
+                boolean valid = record != null && record.get(0).equals(Json.stringField(body, "token"))
+                        && record.get(1).equals(Json.stringField(body, "clientIp"))
+                        && record.get(2).equals(Json.stringField(body, "userAgent"));
+                ObjectNode answer = Json.object();
+                answer.put("valid", valid);
+                ArrayNode permissions = answer.putArray("permissions");
+                if (valid) {
+                    record.subList(3, record.size()).forEach(permissions::add);
+                }
+                json(exchange, 200, answer);
             }
             case "POST test" -> {
                 environment.testCalls.add(body);

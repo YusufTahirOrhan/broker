@@ -7,6 +7,7 @@ import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import com.acme.yapi.core.runtime.RuntimeSignals;
+import com.acme.yapi.core.session.SessionRecordCodec;
 
 /**
  * @param environment            code of this environment (DEV, PREPROD, PROD); returned in listings
@@ -15,7 +16,7 @@ import com.acme.yapi.core.runtime.RuntimeSignals;
  */
 @ConfigurationProperties("yapi.env-admin")
 public record EnvAdminProperties(String environment, Signals signals, Upstream upstream, Test test,
-                                 List<String> allowedClientSubjects) {
+                                 List<String> allowedClientSubjects, Session session) {
 
     public EnvAdminProperties {
         environment = environment == null ? "DEV" : environment;
@@ -23,6 +24,18 @@ public record EnvAdminProperties(String environment, Signals signals, Upstream u
         upstream = upstream == null ? new Upstream(null, null, null, null) : upstream;
         test = test == null ? new Test(false, null, null, null) : test;
         allowedClientSubjects = allowedClientSubjects == null ? List.of() : List.copyOf(allowedClientSubjects);
+        session = session == null ? new Session(null) : session;
+    }
+
+    /**
+     * The giriş service's session records in this environment's Redis, for the central admin's sign-in check.
+     *
+     * @param keyPattern the record's key, as the broker's {@code yapi.session.key-pattern}
+     */
+    public record Session(String keyPattern) {
+        public SessionRecordCodec codec() {
+            return new SessionRecordCodec(keyPattern, null, null, null, null, null);
+        }
     }
 
     public record Signals(String routesChangedChannel, String loadedKeyPrefix) {
