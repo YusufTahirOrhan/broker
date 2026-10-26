@@ -2,7 +2,7 @@
 
 Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; çekirdek ve beş modül (giriş servisi dahil) yazıldı, `mvn -B verify` yeşil. 2026-10-16 turunda "Sıradaki iş"in 1–6. maddeleri yapıldı: Oracle 19c, yanıt verisinin loglanması, eski broker'la aynı oturum ve yanıtlar, giriş servisi, DEV'e bağlı yerel çalıştırma, `${user.permission}`; alarm (7) sonraki tur. Hepsi PR #1 ile, inceleme düzeltmeleriyle birlikte main'e merge edildi (2026-10-16). Düzeltmeler: yerel giriş servisi DEV'in ortak Redis anahtarlarına yazmaz (madde 5), giriş servisinin imza kontrolü `/actuator/` ve `/internal/` dışındaki her yolda ve imza anahtarı `local` dışında zorunlu, boşluklu şifre LDAP'a gitmez, yetki listesiz Koordinatör cevabı hata (madde 4). `mvn -B verify`: 203 test. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
 
-Son güncelleme: 2026-10-16.
+Son güncelleme: 2026-10-26.
 
 ## Kaynaklar
 
@@ -15,9 +15,73 @@ Son güncelleme: 2026-10-16.
 
 `docs/design.md` bu repoda değiştirilmez; canlı doküman güncellenip buraya aktarılır. Tasarıma yansıması gereken bir şey çıkarsa "Tasarıma yansıtılacaklar" başlığına yazılır.
 
-## Sıradaki iş (2026-10-16)
+## Sıradaki iş (2026-10-26)
 
-**Durum:** 1–6 bitti (2026-10-16). 7 (alarm) sonraki tur.
+**Durum:** Yapılacak. Kararlar kullanıcıyla 2026-10-21 ve 2026-10-26'da netleşti ("Eski broker'dan teyit edilenler", "Verilmiş kararlar").
+
+Maddeler sırayla yapılır; her biri kendi commit'leriyle biter, her push'tan önce `mvn -B verify` yeşildir. API sözleşmesi değişen her maddede `docs/frontend-guide.md` ve değişiklik kaydı aynı commit'te güncellenir. `docs/design.md`'ye dokunulmaz: tasarım dokümanını tur bitince Claude günceller, uygulanırken netleşenler "Tasarıma yansıtılacaklar"a yazılır. Eski broker'dan gelen gövdeler, anahtarlar ve alan adları korunur.
+
+### 1. Ad değişikliği: broker → yapi
+
+Projenin adı Yapi. Henüz hiçbir ortamda kurulum yok; migration'lar dahil her şey yerinde değiştirilir.
+
+- **Modüller ve kod:** `yapi-core`, `yapi-runtime`, `yapi-env-admin`, `yapi-admin`, `yapi-log-sink`, `yapi-login`; artifact ve uygulama adları; paket kökü `com.acme.yapi`.
+- **Ayarlar:** önek `yapi.*`, ortam değişkenleri `YAPI_*`; betikler, `local.env.example`, `docs/local-run.md`, README'ler, CLAUDE.md, CI.
+- **Bizim koyduğumuz adlar:** Redis `yapi:applications`, `yapi:loaded:*`, `yapi:loaded-local:*`, `yapi:routes-changed` (yerel kanal dahil); Kafka `yapi.logs.v1` ve DLQ'su; ClickHouse `yapi_logs.yapi_log`; Oracle şema ve kullanıcıları (`YAPI_ADMIN`, `YAPI_RUNTIME`, `yapi_runtime_reader` …); eski Elastic dokümanlarına eklenen bilgi nesnesi `broker` → `yapi`; yeni metrikler.
+- **Değişmeyenler (eski sözleşme):** `POST /broker` yolu, `broker.gelen.istekler` sayacı, eski Elastic indeksleri ve alanları (`requests_*`, `alarm`), `user:*` Redis anahtarları, eski gövdeler. Belgelerde istek yolundaki bileşen "broker" diye anılmaya devam edebilir.
+
+### 2. Ortam adları
+
+TEST, PREPROD olur; ortamlar DEV, PREPROD, PROD (migration'daki tohum, ayarlar, testler, rehberdeki örnekler).
+
+### 3. Koordinatör'ün gerçek uçları
+
+Biçimler "Eski broker'dan teyit edilenler"de. Yollar, alan adları (`is_yapi` dahil) ve isteğe bağlı kimlik header'ı ayarda; şimdilik header gerekmediği varsayıldı.
+
+- **Login yetkileri:** `GET /api/koordinator/personel-yetki/aktif-yetkiler/{uid}` (`uid` = sicil). Map'teki bütün listelerin `yetkiIsim`'leri, sırası korunup tekrarları atılarak oturumdaki `permissions` olur (string listesi). Bunun eski login'in yazdığıyla aynı olduğu varsayıldı; pilot projede eski ve yeni broker'ın birbirinin oturumunu okuduğu teyit edilecek. 200 dışı ya da beklenmeyen biçim Koordinatör hatasıdır (giriş reddi, bugünkü gibi). `askidaMi`, `durum` ve tarihler süzülmez (anlamları bekleniyor).
+- **Application listesi:** `GET /api/koordinator/projeler-ve-yetkileri`'nden `is_yapi` true olanların `projeAdi`'leri.
+- **Admin:** Proje kataloğu, projenin yetkileri ve yetkinin hedef ortamda varlığı aynı uçtan, ortam başına adresle; yalnızca `is_yapi` projeler. Eşleşme `projeId`, yetki kodu `yetkiList[].yetki`. Liste ortam başına birkaç dakika önbellekte tutulur.
+- **Yetki açma kalkar:** `POST /projects/{id}/permissions` ve ekrandaki "yetki ekle". Yetkiler yalnızca Koordinatör'den açılır.
+
+### 4. Giriş servisi: DEV'de magic key
+
+Yeni LDAP modu `magic-key`, yalnızca `dev` profilinde (başka profilde servis başlamaz): `uid` boş değilse ve şifre ayardaki anahtara (`YAPI_LOGIN_MAGIC_KEY`) sabit zamanlı karşılaştırmayla eşitse başarılı. Her giriş `info` loglanır (uid; şifre yok). Yetkiler yine Koordinatör'den gelir. PREPROD ve PROD `bind` modunda; adres ve principal deseni ayardan.
+
+### 5. Admin'e giriş: giriş uygulamasının oturumu
+
+SSO ve JWT kalkar. Kullanıcılar şirketin giriş uygulamasından girer; Yapi yetkisi olan (`YAPI_DEVELOPER`, `YAPI_ADMIN`) admin ekranını görür.
+
+- **İstek:** Admin ekranı her istekte `X-Token`, `X-Uid`, `X-Clientip`, `X-User-Agent` gönderir.
+- **Doğrulama:** Admin API oturumu, oturum ortamının (`yapi.admin.session.environment`, varsayılan `PROD`) env-admin'ine sorar; merkez ortama yalnızca env-admin'den girer. env-admin'e yeni uç: `POST /admin/v1/sessions/verify` `{"uid", "token", "clientIp", "userAgent"}` → `{"valid", "permissions"}`; kaydı core'daki codec'le okur ve broker'ın kuralıyla eşleştirir. Admin API sonucu kısa süre (varsayılan 30 sn) önbellekte tutar.
+- **Roller (ayardan):** `VIEWER` ← `YAPI_DEVELOPER` ya da `YAPI_ADMIN`; `ROUTE_EDITOR` ← `YAPI_DEVELOPER`, `YAPI_ADMIN`; `APPROVER` ← `YAPI_ADMIN`. Yetki adları değişebilir. Dört göz kuralı aynen.
+- **Hatalar:** Oturum geçersizse 401, rol yetmezse 403. `local` profilinde HTTP Basic kalır.
+- Rehberin "Kimlik" bölümü ve değişiklik kaydı. DevOps notu: admin API'ye gelen isteklere `X-Clientip`'i broker'dakiyle aynı proxy koymalı.
+
+### 6. Giriş servisi: kullanıcı ayarları
+
+Eski broker dashboard yerleşimini ve hızlı bağlantıları kendi içinde Redis'te tutuyordu; yeni yerleri giriş servisi.
+
+- `GET` ve `PUT /users/me/settings/{name}`; `name` ayardaki listeden: `layout` → `user:layout:{uid}`, `quick_link` → `user:quick_link:{uid}`.
+- Kullanıcı, imzalı `X-User-Context`'teki uid'dir (gövdeden alınmaz); route'lar oturumlu tanımlanır.
+- `PUT` gövdedeki JSON'u olduğu gibi ve süresiz yazar; eski `RedisTemplate` + `JacksonJsonRedisSerializer` ile aynı metin olmalı. `GET` kayıt yoksa 200 ve `null` döner.
+- Route'ları kullanıcı eski subtask adlarıyla tanımlar, yanıt biçimini profille eskisine benzetir. `harici_uygulamalar` da kullanıcının tanımlayacağı sıradan bir route (Koordinatör'de `GET /api/koordinator/projeler-external`). `refresh_permissions`'ın karşılığı giriş servisindeki iç uç; Koordinatör ekibi doğrudan ona geçecek, kod gerekmez.
+
+### 7. Alarm
+
+Eski akış ve kararlar "Eski broker'dan teyit edilenler" ve "Verilmiş kararlar"da.
+
+- **Alarm servisi route'u:** Tanımında `alarmService: {"resultPath": "<JSON yolu>"}` olan sıradan bir route (`resultPath` boşsa yanıtın kendisi dizi). Gövde şablonunda yeni yer tutucu `${alarm.values}` (gelen istekteki değerlerin JSON dizisi) ve mevcut yer tutucular kullanılır. Frontend'den doğrudan çağrılamaz (404 `UNKNOWN_TASK`); kendisinde alarm kontrolü olmaz.
+- **Seçim:** Projenin ortam ayarında `alarmRoute` (`{"maintask", "subtask"}` ya da null; runtime'da `runtime_project`'e yazılır). Subtask tanımında `alarm: {"check": "INHERIT" | "OFF" | "ROUTE", "maintask", "subtask"}`, varsayılan `INHERIT`. Seçilen route alarm servisi route'u olmalı; taşıma ön kontrolü route'un hedef ortamda aktif olduğuna bakar.
+- **Akış:** Oturum, yetki ve alan doğrulamasından sonra, forward'dan önce. Değerler: gövdedeki bütün yaprak değerler (iç içe dahil), metin olarak ve sırayla; zarf alanları (`maintask`, `subtask`, `application`, `uid`) ve maskelenen alanlar hariç. Alarm route'u kendi timeout'uyla çağrılır.
+- **Alarm varsa:** Servis çağrılmaz; yeni outcome `ALARM`. `legacy-responses` açıkken HTTP 200 `{"response": false, "badprocess": true, "status": 500}`, kapalıyken 403 ortak format. RESPONSE olayına `alarm` (route ve alarm listesi) yazılır.
+- **Alarm servisi hatası** (bağlantı, timeout, 2xx dışı, okunamayan yanıt): istek reddedilir; ortak formatta 503 `TECHNICAL_ERROR`, mesaj "Alarm kontrolü yapılamadı; istek gönderilmedi."; olaya yazılır.
+- **Elastic:** Log sink, alarm olan olaylardan `alarm` indeksine doküman yazar: `_id` = `query_id`; gövde eski `alarm_log` gibi isteğin parametreleri olduğu gibi; yeni bilgi `yapi` nesnesinde (request_id, uid, client_ip, alarm listesi, alarm route'u, zaman).
+- **`alarm_list`:** Alarm yoksa servise giden gövdeye eklenmez (açık nokta).
+- Rehber: proje ortam ayarı, subtask formu, `definition-rules`, yeni outcome, değişiklik kaydı.
+
+## Tamamlanan iş (2026-10-16)
+
+**Durum:** 1–6 bitti, PR #1 ile merge edildi. 7 (alarm) "Sıradaki iş (2026-10-26)" 7'ye taşındı.
 
 Maddeler sırayla yapılır; her biri kendi commit'leriyle biter ve her push'tan önce `mvn -B verify` yeşildir. 7. madde bu turda yapılmaz. "Bilgi bekleyenler"deki konular işi durdurmaz: o parçalar arayüz arkasında, ayara bağlı ve aşağıdaki varsayılanlarla yazılır; bilgi gelince yalnızca o parça değişir. Eski broker'dan alınan gövdeler, anahtarlar ve alan adları birebir korunur ve testlerle sabitlenir. Bir madde bitince bu nottaki modül bölümleri de güncellenir.
 
@@ -165,7 +229,7 @@ Kullanıcıda olan ilk route yetkisi: önce `permissions`, sonra `foreignPermiss
 
 - **Yapıldı (2026-10-16):** `RequestContext.permission` ve `RequestContext.firstPermission(routePermissions, userPermissions)` core'da; doğrulayıcı `${user.permission}`'ı kabul eder, `definition-rules` listeler. Broker'da route yetkileri artık sıralı (`Route.permissions` `List`; runtime DB'deki dizi zaten önce proje, sonra başka proje yetkilerini sırayla taşıyordu). Önizleme ve test çağrısında kullanıcının formdaki yetkilere sahip olduğu varsayılır: `Trial` ve `TestCallRequest` isteğe bağlı `permissions`/`foreignPermissions` (test çağrısında `permission`) taşır; rehber ve değişiklik kaydı güncellendi. Testler: core (sıra, yokken alanın yazılmaması), broker (`sorgu` örneği, anonim route), admin önizlemesi.
 
-### 7. Alarm (bu turda yok)
+### 7. Alarm (2026-10-26 turuna taşındı)
 
 Her şey bittikten sonra yapılacak. Eski akış: `maintask = sorgu` ve `reason` 5 karakterden uzunsa `alarmService.checkAlarm(params, client_ip, query_id)`; `isAlarmQuery` true ise HTTP 200 `{"response": false, "badprocess": true, "status": 500}`, değilse gövdeye `alarm_list` eklenir. Alarm logu Elastic'te `alarm` indeksine yazılıyor. Ayrıntılar `alarmService` koduyla gelecek.
 
@@ -193,17 +257,18 @@ Kullanıcının paylaştığı eski kod ekran görüntülerinden (2026-10-12 ve 
 - **`RedisTemplate<String, Object>` bean'i:** `setKeySerializer(new StringRedisSerializer())`, `setValueSerializer(new JacksonJsonRedisSerializer<>(Object.class))`, hash anahtar ve değerleri de `JacksonJsonRedisSerializer`, `setEnableTransactionSupport(true)`. Değerler tip bilgisi olmayan JSON.
 - **LDAP (`LdapPreprod.check_user`):** `uid`, şifre boş değilse `ldapTemplate.getContextSource().getContext(uid + "@test.com.tr", password)`; başarılıysa true, exception olursa false. Sınıf `@ConditionalOnProperty(name = "spring.profiles.active", havingValue = "preprod")` ile yalnızca preprod'da yükleniyor. PROD sınıfı bununla aynı, yalnızca profil koşulu `prod`; alan adını kullanıcı ayarda verir (fotoğraftaki `@test.com.tr` değiştirilmişti). DEV'de giriş belirlenmiş bir magic key ile yapılıyor: herkes herkesin hesabına girebiliyor (2026-10-21).
 - **Alarm (kullanıcı, 2026-10-21):** Şu an çalışmıyor. Akış: isteğin bütün parametre değerleri liste yapılıp başka bir projeye (alarm servisi) gönderilir; yanıtta alarm olan değerlerin listesi döner; alarm varsa Elastic'teki `alarm` indeksine yazılır ve servise gitmeden 500 döner. İndeks kullanılmış; istek doğrudan basıldığı için mapping çok geniş.
+- **`alarm_log`:** İndeks `alarm`, `_id` = `query_id`, doküman = çağıranın verdiği parametre map'i (`elasticsearchClient.index(...)`; sonuç `created` ise true).
+- **Public subtask'ler (2026-10-26):** `harici_uygulamalar` Koordinatör'ün `/api/koordinator/projeler-external` listesini döner. `refresh_permissions` → `redisService.expire_user_tirggered_from_koordinator(params.uid, params.koordinator_secret_key)`: secret `koordinatorSecret`'e eşit değilse "logout işlemi sadece koordinator projesi tarafından yapılabilir." hatası; kayıt varsa `user:session:{uid}` silinir ve true, yoksa false.
+- **Redis önekleri:** `user:layout:`, `user:session:`, `user:quick_link:`.
+- **Koordinatör (2026-10-26):** `projeler-ve-yetkileri` her projede `is_yapi` taşıyor; Yapi yalnızca bunları alır. `application` değeri `projeAdi`. `uid` sicildir.
 - **Java sürümü:** Eski kod `catch (Exception _)` kullanıyor (Java 22+) ve spring-data-redis 4.0.3 ile çalışıyor (Boot 4.0); JSON aynı Jackson 3 ile yazılıyor.
 
 ## Bilgi bekleyenler
 
 Kullanıcıdan istendi; gelince ilgili madde güncellenir:
 
-1. Koordinatör: servislerimiz çağırırken kimlik bilgisi (header ya da anahtar) gerekiyor mu; frontend'lerin gönderdiği `application` değeri `projeler-ve-yetkileri`'nde hangi alan (`projeAdi`?); `projeDurum` ve `durum` hangi değerde aktif; eski login'in `aktif-yetkiler` cevabını oturumdaki `permissions`'a çevirdiği kod (hangi alan, `askidaMi` süzülüyor mu, `uid` ile `sicil` aynı mı). Oturum kaydı eski broker'la birebir aynı kalmalı.
-2. Admin'den yetki açma (`POST /projects/{id}/permissions`): Koordinatör'de karşılığı yok. Öneri: özellik kalksın, yetkiler Koordinatör'ün ekranından açılır; ya da Koordinatör ekibi uç ekler.
-3. Merkezi admin'e giriş: şirkette SSO var mı? Yoksa öneri: LDAP ile giriş, roller PROD Koordinatör'ünde "Broker Admin" projesinin üç yetkisi.
-4. Dashboard yerleşimi ve hızlı bağlantılar: öneri giriş servisinde okuma/kaydetme uçları (aynı Redis anahtarları ve biçim), route'ları kullanıcı tanımlar; eski koddaki bu işlemlerin fotoğrafı bekleniyor.
-5. Alarm: eski kodda `alarm` dokümanını yazan kısım (alanları birebir korumak için); alarm servisini route olarak seçme önerisi kullanıcı onayı bekliyor.
+1. Koordinatör: `projeDurum`, `durum` ve `askidaMi` hangi değerde aktif (şimdilik süzülmüyor); servislerimizin çağrısında kimlik bilgisi gerekiyor mu (şimdilik gerekmediği varsayıldı).
+2. Paket kökü için şirket alan adı (şimdilik `com.acme.yapi`).
 
 ## Verilmiş kararlar
 
@@ -232,6 +297,11 @@ Tasarım dokümanındakilere ek olarak netleşenler:
 - **Dağıtım (kullanıcı kararı, 2026-10-16):** DevOps yapar; Kubernetes ya da VM kararı onlarda. Her ortamda broker, giriş servisi, env-admin ve log sink çalışır, merkezde admin. Log sink o ortamın Kafka'sını okur ve o ortamın Elastic'ine yazar (eski broker'ın Elastic'i ortam başına; `requests_` indeksinde ortam yok); ClickHouse ortak da olabilir, satırlar `environment` taşır.
 - **Alarm (kullanıcı kararı, 2026-10-21):** İsteğe bağlı; proje ve subtask düzeyinde açılır, hangi subtask'lerin kontrol edileceği kodda yazılmaz. Gövdedeki bütün değerler gönderilir. Alarm servisi yanıt vermezse istek reddedilir ve Kafka'ya loglanır.
 - **DEV'de giriş:** Eski DEV sınıfı gibi magic key; giriş servisinde yalnızca `dev` profilinde açılan bir mod olacak, anahtar ayardan.
+- **Ad (2026-10-26):** Projenin adı Yapi; kod ve ayar adlarında broker yerine yapi, eski sözleşmedeki adlar hariç ("Sıradaki iş" 1).
+- **Ortamlar:** DEV, PREPROD, PROD.
+- **Koordinatör:** Yalnızca `is_yapi` projeler; application = `projeAdi`; uid = sicil. Yetkiler yalnızca Koordinatör'den açılır. Yapi'nin yetkileri `YAPI_DEVELOPER`, `YAPI_ADMIN` (adlar değişebilir, ayarda).
+- **Admin'e giriş:** Şirketin giriş uygulamasının oturumu ve Yapi yetkileri; SSO yok.
+- **Geçiş:** Önce tek bir proje pilot, sonra kalanlar. Eski subtask'leri (`harici_uygulamalar` gibi Koordinatör'e gidenler dahil) kullanıcı admin ekranından tanımlar.
 
 ## Modüller ve durum
 
@@ -377,20 +447,18 @@ Derlemede doğrulandı (Boot 4.1.1, Spring Framework 7.0, Jackson 3.1, Kafka 4.2
 
 1. Dağıtımı DevOps yapar ("Verilmiş kararlar"); imaj ve manifest bu repoda yazılmaz. Gerekirse onlar için bir devir notu: uygulamaların yerleri, portlar, ayarlar ve gizli anahtarlar, DB kullanıcıları; env-admin ve admin `mtls` profiliyle, broker'da kalıcı spool volume'u; Kafka topic'i ve DLQ tasarımdaki ayarlarla; ClickHouse DDL'i ve Elastic bileşen şablonu `broker-log-sink/src/main/resources` altında.
 2. Geçiş planı adım 1 (tasarım "Geçiş planı"): DEV'de eski broker ile sink'in Elastic dokümanlarını alan alan karşılaştırma. Eski sabit subtask'leri ve projeye özel response sınıflarını kullanıcı admin ekranından kendisi tanımlar; aktarım script'i yazılmaz (2026-10-21).
-3. Eski broker'ın Redis'te tuttuğu kullanıcı verileri (dashboard yerleşimi `user:layout:{sicil}`, hızlı bağlantılar `user:quick_link:{sicil}`), "Bilgi bekleyenler" 4 gelince. Değerleri de tip bilgisi olmayan JSON; anahtar ve biçim korunursa veri taşımadan yeni servise geçilir.
-4. Alarm ("Sıradaki iş" 7).
-5. Frontend: sözleşme `docs/frontend-guide.md`'de; canlı sürüm (artifact) bu dosyadan eşitlenir.
+3. Frontend: sözleşme `docs/frontend-guide.md`'de; canlı sürüm (artifact) bu dosyadan eşitlenir.
 
 ## Tasarıma yansıtılacaklar
 
 Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya yazılır; canlı doküman buradan güncellenir.
 
-- Henüz yok. 2026-10-16 turunun maddeleri (Oracle şemasının modelden ayrıldığı yerler, runtime'a `MERGE` ile uygulama, `X-User-Agent` istisnası, `legacy-responses`, readiness, giriş servisinin imza kuralı, oturum işlemlerinin ve `logResponseBody`'nin logu, DEV'e yazmayan yerel çalıştırma) canlı dokümana işlendi (rev 180) ve `docs/design.md`'ye aktarıldı.
+- 2026-10-16 turunun maddeleri canlı dokümana işlendi (rev 180). 2026-10-26 turunun kararlarını (ad, ortamlar, Koordinatör, magic key, admin girişi, kullanıcı ayarları, alarm) Claude tur bitince tasarım dokümanına işler; buraya yalnızca uygulanırken netleşenler yazılır.
 
 ## Açık noktalar
 
-- Merkezi admin'e giriş ("Bilgi bekleyenler" 3).
-- **Ortam adları:** Kullanıcı DEV, PREPROD, PROD diyor; kodda ve tasarımda TEST yazıyor. PREPROD'a çevrilmesi önerildi.
+- **Oturum kaydındaki `permissions`:** Eski login'in Koordinatör cevabını nasıl çevirdiği görülmedi; `yetkiIsim` listesi varsayıldı. Pilot projede eski ve yeni broker'ın birbirinin oturumunu okuduğu teyit edilecek.
+- **`refresh_permissions`:** Koordinatör ekibi giriş servisinin iç ucuna geçecek (kullanıcı iletecek). Geçişte ortak Redis'te eski yol da aynı kaydı siler.
 - **`alarm_list`:** Alarm yoksa eski kod servise giden gövdeye `alarm_list` ekliyordu. Alarm şu an kullanılmadığı için eklenmiyor; kullanıcı ileride eklenebileceğini not ettirdi.- **`X-Clientip`:** Kullanıcı bu header'ı frontend'in değil, önündeki proxy'nin koyduğunu düşünüyor; teyit edilmedi. İstemci koyuyorsa IP bağlaması güvenlik sağlamaz; o durumda eski broker kapandıktan sonra IP bağlantıdan ya da güvenilir proxy'nin header'ından alınmalı.
 - **Hata yanıtlarında HTTP 200 (ileride):** Mevcut frontend'ler için korunuyor. Frontend'ler güncellenince `broker.compat.legacy-responses: false` ile ortak formata ve gerçek HTTP status'lara geçilebilir; kullanıcı açık kalmasını istedi.
 - Kullanıcı başına tek oturum ve 1 günlük sabit süre (eski davranış): yeni login eskisini ezer, kullanılsa da oturum 1 günde biter.
