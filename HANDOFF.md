@@ -28,7 +28,9 @@ Projenin adı Yapi. Henüz hiçbir ortamda kurulum yok; migration'lar dahil her 
 - **Modüller ve kod:** `yapi-core`, `yapi-runtime`, `yapi-env-admin`, `yapi-admin`, `yapi-log-sink`, `yapi-login`; artifact ve uygulama adları; paket kökü `com.acme.yapi`.
 - **Ayarlar:** önek `yapi.*`, ortam değişkenleri `YAPI_*`; betikler, `local.env.example`, `docs/local-run.md`, README'ler, CLAUDE.md, CI.
 - **Bizim koyduğumuz adlar:** Redis `yapi:applications`, `yapi:loaded:*`, `yapi:loaded-local:*`, `yapi:routes-changed` (yerel kanal dahil); Kafka `yapi.logs.v1` ve DLQ'su; ClickHouse `yapi_logs.yapi_log`; Oracle şema ve kullanıcıları (`YAPI_ADMIN`, `YAPI_RUNTIME`, `yapi_runtime_reader` …); eski Elastic dokümanlarına eklenen bilgi nesnesi `broker` → `yapi`; yeni metrikler.
-- **Değişmeyenler (eski sözleşme):** `POST /broker` yolu, `broker.gelen.istekler` sayacı, eski Elastic indeksleri ve alanları (`requests_*`, `alarm`), `user:*` Redis anahtarları, eski gövdeler. Belgelerde istek yolundaki bileşen "broker" diye anılmaya devam edebilir.
+- **Eski sözleşmeden değişenler (kullanıcı kararı):** Uç `POST /broker` → `POST /yapi` (taşınan projelerin frontend'leri adresle birlikte yolu da değiştirir); sayaç `broker.gelen.istekler` → `yapi.gelen.istekler` (tag'ler aynı).
+- **Değişmeyenler:** Eski Elastic indeksleri ve alanları (`requests_*`, `alarm`), `user:*` Redis anahtarları, eski gövdeler. Belgelerde istek yolundaki bileşen "broker" diye anılmaya devam edebilir.
+- **Repo:** GitHub'daki adı kullanıcı `yapi` yapacak (eski adres yönlendirilir); kodda ve belgelerde repo adı geçiyorsa `yapi` olur.
 
 ### 2. Ortam adları
 
@@ -38,7 +40,7 @@ TEST, PREPROD olur; ortamlar DEV, PREPROD, PROD (migration'daki tohum, ayarlar, 
 
 Biçimler "Eski broker'dan teyit edilenler"de. Yollar, alan adları (`is_yapi` dahil) ve isteğe bağlı kimlik header'ı ayarda; şimdilik header gerekmediği varsayıldı.
 
-- **Login yetkileri:** `GET /api/koordinator/personel-yetki/aktif-yetkiler/{uid}` (`uid` = sicil). Map'teki bütün listelerin `yetkiIsim`'leri, sırası korunup tekrarları atılarak oturumdaki `permissions` olur (string listesi). Bunun eski login'in yazdığıyla aynı olduğu varsayıldı; pilot projede eski ve yeni broker'ın birbirinin oturumunu okuduğu teyit edilecek. 200 dışı ya da beklenmeyen biçim Koordinatör hatasıdır (giriş reddi, bugünkü gibi). `askidaMi`, `durum` ve tarihler süzülmez (anlamları bekleniyor).
+- **Login yetkileri:** `GET /api/koordinator/personel-yetki/aktif-yetkiler/{uid}` (`uid` = sicil). Map'teki bütün listelerin `yetkiIsim`'leri, sırası korunup tekrarları atılarak oturumdaki `permissions` olur (string listesi). Bunun eski login'in yazdığıyla aynı olduğu varsayıldı; pilot projede eski ve yeni broker'ın birbirinin oturumunu okuduğu teyit edilecek. 200 dışı ya da beklenmeyen biçim Koordinatör hatasıdır (giriş reddi, bugünkü gibi). İki uç da yalnızca aktif proje ve yetkileri döner; yine de `askidaMi` true (ya da 1) olan yetki aktif değildir ve listeye girmez. `durum`, `projeDurum` ve tarihler süzülmez.
 - **Application listesi:** `GET /api/koordinator/projeler-ve-yetkileri`'nden `is_yapi` true olanların `projeAdi`'leri.
 - **Admin:** Proje kataloğu, projenin yetkileri ve yetkinin hedef ortamda varlığı aynı uçtan, ortam başına adresle; yalnızca `is_yapi` projeler. Eşleşme `projeId`, yetki kodu `yetkiList[].yetki`. Liste ortam başına birkaç dakika önbellekte tutulur.
 - **Yetki açma kalkar:** `POST /projects/{id}/permissions` ve ekrandaki "yetki ekle". Yetkiler yalnızca Koordinatör'den açılır.
@@ -267,7 +269,7 @@ Kullanıcının paylaştığı eski kod ekran görüntülerinden (2026-10-12 ve 
 
 Kullanıcıdan istendi; gelince ilgili madde güncellenir:
 
-1. Koordinatör: `projeDurum`, `durum` ve `askidaMi` hangi değerde aktif (şimdilik süzülmüyor); servislerimizin çağrısında kimlik bilgisi gerekiyor mu (şimdilik gerekmediği varsayıldı).
+1. Koordinatör: servislerimizin çağrısında kimlik bilgisi gerekiyor mu (şimdilik gerekmediği varsayıldı).
 2. Paket kökü için şirket alan adı (şimdilik `com.acme.yapi`).
 
 ## Verilmiş kararlar
@@ -297,7 +299,8 @@ Tasarım dokümanındakilere ek olarak netleşenler:
 - **Dağıtım (kullanıcı kararı, 2026-10-16):** DevOps yapar; Kubernetes ya da VM kararı onlarda. Her ortamda broker, giriş servisi, env-admin ve log sink çalışır, merkezde admin. Log sink o ortamın Kafka'sını okur ve o ortamın Elastic'ine yazar (eski broker'ın Elastic'i ortam başına; `requests_` indeksinde ortam yok); ClickHouse ortak da olabilir, satırlar `environment` taşır.
 - **Alarm (kullanıcı kararı, 2026-10-21):** İsteğe bağlı; proje ve subtask düzeyinde açılır, hangi subtask'lerin kontrol edileceği kodda yazılmaz. Gövdedeki bütün değerler gönderilir. Alarm servisi yanıt vermezse istek reddedilir ve Kafka'ya loglanır.
 - **DEV'de giriş:** Eski DEV sınıfı gibi magic key; giriş servisinde yalnızca `dev` profilinde açılan bir mod olacak, anahtar ayardan.
-- **Ad (2026-10-26):** Projenin adı Yapi; kod ve ayar adlarında broker yerine yapi, eski sözleşmedeki adlar hariç ("Sıradaki iş" 1).
+- **Ad (2026-10-26):** Projenin adı Yapi; kod ve ayar adlarında broker yerine yapi. `POST /broker` ve `broker.gelen.istekler` de `yapi` olur; eski Elastic indeksleri, `user:*` anahtarları ve eski gövdeler aynı kalır ("Sıradaki iş" 1).
+- **Koordinatör'de aktiflik:** Uçlar yalnızca aktif proje ve yetkileri döner; `askidaMi` true olan yetki aktif değildir.
 - **Ortamlar:** DEV, PREPROD, PROD.
 - **Koordinatör:** Yalnızca `is_yapi` projeler; application = `projeAdi`; uid = sicil. Yetkiler yalnızca Koordinatör'den açılır. Yapi'nin yetkileri `YAPI_DEVELOPER`, `YAPI_ADMIN` (adlar değişebilir, ayarda).
 - **Admin'e giriş:** Şirketin giriş uygulamasının oturumu ve Yapi yetkileri; SSO yok.
