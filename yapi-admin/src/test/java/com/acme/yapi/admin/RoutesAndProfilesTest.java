@@ -91,9 +91,22 @@ class RoutesAndProfilesTest extends AdminTestBase {
         route(projectId, """
                 {"subtask": "sorgu", "httpMethod": "POST", "pathTemplate": "/sorgu", "permissions": [], "foreignPermissions": ["CRM_AGENT"], "definition": {}}
                 """);
+        // A null alarmService is no alarm service, as the parser reads it
+        route(projectId, """
+                {"subtask": "bos_alarm", "httpMethod": "POST", "pathTemplate": "/bos", "permissions": [], "foreignPermissions": ["CRM_AGENT"],
+                 "definition": {"alarmService": null}}
+                """);
+        long creditAlarm = route(projectId, """
+                {"subtask": "alarm_kredi", "httpMethod": "POST", "pathTemplate": "/alarm/kredi", "permissions": [], "foreignPermissions": ["CRM_AGENT"],
+                 "definition": {"alarmService": {"resultPath": "data.alarms"}}}
+                """);
 
-        assertThat(get("viewer", "/projects/" + projectId + "/routes").json().get(0).get("alarmService").booleanValue())
-                .isFalse();
+        java.util.Map<String, Boolean> credit = new java.util.LinkedHashMap<>();
+        for (JsonNode route : get("viewer", "/projects/" + projectId + "/routes").json()) {
+            credit.put(route.get("subtask").stringValue(), route.get("alarmService").booleanValue());
+        }
+        assertThat(credit).containsExactly(java.util.Map.entry("alarm_kredi", true),
+                java.util.Map.entry("bos_alarm", false), java.util.Map.entry("sorgu", false));
         assertThat(get("viewer", "/projects/" + security + "/routes").json().get(0).get("alarmService").booleanValue())
                 .isTrue();
 
@@ -107,16 +120,21 @@ class RoutesAndProfilesTest extends AdminTestBase {
                 """.formatted(alarmId));
         assertStatus(deployed, 201);
         JsonNode services = get("viewer", "/routes?alarmService=true").json();
-        assertThat(services.size()).isEqualTo(1);
+        assertThat(services.size()).isEqualTo(2);
         assertThat(services.get(0).get("id").longValue()).isEqualTo(alarmId);
+        assertThat(services.get(0).get("projectId").longValue()).isEqualTo(security);
         assertThat(services.get(0).get("maintask").stringValue()).isEqualTo("guvenlik");
         assertThat(services.get(0).get("alarmService").booleanValue()).isTrue();
         assertThat(services.get(0).get("deployments").get(0).get("environment").stringValue()).isEqualTo("DEV");
+        assertThat(services.get(1).get("id").longValue()).isEqualTo(creditAlarm);
+        assertThat(services.get(1).get("projectId").longValue()).isEqualTo(projectId);
+        assertThat(services.get(1).get("deployments").size()).isZero();
 
-        JsonHttp.Response unfiltered = get("viewer", "/routes");
-        assertStatus(unfiltered, 400);
-        assertThat(unfiltered.json().get("errors").get(0).get("field").stringValue()).isEqualTo("alarmService");
-        assertStatus(get("viewer", "/routes?alarmService=false"), 400);
+        for (String path : java.util.List.of("/routes", "/routes?alarmService=false", "/routes?alarmService=abc")) {
+            JsonHttp.Response unsupported = get("viewer", path);
+            assertStatus(unsupported, 400);
+            assertThat(unsupported.json().get("errors").get(0).get("field").stringValue()).isEqualTo("alarmService");
+        }
     }
 
     @Test

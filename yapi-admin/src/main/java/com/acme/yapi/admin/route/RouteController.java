@@ -40,9 +40,9 @@ public class RouteController {
 
     /** Across projects; only {@code alarmService=true} is supported, for the alarm route pickers. */
     @GetMapping("/routes")
-    public List<RouteService.Summary> listAcrossProjects(@RequestParam(required = false) Boolean alarmService) {
+    public List<RouteService.Summary> listAcrossProjects(@RequestParam(required = false) String alarmService) {
         currentUser.get();
-        if (!Boolean.TRUE.equals(alarmService)) {
+        if (!"true".equalsIgnoreCase(alarmService)) {
             throw ApiException.validation(
                     List.of(new FieldError("alarmService", "Şimdilik yalnızca alarmService=true destekleniyor")));
         }

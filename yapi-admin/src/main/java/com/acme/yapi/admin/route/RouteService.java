@@ -103,16 +103,26 @@ public class RouteService {
 
     /** The alarm service routes of every project, for the alarm route pickers; archived ones are left out. */
     public List<Summary> alarmServices() {
+        Map<Long, List<DeploymentView>> deployments = new HashMap<>();
+        for (RouteRepository.Deployment deployment : routes.deploymentsOfAlarmServices()) {
+            deployments.computeIfAbsent(deployment.definitionId(), id -> new ArrayList<>()).add(view(deployment));
+        }
         return routes.alarmServices().stream()
-                .map(row -> summary(row, routes.deployments(row.id()).stream().map(RouteService::view).toList()))
+                .filter(RouteService::isAlarmService)
+                .map(row -> summary(row, deployments.getOrDefault(row.id(), List.of())))
                 .toList();
+    }
+
+    /** As the parser reads it: an {@code alarmService} object; a JSON {@code null} there is no alarm service. */
+    private static boolean isAlarmService(RouteRepository.Row row) {
+        JsonNode alarmService = row.definition() == null ? null : row.definition().get("alarmService");
+        return alarmService != null && alarmService.isObject();
     }
 
     private Summary summary(RouteRepository.Row row, List<DeploymentView> deployments) {
         return new Summary(row.id(), row.projectId(), row.maintask(), row.subtask(), row.httpMethod(),
                 row.pathTemplate(), row.permissions(), row.foreignPermissions(), row.anonymous(), profileRef(row),
-                row.definition() != null && row.definition().has("alarmService"), row.status(), row.version(),
-                row.updatedBy(), row.updatedAt(), deployments);
+                isAlarmService(row), row.status(), row.version(), row.updatedBy(), row.updatedAt(), deployments);
     }
 
     public View get(long id) {
