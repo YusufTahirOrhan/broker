@@ -39,13 +39,13 @@ Broker `X-Token: login` ve `X-Token: logout` isteklerini gövdedeki maintask'a b
 | Ayar | Varsayılan | Not |
 | --- | --- | --- |
 | `login.ldap.mode` | `bind` | `static` yalnızca `local` profilinde (`login.ldap.users`); başka profilde servis başlamaz |
-| `login.ldap.urls` | — | `LOGIN_LDAP_URLS`, virgülle birden çok adres |
+| `login.ldap.urls` | — | `YAPI_LOGIN_LDAP_URLS`, virgülle birden çok adres |
 | `login.ldap.principal-pattern` | `{uid}@test.com.tr` | Active Directory UPN ya da DN, ör. `uid={uid},ou=people,dc=test` |
 | `login.ldap.connect-timeout`, `read-timeout` | 3 sn, 5 sn | |
 | `login.session.key-pattern`, `ttl` | `user:session:{uid}`, 86400 sn | Alan adları da ayarlanabilir; broker'ınkilerle aynı olmalı. `local` profilinde `local:user:session:{uid}` (DEV'in oturumlarına yazmaz) |
 | `login.applications.key`, `refresh-interval` | `yapi:applications`, 5 dk | `local` profilinde `yapi:applications:local` |
 | `login.user-context-secret` | — | `YAPI_USER_CONTEXT_SECRET`; `local` dışında zorunlu |
-| `login.koordinator-secret` | — | `LOGIN_KOORDINATOR_SECRET` |
+| `login.koordinator-secret` | — | `YAPI_LOGIN_KOORDINATOR_SECRET` |
 | `koordinator.url`, `auth-header`, `auth-value` | — | Bu ortamın Koordinatör'ü; kimlik header'ı şimdilik gerekmiyor (`auth-value` boşken gönderilmez). Admin ortam başına `koordinator.urls.<ENV>` kullanır |
 | `koordinator.permissions-path`, `permission-field`, `suspended-field` | `/api/koordinator/personel-yetki/aktif-yetkiler/{uid}`, `yetkiIsim`, `askidaMi` | |
 | `koordinator.projects-path`, `application-field`, `yapi-field` | `/api/koordinator/projeler-ve-yetkileri`, `projeAdi`, `is_yapi` | |

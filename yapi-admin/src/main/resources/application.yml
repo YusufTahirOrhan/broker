@@ -79,12 +79,12 @@ yapi:
 # Yetki projesi; her ortamda ayrı çalışır. Proje kataloğu, projelerin yetkileri ve yetkinin ortamda varlığı aynı uçtan.
 koordinator:
   urls:
-    DEV: ${KOORDINATOR_DEV_URL:}
-    PREPROD: ${KOORDINATOR_PREPROD_URL:}
-    PROD: ${KOORDINATOR_PROD_URL:}
+    DEV: ${YAPI_KOORDINATOR_DEV_URL:}
+    PREPROD: ${YAPI_KOORDINATOR_PREPROD_URL:}
+    PROD: ${YAPI_KOORDINATOR_PROD_URL:}
   # kimlik header'ı şimdilik gerekmiyor; auth-value boşken gönderilmez
-  auth-header: ${KOORDINATOR_AUTH_HEADER:Authorization}
-  auth-value: ${KOORDINATOR_AUTH_VALUE:}
+  auth-header: ${YAPI_KOORDINATOR_AUTH_HEADER:Authorization}
+  auth-value: ${YAPI_KOORDINATOR_AUTH_VALUE:}
   # [{"projeId", "projeAdi", "is_yapi", "yetkiList": [{"yetki", ...}], ...}]
   projects-path: /api/koordinator/projeler-ve-yetkileri
   cache-ttl: 5m

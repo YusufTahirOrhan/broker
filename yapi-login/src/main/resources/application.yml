@@ -12,7 +12,7 @@ spring:
       timeout: 2s
 
 server:
-  port: ${LOGIN_PORT:8082}
+  port: ${YAPI_LOGIN_PORT:8082}
 
 management:
   endpoints:
@@ -27,10 +27,10 @@ management:
 login:
   ldap:
     # bind: kullanıcının şifresiyle doğrudan bind (eski Ldap sınıfları gibi); static yalnızca local profilinde
-    mode: ${LOGIN_LDAP_MODE:bind}
-    urls: ${LOGIN_LDAP_URLS:}
-    # Active Directory UPN; preprod'da {uid}@test.com.tr. Ortam değişkeni: LOGIN_LDAP_PRINCIPALPATTERN
-    principal-pattern: "{uid}@test.com.tr"
+    mode: ${YAPI_LOGIN_LDAP_MODE:bind}
+    urls: ${YAPI_LOGIN_LDAP_URLS:}
+    # Active Directory UPN; preprod'da {uid}@test.com.tr
+    principal-pattern: "${YAPI_LOGIN_LDAP_PRINCIPAL_PATTERN:{uid}@test.com.tr}"
     connect-timeout: 3s
     read-timeout: 5s
   session:
@@ -40,7 +40,7 @@ login:
     # kaydı yalnızca açan istemci (X-Clientip + X-User-Agent) kapatabilir
     require-client-match: true
   # Koordinatör'ün zorla çıkışı (X-Koordinator-Secret); boşken uç her çağrıyı reddeder
-  koordinator-secret: ${LOGIN_KOORDINATOR_SECRET:}
+  koordinator-secret: ${YAPI_LOGIN_KOORDINATOR_SECRET:}
   # broker'ın X-User-Context anahtarı (yapi.forward.user-context-secret): /actuator/ ve /internal/ dışındaki her uç
   # imza ister, imzasız çağrı 403. Boşken kontrol kapalı; bu yalnızca local profilinde olabilir, başka profilde
   # servis başlamaz.
@@ -54,9 +54,9 @@ login:
 koordinator:
   # http; static yalnızca local profilinde (sabit yetkiler)
   mode: http
-  url: ${KOORDINATOR_URL:}
-  auth-header: ${KOORDINATOR_AUTH_HEADER:Authorization}
-  auth-value: ${KOORDINATOR_AUTH_VALUE:}
+  url: ${YAPI_KOORDINATOR_URL:}
+  auth-header: ${YAPI_KOORDINATOR_AUTH_HEADER:Authorization}
+  auth-value: ${YAPI_KOORDINATOR_AUTH_VALUE:}
   # kullanıcının aktif yetkileri (uid = sicil): {"<anahtar>": [{"yetkiIsim", "askidaMi", ...}], ...}
   permissions-path: "/api/koordinator/personel-yetki/aktif-yetkiler/{uid}"
   permission-field: yetkiIsim

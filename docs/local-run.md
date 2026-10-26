@@ -99,8 +99,8 @@ Oturum, login'deki `X-Clientip` ve `X-User-Agent` ile aynı header'ları taşıy
 ## Giriş servisini yerelde geliştirmek
 
 `scripts/local-run.sh login`: LDAP yerine sabit kullanıcılar (`dev.ali`, `dev.ayse`; şifre kullanıcı adı), Koordinatör
-yerine sabit yetkiler. DEV'in LDAP'ı ya da Koordinatör'ü denenecekse `LOGIN_LDAP_MODE=bind`, `LOGIN_LDAP_URLS`,
-`LOGIN_LDAP_PRINCIPALPATTERN`; `KOORDINATOR_MODE=http`, `KOORDINATOR_URL`.
+yerine sabit yetkiler. DEV'in LDAP'ı ya da Koordinatör'ü denenecekse `YAPI_LOGIN_LDAP_MODE=bind`, `YAPI_LOGIN_LDAP_URLS`,
+`YAPI_LOGIN_LDAP_PRINCIPAL_PATTERN`; `YAPI_KOORDINATOR_MODE=http`, `YAPI_KOORDINATOR_URL`.
 
 Yerel giriş servisi DEV Redis'e bağlanır ama DEV'in ortak anahtarlarına yazmaz: oturumlar `local:user:session:{uid}`,
 application listesi `yapi:applications:local`. Bind modunda da gerçek kullanıcının DEV oturumu ezilmez; yerelde
