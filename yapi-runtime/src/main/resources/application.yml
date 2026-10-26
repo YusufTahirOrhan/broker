@@ -1,0 +1,109 @@
+spring:
+  application:
+    name: yapi-runtime
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    # Runtime DB'yi (Oracle 19c) yalnızca okur; tablolar şema sahibinin, CURRENT_SCHEMA ile şemasız okunur
+    url: ${YAPI_RUNTIME_DB_URL:jdbc:oracle:thin:@//localhost:1521/XEPDB1}
+    username: ${YAPI_RUNTIME_DB_USER:yapi_runtime_reader}
+    password: ${YAPI_RUNTIME_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 4
+      read-only: true
+      schema: ${YAPI_RUNTIME_DB_SCHEMA:YAPI_RUNTIME}
+  flyway:
+    # Şema ortam Admin API'sinindir; broker runtime DB'ye hiç yazmaz
+    enabled: false
+  data:
+    redis:
+      host: ${YAPI_REDIS_HOST:localhost}
+      port: ${YAPI_REDIS_PORT:6379}
+      password: ${YAPI_REDIS_PASSWORD:}
+      timeout: 500ms
+  kafka:
+    bootstrap-servers: ${YAPI_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      acks: all                       # onay = olay en az iki replikada (min.insync.replicas=2)
+      compression-type: zstd
+      batch-size: 131072
+      buffer-memory: 67108864
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+      properties:
+        enable.idempotence: true
+        linger.ms: 2                  # her istek kendi onayını beklediği için kısa
+        max.block.ms: 50              # metadata ya da tampon yoksa beklemeden hata ver
+        request.timeout.ms: 1500
+        delivery.timeout.ms: 2000     # bir olayın onay bütçesi; aşılırsa istek 500 alır
+
+server:
+  port: ${YAPI_PORT:8080}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          # application listesi okunmadan trafik alınmaz
+          include: readinessState,applications
+
+yapi:
+  environment: ${YAPI_ENVIRONMENT:DEV}
+  instance-id: ${YAPI_INSTANCE_ID:}
+  readable-headers:
+    - Accept-Language
+    - X-Clientip
+    - X-User-Agent
+  log-sink: kafka
+  cache:
+    verify-interval: 15s
+  session:
+    # Giriş servisinin yazdığı kayıt, eski broker'la aynı: anahtar düz string, değer tip bilgisi olmayan JSON
+    # {"uid", "X-Token", "X-Clientip", "X-User-Agent", "permissions"}; uid istek gövdesinden
+    key-pattern: "user:session:{uid}"
+    # Eski broker bunlara login'den önce bakıyordu; route'ları anonim tanımlanır
+    public-maintasks: [refresh_permissions, giris_public]
+    # X-Token değeri → giriş servisinin anonim route'u
+    routes:
+      login: giris/login
+      logout: giris/logout
+  applications:
+    # redis: giriş servisinin yazdığı liste; static: aşağıdaki liste (local ve testler); off: kontrol yok
+    mode: ${YAPI_APPLICATIONS_MODE:redis}
+    key: yapi:applications
+    refresh-interval: 30s
+  compat:
+    # Eski broker'ın HTTP 200'lü gövdeleri (application ve oturum); frontend'ler güncellenince false
+    legacy-responses: ${YAPI_LEGACY_RESPONSES:true}
+  kafka:
+    topic: yapi.logs.v1
+    ack-timeout: 2500ms
+  spool:
+    directory: ${YAPI_SPOOL_DIR:/var/lib/yapi/log-spool}
+    resend-interval: 10s
+  forward:
+    connect-timeout: 2s
+    user-context-secret: ${YAPI_USER_CONTEXT_SECRET:}
+  legacy-counter:
+    # Eski controller'daki sayaç; tag anahtarları ve "Bilinmeyen ..." değerleri eski kodla aynı
+    name: yapi.gelen.istekler
+    project-tag: maintask
+    endpoint-tag: subtask
+  test:
+    # Yalnızca DEV ve PREPROD'da açılır; ortam Admin API'si paylaşılan gizli anahtarla çağırır
+    enabled: ${YAPI_TEST_ENABLED:false}
+    secret: ${YAPI_TEST_SECRET:}
+
+logging:
+  structured:
+    format:
+      console: ${YAPI_LOG_FORMAT:}

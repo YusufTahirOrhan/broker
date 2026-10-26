@@ -11,12 +11,12 @@
         <relativePath/>
     </parent>
 
-    <groupId>com.acme.broker</groupId>
-    <artifactId>broker-platform</artifactId>
+    <groupId>com.acme.yapi</groupId>
+    <artifactId>yapi-platform</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
-    <name>broker-platform</name>
-    <description>Dinamik ve gözlemlenebilir istek broker'ı</description>
+    <name>yapi-platform</name>
+    <description>Yapi: dinamik ve gözlemlenebilir istek broker'ı</description>
 
     <properties>
         <java.version>25</java.version>
@@ -24,43 +24,43 @@
     </properties>
 
     <modules>
-        <module>broker-core</module>
-        <module>broker-env-admin</module>
-        <module>broker-login</module>
-        <module>broker-runtime</module>
-        <module>broker-log-sink</module>
-        <module>broker-admin</module>
+        <module>yapi-core</module>
+        <module>yapi-env-admin</module>
+        <module>yapi-login</module>
+        <module>yapi-runtime</module>
+        <module>yapi-log-sink</module>
+        <module>yapi-admin</module>
     </modules>
 
     <dependencyManagement>
         <dependencies>
             <dependency>
-                <groupId>com.acme.broker</groupId>
-                <artifactId>broker-core</artifactId>
+                <groupId>com.acme.yapi</groupId>
+                <artifactId>yapi-core</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.acme.broker</groupId>
-                <artifactId>broker-core</artifactId>
-                <version>${project.version}</version>
-                <type>test-jar</type>
-                <scope>test</scope>
-            </dependency>
-            <dependency>
-                <groupId>com.acme.broker</groupId>
-                <artifactId>broker-env-admin</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.acme.broker</groupId>
-                <artifactId>broker-env-admin</artifactId>
+                <groupId>com.acme.yapi</groupId>
+                <artifactId>yapi-core</artifactId>
                 <version>${project.version}</version>
                 <type>test-jar</type>
                 <scope>test</scope>
             </dependency>
             <dependency>
-                <groupId>com.acme.broker</groupId>
-                <artifactId>broker-login</artifactId>
+                <groupId>com.acme.yapi</groupId>
+                <artifactId>yapi-env-admin</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.acme.yapi</groupId>
+                <artifactId>yapi-env-admin</artifactId>
+                <version>${project.version}</version>
+                <type>test-jar</type>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.acme.yapi</groupId>
+                <artifactId>yapi-login</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

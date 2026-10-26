@@ -1,6 +1,6 @@
 # Devir notu
 
-Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; çekirdek ve beş modül (giriş servisi dahil) yazıldı, `mvn -B verify` yeşil. 2026-10-16 turunda "Sıradaki iş"in 1–6. maddeleri yapıldı: Oracle 19c, yanıt verisinin loglanması, eski broker'la aynı oturum ve yanıtlar, giriş servisi, DEV'e bağlı yerel çalıştırma, `${user.permission}`; alarm (7) sonraki tur. Hepsi PR #1 ile, inceleme düzeltmeleriyle birlikte main'e merge edildi (2026-10-16). Düzeltmeler: yerel giriş servisi DEV'in ortak Redis anahtarlarına yazmaz (madde 5), giriş servisinin imza kontrolü `/actuator/` ve `/internal/` dışındaki her yolda ve imza anahtarı `local` dışında zorunlu, boşluklu şifre LDAP'a gitmez, yetki listesiz Koordinatör cevabı hata (madde 4). `mvn -B verify`: 203 test. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
+Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; çekirdek ve beş modül (giriş servisi dahil) yazıldı, `mvn -B verify` yeşil. 2026-10-16 turunda "Sıradaki iş"in 1–6. maddeleri yapıldı: Oracle 19c, yanıt verisinin loglanması, eski broker'la aynı oturum ve yanıtlar, giriş servisi, DEV'e bağlı yerel çalıştırma, `${user.permission}`; alarm (7) sonraki tur. Hepsi PR #1 ile, inceleme düzeltmeleriyle birlikte main'e merge edildi (2026-10-16). Düzeltmeler: yerel giriş servisi DEV'in ortak Redis anahtarlarına yazmaz (madde 5), giriş servisinin imza kontrolü `/actuator/` ve `/internal/` dışındaki her yolda ve imza anahtarı `local` dışında zorunlu, boşluklu şifre LDAP'a gitmez, yetki listesiz Koordinatör cevabı hata (madde 4). 2026-10-26 turunda "Sıradaki iş (2026-10-26)"in 1–7. maddeleri yapıldı: ad değişikliği (broker → yapi), ortam adları (TEST → PREPROD), Koordinatör'ün gerçek uçları, DEV'de magic key, admin'e giriş uygulamasının oturumuyla giriş, kullanıcı ayarları, alarm; her madde kendi commit'inde, main'e PR'la (merge edilmedi). `mvn -B verify`: 234 test. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
 
 Son güncelleme: 2026-10-26.
 
@@ -17,7 +17,7 @@ Son güncelleme: 2026-10-26.
 
 ## Sıradaki iş (2026-10-26)
 
-**Durum:** Yapılacak. Kararlar kullanıcıyla 2026-10-21 ve 2026-10-26'da netleşti ("Eski broker'dan teyit edilenler", "Verilmiş kararlar").
+**Durum:** 1–7 yapıldı (2026-10-26); her maddenin "Yapıldı" notu altında. Kararlar kullanıcıyla 2026-10-21 ve 2026-10-26'da netleşti ("Eski broker'dan teyit edilenler", "Verilmiş kararlar").
 
 Maddeler sırayla yapılır; her biri kendi commit'leriyle biter, her push'tan önce `mvn -B verify` yeşildir. API sözleşmesi değişen her maddede `docs/frontend-guide.md` ve değişiklik kaydı aynı commit'te güncellenir. `docs/design.md`'ye dokunulmaz: tasarım dokümanını tur bitince Claude günceller, uygulanırken netleşenler "Tasarıma yansıtılacaklar"a yazılır. Eski broker'dan gelen gövdeler, anahtarlar ve alan adları korunur.
 
@@ -31,10 +31,20 @@ Projenin adı Yapi. Henüz hiçbir ortamda kurulum yok; migration'lar dahil her 
 - **Eski sözleşmeden değişenler (kullanıcı kararı):** Uç `POST /broker` → `POST /yapi` (taşınan projelerin frontend'leri adresle birlikte yolu da değiştirir); sayaç `broker.gelen.istekler` → `yapi.gelen.istekler` (tag'ler aynı).
 - **Değişmeyenler:** Eski Elastic indeksleri ve alanları (`requests_*`, `alarm`), `user:*` Redis anahtarları, eski gövdeler. Belgelerde istek yolundaki bileşen "broker" diye anılmaya devam edebilir.
 - **Repo:** GitHub'daki adı kullanıcı `yapi` yapacak (eski adres yönlendirilir); kodda ve belgelerde repo adı geçiyorsa `yapi` olur.
+- **Yapıldı (2026-10-26):** Tek commit. Modül klasörleri ve artifact'ler `yapi-*` (üst pom `yapi-platform`, groupId ve paket kökü `com.acme.yapi`); ayarlar `yapi.*`, ortam değişkenleri `YAPI_*`; uç `POST /yapi`, sayaç `yapi.gelen.istekler`; eski Elastic dokümanlarındaki bilgi nesnesi `yapi`. Değişmeyenler testlerle sabit: `requests_*` indeksi ve alanları, `user:session:{uid}` (`SharedNamesTest`), eski gövdeler; eski yol `POST /broker` 404 (`CommonFormatTest`). Uygulanırken listede olmayan adlar da aynı kuralla değişti:
+  - **Sınıflar:** `YapiApplication`, `YapiController`, `YapiHandler`, `YapiErrors`, `YapiProperties`, `YapiMetrics` (testte `YapiFlowTest`).
+  - **Header ve kod:** env-admin → runtime test çağrısında `X-Yapi-Test-Secret`; env-admin'in iç hata kodu `YAPI_UNREACHABLE` (admin bunu frontend'e yine `ENV_UNREACHABLE` diye verir).
+  - **Log hattı:** olay alanı `yapi_instance` (Kafka, ClickHouse kolonu, Elastic'te `yapi.yapi_instance`); consumer group'lar `yapi-logs-elastic`, `yapi-logs-clickhouse`; DLQ header'ları `yapi.dlq.sink|reason|origin`; ClickHouse `yapi_logs.yapi_log`, `yapi_logs.yapi_metrics_1m(_mv)`, DDL dosyası `clickhouse/yapi_logs.sql`; Elastic bileşen şablonu `yapi-fields`.
+  - **Oracle:** şemalar `YAPI_ADMIN`, `YAPI_RUNTIME`; kullanıcılar `yapi_admin_app`, `yapi_runtime_reader`, `yapi_runtime_writer`; yerelde `yapi_admin_local`, `yapi_runtime_local`; migration klasörleri `db/migration/yapi_admin`, `yapi_runtime`.
+  - **Diğer:** audit logger'ı `yapi.audit`; instance ID öneki `yapi-`; dosya yolları `/etc/yapi/...` (keystore'lar), `/var/lib/yapi/log-spool`; yerel override dosyası `yapi-local.json`; `scripts/local-run.sh` uygulama adı `runtime` (eskiden `broker`); ekranın adı "Yapi Admin" (rehber ve 403 mesajı).
+  - **Ortam değişkenleri (tamamlama, ayrı commit):** Giriş servisinin ve Koordinatör'ün değişkenleri de `YAPI_` önekli: `YAPI_LOGIN_PORT`, `YAPI_LOGIN_LDAP_MODE`, `YAPI_LOGIN_LDAP_URLS`, `YAPI_LOGIN_LDAP_PRINCIPAL_PATTERN` (eskiden relaxed binding'le `LOGIN_LDAP_PRINCIPALPATTERN`; artık açık placeholder, `SettingsFileTest`), `YAPI_LOGIN_KOORDINATOR_SECRET`, `YAPI_KOORDINATOR_URL`, `YAPI_KOORDINATOR_MODE`, `YAPI_KOORDINATOR_AUTH_HEADER`, `YAPI_KOORDINATOR_AUTH_VALUE`, admin'de `YAPI_KOORDINATOR_DEV_URL`, `YAPI_KOORDINATOR_PREPROD_URL`, `YAPI_KOORDINATOR_PROD_URL`.
+  - **Kalanlar:** İstek yolundaki bileşen yorumlarda, belgelerde ve kullanıcı mesajlarında "broker" diye geçmeye devam eder ("Çağrı broker'ın imzasını taşımıyor." gibi). Kafka'nın kendi adları (`EmbeddedKafkaBroker`) değişmez.
 
 ### 2. Ortam adları
 
 TEST, PREPROD olur; ortamlar DEV, PREPROD, PROD (migration'daki tohum, ayarlar, testler, rehberdeki örnekler).
+
+- **Yapıldı (2026-10-26):** `V2__environments.sql`'de ikinci ortam `PREPROD` (görünen ad `Preprod`), Flyway placeholder'ı `preprod_admin_api_url` (`YAPI_PREPROD_ADMIN_API_URL`); admin'in yetki adresi `yapi.admin.authorization.urls.PREPROD` (`YAPI_PREPROD_AUTHORIZATION_URL`). Testler, yorumlar ve rehberin örnekleri PREPROD. Kurulum olmadığı için migration yerinde değişti. Uygulanırken netleşen: `SOURCE_ACTIVE` ön kontrol mesajı ortam koduna Türkçe ek yapıştırıyordu ("TEST'te", PREPROD'la yanlış olurdu); artık "v4 PREPROD ortamında aktif" (`PromotionFlowTest`). Test çağrısıyla ilgili adlar (`TEST_NOT_ALLOWED`, `YAPI_TEST_SECRET`, `test_calls_allowed`) ortam adı olmadığı için aynı.
 
 ### 3. Koordinatör'ün gerçek uçları
 
@@ -44,10 +54,25 @@ Biçimler "Eski broker'dan teyit edilenler"de. Yollar, alan adları (`is_yapi` d
 - **Application listesi:** `GET /api/koordinator/projeler-ve-yetkileri`'nden `is_yapi` true olanların `projeAdi`'leri.
 - **Admin:** Proje kataloğu, projenin yetkileri ve yetkinin hedef ortamda varlığı aynı uçtan, ortam başına adresle; yalnızca `is_yapi` projeler. Eşleşme `projeId`, yetki kodu `yetkiList[].yetki`. Liste ortam başına birkaç dakika önbellekte tutulur.
 - **Yetki açma kalkar:** `POST /projects/{id}/permissions` ve ekrandaki "yetki ekle". Yetkiler yalnızca Koordinatör'den açılır.
+- **Yapıldı (2026-10-26):** Uygulanırken netleşenler ve varsayımlar:
+  - **Giriş servisi:** `HttpKoordinatorClient` (`koordinator.permissions-path`, `permission-field`, `suspended-field`; `projects-path`, `application-field`, `yapi-field`; varsayılanlar gerçek uçlar). Boş map yetkisiz giriş; map değil, değeri liste değil ya da `yetkiIsim`'i olmayan öğe Koordinatör hatası (giriş reddi, uyarı logu). `KoordinatorClient.projectCodes()` → `applications()`: `is_yapi` olanların `projeAdi`'si, tekrarsız; `projeAdi`'si olmayan proje atlanır.
+  - **Evet/hayır alanları** (`is_yapi`, `askidaMi`): `true`, `1`, `"true"`, `"1"` evet; diğer her şey (yok, null, false, 0) hayır (`Json.isTrue`).
+  - **Admin:** `KoordinatorProjects` her ortamın `projeler-ve-yetkileri` listesini (yalnızca `is_yapi`) `koordinator.cache-ttl` (varsayılan 5 dk) boyunca tutar; başarısız çağrı önbelleğe girmez, 502 `UPSTREAM_ERROR`. Adresler `koordinator.urls.<ENV>` (`YAPI_KOORDINATOR_DEV_URL`, `YAPI_KOORDINATOR_PREPROD_URL`, `YAPI_KOORDINATOR_PROD_URL`); `yapi.admin.catalog.url` ve `yapi.admin.authorization.urls` kalktı.
+  - **Katalog hangi ortamdan:** Proje kataloğu (arama, ID ile okuma, gece ad yenilemesi) tek bir ortamın Koordinatör'ünden: `yapi.admin.catalog.environment`, varsayılan `PROD` (varsayım; projeler PROD'da en eksiksiz). Arama `projeAdi` ya da `projeId` içinde, harf duyarsız.
+  - **Projenin yetkileri:** Koordinatör'deki projesinin (`projeId` = `externalProjectId`) `yetkiList[].yetki`'leri; `UNLINKED` projede liste boş. `description` Koordinatör vermediği için `null`; `suffix` kod önekle başlamıyorsa `null`; `routeCount` kodlara göre sayılır (önek aranmaz). Yetkinin ortamda varlığı (kayıt doğrulaması ve `PERMISSIONS_EXIST`): o ortamdaki herhangi bir Yapi projesinin listesinde olması.
+  - **Yetki açma:** `POST /projects/{id}/permissions` kaldırıldı (405 `METHOD_NOT_ALLOWED`), `AuthorizationService.create` de. Mesajlarda "yetkilendirme servisi" ve "proje servisi" yerine "Koordinatör".
+  - **Kimlik header'ı:** Gerekmediği varsayıldı ("Bilgi bekleyenler" 1); `koordinator.auth-header`/`auth-value` ile eklenebilir.
+  - **Testler:** `HttpKoordinatorClientTest` (login: map'in sırası, tekrar, `askidaMi`, boş map, beklenmeyen biçimler, `is_yapi`), `KoordinatorClientsTest` (admin: katalog, ortam başına yetkiler, varlık, önbellek süresi, hatalar), `JsonTest`, `SessionAndProjectsTest` (salt okunur yetkiler, POST 405), `LoginApiTest` ve `LoginEndToEndTest` gerçek biçimlerle.
 
 ### 4. Giriş servisi: DEV'de magic key
 
 Yeni LDAP modu `magic-key`, yalnızca `dev` profilinde (başka profilde servis başlamaz): `uid` boş değilse ve şifre ayardaki anahtara (`YAPI_LOGIN_MAGIC_KEY`) sabit zamanlı karşılaştırmayla eşitse başarılı. Her giriş `info` loglanır (uid; şifre yok). Yetkiler yine Koordinatör'den gelir. PREPROD ve PROD `bind` modunda; adres ve principal deseni ayardan.
+
+- **Yapıldı (2026-10-26):** `MagicKeyAuthenticator` (`MessageDigest.isEqual`); `login.ldap.magic-key` (`YAPI_LOGIN_MAGIC_KEY`). Uygulanırken netleşenler:
+  - **DEV'in varsayılanı:** `application-dev.yml` modu `magic-key` yapar (`YAPI_LOGIN_LDAP_MODE` ile değişir); PREPROD ve PROD `application.yml`'daki `bind` ile, adres `YAPI_LOGIN_LDAP_URLS`, principal deseni `YAPI_LOGIN_LDAP_PRINCIPAL_PATTERN` (varsayılan `{uid}@test.com.tr`).
+  - **Anahtar boşsa** servis başlamaz (yalnızca boşluk da boş sayılır). `local` profili de `dev` değildir: orada magic key açılmaz.
+  - **Log:** başarılı ve başarısız her deneme `info`, `uid` ve sonuçla ("Magic key ile giriş denemesi: uid=…, başarılı=…").
+  - **Testler:** `MagicKeyAuthenticatorTest` (eşleşme, büyük/küçük harf, boşluk, log), `LoginConfigurationTest` (yalnızca `dev`, anahtarsız başlamaz), `UserContextSecretTest` (`dev` profili anahtarla açılır, anahtarsız açılmaz).
 
 ### 5. Admin'e giriş: giriş uygulamasının oturumu
 
@@ -58,6 +83,14 @@ SSO ve JWT kalkar. Kullanıcılar şirketin giriş uygulamasından girer; Yapi y
 - **Roller (ayardan):** `VIEWER` ← `YAPI_DEVELOPER` ya da `YAPI_ADMIN`; `ROUTE_EDITOR` ← `YAPI_DEVELOPER`, `YAPI_ADMIN`; `APPROVER` ← `YAPI_ADMIN`. Yetki adları değişebilir. Dört göz kuralı aynen.
 - **Hatalar:** Oturum geçersizse 401, rol yetmezse 403. `local` profilinde HTTP Basic kalır.
 - Rehberin "Kimlik" bölümü ve değişiklik kaydı. DevOps notu: admin API'ye gelen isteklere `X-Clientip`'i broker'dakiyle aynı proxy koymalı.
+- **Yapıldı (2026-10-26):** SSO/JWT kaldırıldı (`spring-boot-starter-security-oauth2-resource-server`, `JwtRoles`, `SsoTokenTest`). Uygulanırken netleşenler ve varsayımlar:
+  - **env-admin:** `POST /admin/v1/sessions/verify` (`SessionController`); kayıt `yapi.env-admin.session.key-pattern` (varsayılan `user:session:{uid}`) ve core'daki codec'le okunur, `SessionRecord.matches` ile eşleştirilir. Geçersizse `{"valid": false, "permissions": []}`; Redis okunamazsa 503 `SESSION_UNAVAILABLE`.
+  - **Admin:** `SessionAuthenticationFilter` (yalnızca `!local`) dört header'ı okur; biri eksikse istek anonim kalır, `/api/**` 401 `UNAUTHENTICATED` ("Oturum yok ya da geçersiz."). `SessionVerifier` oturum ortamının env-admin'ine `EnvironmentClient` (mTLS) ile sorar. Ayarlar `yapi.admin.session.environment` (`YAPI_ADMIN_SESSION_ENVIRONMENT`, varsayılan `PROD`), `cache-ttl` (30 sn), `roles` (rol → yetkiler; biri yeterli).
+  - **Önbellek:** Anahtar dört header'ın tamamı; geçerli ve geçersiz cevaplar 30 sn tutulur (geçersizin de tutulması env-admin'i yanlış token tekrarlarından korur; yeni login yeni token demek), başarısız çağrı tutulmaz. En çok 10.000 kayıt; dolunca süresi geçenler atılır.
+  - **Hatalar:** Oturum geçersiz → 401; geçerli ama `roles`'taki yetkilerden hiçbiri yok → 403 `FORBIDDEN` ("Yapi Admin için rolünüz yok."); env-admin'e ulaşılamadı → 502 `ENV_UNREACHABLE`; env-admin'in hatası kodu ve status'uyla (`SESSION_UNAVAILABLE` 503).
+  - **Kullanıcı:** `username` ve `displayName` uid (sicil); oturum kaydında ad yok. Dört göz kuralı uid ile, aynen.
+  - **CORS:** izinli header'lara `X-Token`, `X-Uid`, `X-Clientip`, `X-User-Agent` eklendi.
+  - **Testler:** `SessionLoginTest` (`!local`: roller yetkilerden ve ayardan, yalnızca PROD'a sorulur, eksik header/yanlış token/başka tarayıcı 401, Yapi yetkisi yok 403, önbellek, ulaşılamayan ortam 502, Swagger kapalı), env-admin `AdminApiTest` (eşleşme matrisi).
 
 ### 6. Giriş servisi: kullanıcı ayarları
 
@@ -67,6 +100,13 @@ Eski broker dashboard yerleşimini ve hızlı bağlantıları kendi içinde Redi
 - Kullanıcı, imzalı `X-User-Context`'teki uid'dir (gövdeden alınmaz); route'lar oturumlu tanımlanır.
 - `PUT` gövdedeki JSON'u olduğu gibi ve süresiz yazar; eski `RedisTemplate` + `JacksonJsonRedisSerializer` ile aynı metin olmalı. `GET` kayıt yoksa 200 ve `null` döner.
 - Route'ları kullanıcı eski subtask adlarıyla tanımlar, yanıt biçimini profille eskisine benzetir. `harici_uygulamalar` da kullanıcının tanımlayacağı sıradan bir route (Koordinatör'de `GET /api/koordinator/projeler-external`). `refresh_permissions`'ın karşılığı giriş servisindeki iç uç; Koordinatör ekibi doğrudan ona geçecek, kod gerekmez.
+- **Yapıldı (2026-10-26):** `settings/UserSettingsController`; `login.user-settings.keys` (ad → anahtar). Uygulanırken netleşenler ve varsayımlar:
+  - **Kullanıcı:** `UserContextFilter` imzadaki `userId`'yi istek özelliğine koyar; uçlar yalnızca onu kullanır (gövdedeki `uid` ve `X-uid` dikkate alınmaz). İmzada kullanıcı yoksa 403. `local` profilinde imza olmadığından broker'ın `X-uid`'i kullanılır.
+  - **Metin:** `PUT` gövdeyi ayrıştırıp sıkışık JSON yazar; Jackson'ın `readValue(..., Object.class)` + `writeValueAsString` çıktısıyla aynı (eski `JacksonJsonRedisSerializer`), testte karşılaştırılır. `GET` saklanan metni değiştirmeden döner (eski broker'ın yazdığı da). `PUT`'un yanıtı yazılan JSON (varsayım; eski yanıt biçimini route'un profili kurar).
+  - **Hatalar:** bilinmeyen ad 404, kullanıcı yok 403, gövde JSON değil 400, Redis 503; gövde `{"response": false, "status", "message"}`.
+  - **Yerel:** `local` profilinde anahtarlar `local:user:layout:{uid}`, `local:user:quick_link:{uid}` (DEV'in kayıtlarına yazmaz).
+  - **Route'lar** kullanıcıda: örnek `giris/save_layout` (`TEMPLATE` gövde `"${request.layout}"`) README'de; anonim olamazlar, yetkisini kullanıcı seçer.
+  - **Testler:** `UserSettingsApiTest` (eski metinle aynı, süresiz, imzalı kullanıcı, eski kaydı okuma, `null`, 404/403/400), `LocalProfileTest` (yerel anahtar).
 
 ### 7. Alarm
 
@@ -80,10 +120,24 @@ Eski akış ve kararlar "Eski broker'dan teyit edilenler" ve "Verilmiş kararlar
 - **Elastic:** Log sink, alarm olan olaylardan `alarm` indeksine doküman yazar: `_id` = `query_id`; gövde eski `alarm_log` gibi isteğin parametreleri olduğu gibi; yeni bilgi `yapi` nesnesinde (request_id, uid, client_ip, alarm listesi, alarm route'u, zaman).
 - **`alarm_list`:** Alarm yoksa servise giden gövdeye eklenmez (açık nokta).
 - Rehber: proje ortam ayarı, subtask formu, `definition-rules`, yeni outcome, değişiklik kaydı.
+- **Yapıldı (2026-10-26):** Core'da `AlarmSpec`, `AlarmServiceSpec`, `AlarmRoute`, `alarm/AlarmValues` (değerler ve `resultPath`'ten alarm listesi), `Placeholder.ALARM`, `Outcome.ALARM`, `LogEvent.alarm`, `LegacyDocuments`'ta alarm dokümanı; runtime'da `YapiHandler.alarmPassed`; env-admin `runtime_project.alarm_maintask/alarm_subtask`; admin `project_environment.alarm_*`, ortam ayarında doğrulama ve `ALARM_ROUTE_ACTIVE` ön kontrolü; sink `yapi.sink.elastic.alarm-index` (`YAPI_ELASTIC_ALARM_INDEX`, varsayılan `alarm`). Uygulanırken netleşenler ve varsayımlar:
+  - **Değerler:** `null`'lar alınmaz; boolean ve sayılar metne çevrilir (`true`, `10`), boş metin alınır. Zarf alanları yalnızca üst seviyede atlanır; maskelenen alanlar (`password` + route'un `maskFields`'ı) her derinlikte, harf duyarsız. Dizinin elemanları sırayla.
+  - **Alarm listesi:** `resultPath` noktalı yol; yoldaki değer dizi değilse ya da yanıt JSON değilse alarm servisi hatası (503). Liste elemanları metne çevrilir. Boş dizi: alarm yok, istek devam eder ve olaya `alarm` yazılmaz (kontrolün yapıldığı iz bırakmaz; varsayım).
+  - **Hangi istekler:** Login/logout ve test çağrısı alarm kontrolünden geçmez. Alarm servisi route'u frontend'den çağrılınca bulunmamış sayılır (404 `UNKNOWN_TASK`, oturum geçersizse 301 gövdesi).
+  - **Alarm servisi çağrısı:** Alarm route'unun kendi `timeoutMs`'iyle, tek deneme (retry yok), `traceparent` ve varsa `X-User-Context` ile; tanımdaki diğer yer tutucular gelen isteğin bağlamından (`${request.*}`, `${header.*}`, `${user.id}`, `${requestId}`). Alarm route'unun yetkisi ve anonimliği aranmaz; kendi yetkisi olması önerilir ama runtime kontrol etmez. Alarm servisinin cevabı ve hatası ayrı bir olay olarak loglanmaz; ana isteğin RESPONSE olayının `alarm` nesnesinde (`maintask`, `subtask`, `alarms`, `params` ya da `error`).
+  - **Seçilen route ortamda yoksa** (silinmiş, `DISABLED`, alarm servisi olmayan versiyon): istek 503 ile reddedilir ve hata logu yazılır; ön kontrol bunu taşımada engeller, ama alarm route'u sonradan `DISABLE` edilirse onu kullanan subtask'ler 503 döner (`DISABLE`'da bu bağımlılığa bakılmıyor; açık nokta).
+  - **Ön kontrol:** `ALARM_ROUTE_ACTIVE` subtask taşımalarında (`DEPLOY`, `ROLLBACK`, `ENABLE`), alarm servislerinde ve `OFF`'ta çalışmaz. `INHERIT`'te projenin hedef ortamda alarm route'u yoksa geçer ("alarm kontrolü yapılmaz"). Hedefte `ACTIVE` versiyonun alarm servisi olması da aranır. Proje ortam ayarı kaydında alarm route'unun ortamda aktif olması aranmaz (yalnızca kayıtlı ve güncel versiyonu alarm servisi); harf farkıyla gelen ad kayıtlı yazımıyla saklanır.
+  - **Ortam ayarı:** `PUT /projects/{id}/environments/{env}`'de `alarmRoute` gönderilmezse `null` (her kayıt tam ayardır, diğer alanlar gibi). env-admin'de `alarm_maintask` ve `alarm_subtask` ikisi birden dolu ya da boş (`ck_runtime_project_alarm`); değişiklik config versiyonunu artırır.
+  - **`params`:** Elastic'teki alarm dokümanına isteğin gövdesi maskelenmiş haliyle ve zarf alanları dahil yazılır (eski `alarm_log` parametreleri olduğu gibi yazıyordu; `password` maskeleniyor). `_id` = `query_id`; `yapi` nesnesinde `request_id`, `uid`, `client_ip`, `alarms`, `alarm_route`, `time`, `environment`. İndeks adı ayarlanabilir; aylık değil (eski indeks tek).
+  - **Önizleme ve test:** `${alarm.values}`'un değeri yoktur, alan yazılmaz; alarm servisi önizlemede bu yüzden boş değerle görünür.
+  - **`alarm_list`:** eklenmedi (açık nokta olarak kaldı).
+  - **Testler:** core `AlarmTest` (değerler, liste, şablon, doğrulama kuralları) ve `LegacyDocumentsTest` (alarm dokümanı); runtime `YapiFlowTest` (alarm: servis çağrılmaz, eski gövde, olay ve metrik; `OFF`, `ROUTE`, alarm servisine doğrudan çağrı 404; alarm servisi hatası 503) ve `CommonFormatTest` (eski yanıtlar kapalıyken 403); env-admin `AdminApiTest` (ortam ayarında alarm route'u); admin `PromotionFlowTest` (ortam ayarı doğrulaması, ön kontrol); sink `ElasticBulkWriterTest` ve `RealTargetsTest` (gerçek Elastic'te alarm dokümanı).
 
 ## Tamamlanan iş (2026-10-16)
 
 **Durum:** 1–6 bitti, PR #1 ile merge edildi. 7 (alarm) "Sıradaki iş (2026-10-26)" 7'ye taşındı.
+
+Bu bölüm 2026-10-16'daki adlarla yazıldı (`broker-*` modüller, `broker.*` ayarlar, `broker:*` anahtarlar); güncel adlar "Modüller ve durum"da ("Sıradaki iş (2026-10-26)" 1).
 
 Maddeler sırayla yapılır; her biri kendi commit'leriyle biter ve her push'tan önce `mvn -B verify` yeşildir. 7. madde bu turda yapılmaz. "Bilgi bekleyenler"deki konular işi durdurmaz: o parçalar arayüz arkasında, ayara bağlı ve aşağıdaki varsayılanlarla yazılır; bilgi gelince yalnızca o parça değişir. Eski broker'dan alınan gövdeler, anahtarlar ve alan adları birebir korunur ve testlerle sabitlenir. Bir madde bitince bu nottaki modül bölümleri de güncellenir.
 
@@ -231,9 +285,9 @@ Kullanıcıda olan ilk route yetkisi: önce `permissions`, sonra `foreignPermiss
 
 - **Yapıldı (2026-10-16):** `RequestContext.permission` ve `RequestContext.firstPermission(routePermissions, userPermissions)` core'da; doğrulayıcı `${user.permission}`'ı kabul eder, `definition-rules` listeler. Broker'da route yetkileri artık sıralı (`Route.permissions` `List`; runtime DB'deki dizi zaten önce proje, sonra başka proje yetkilerini sırayla taşıyordu). Önizleme ve test çağrısında kullanıcının formdaki yetkilere sahip olduğu varsayılır: `Trial` ve `TestCallRequest` isteğe bağlı `permissions`/`foreignPermissions` (test çağrısında `permission`) taşır; rehber ve değişiklik kaydı güncellendi. Testler: core (sıra, yokken alanın yazılmaması), broker (`sorgu` örneği, anonim route), admin önizlemesi.
 
-### 7. Alarm (2026-10-26 turuna taşındı)
+### 7. Alarm (2026-10-26 turunda yapıldı)
 
-Her şey bittikten sonra yapılacak. Eski akış: `maintask = sorgu` ve `reason` 5 karakterden uzunsa `alarmService.checkAlarm(params, client_ip, query_id)`; `isAlarmQuery` true ise HTTP 200 `{"response": false, "badprocess": true, "status": 500}`, değilse gövdeye `alarm_list` eklenir. Alarm logu Elastic'te `alarm` indeksine yazılıyor. Ayrıntılar `alarmService` koduyla gelecek.
+2026-10-26 turunun 7. maddesi olarak yapıldı. Eski akış: `maintask = sorgu` ve `reason` 5 karakterden uzunsa `alarmService.checkAlarm(params, client_ip, query_id)`; `isAlarmQuery` true ise HTTP 200 `{"response": false, "badprocess": true, "status": 500}`, değilse gövdeye `alarm_list` eklenir. Alarm logu Elastic'te `alarm` indeksine yazılıyor. Ayrıntılar `alarmService` koduyla gelecek.
 
 ## Eski broker'dan teyit edilenler
 
@@ -276,23 +330,23 @@ Kullanıcıdan istendi; gelince ilgili madde güncellenir:
 
 Tasarım dokümanındakilere ek olarak netleşenler:
 
-- **Platform:** Java 25, Spring Boot 4.1.1, Maven çok modüllü proje. Paket kökü `com.acme.broker` (şirket adına göre toplu değiştirilebilir).
-- **JSON:** Jackson 3 (`tools.jackson.*`; anotasyonlar `com.fasterxml.jackson.annotation.*`). Ağaç API'si yalnızca `broker-core/.../json/Json.java` içinden kullanılır; Jackson metot adı hatası çıkarsa tek yerde düzeltilir.
-- **Veri erişimi:** JPA yok; `JdbcClient` ve SQL, şemalar Flyway ile. Veritabanı Oracle 19c (merkezi ve runtime); şema = şema sahibi kullanıcı (`BROKER_ADMIN`, `BROKER_RUNTIME`), uygulamalar kendi kullanıcılarıyla `CURRENT_SCHEMA` (Hikari `schema`) üzerinden şemasız SQL yazar. Testler Oracle XE 21 ile; 19c'de olmayan özellik kullanılmaz.
-- **Broker'ın ortak hata formatı:** `{"result": false, "status": 403, "outcome": "DENIED", "message": "...", "requestId": "...", "errors": []}`. Durumlar: `X-Token` yok 400 `INVALID_REQUEST`, yetki yok 403 `DENIED`, route yok 404 `UNKNOWN_TASK`, gövde `fields`'a uymuyor 400 `INVALID_REQUEST` (alan bazında `errors`), oturum okunamadı 503 `TECHNICAL_ERROR`. Application ve oturum eski broker'ın HTTP 200'lü gövdeleriyle döner (`broker.compat.legacy-responses`, varsayılan açık; kapalıyken 403 ve 401 ortak formatta); login ve logout giriş servisinin gövdeleri.
+- **Platform:** Java 25, Spring Boot 4.1.1, Maven çok modüllü proje. Paket kökü `com.acme.yapi` (şirket adına göre toplu değiştirilebilir).
+- **JSON:** Jackson 3 (`tools.jackson.*`; anotasyonlar `com.fasterxml.jackson.annotation.*`). Ağaç API'si yalnızca `yapi-core/.../json/Json.java` içinden kullanılır; Jackson metot adı hatası çıkarsa tek yerde düzeltilir.
+- **Veri erişimi:** JPA yok; `JdbcClient` ve SQL, şemalar Flyway ile. Veritabanı Oracle 19c (merkezi ve runtime); şema = şema sahibi kullanıcı (`YAPI_ADMIN`, `YAPI_RUNTIME`), uygulamalar kendi kullanıcılarıyla `CURRENT_SCHEMA` (Hikari `schema`) üzerinden şemasız SQL yazar. Testler Oracle XE 21 ile; 19c'de olmayan özellik kullanılmaz.
+- **Broker'ın ortak hata formatı:** `{"result": false, "status": 403, "outcome": "DENIED", "message": "...", "requestId": "...", "errors": []}`. Durumlar: `X-Token` yok 400 `INVALID_REQUEST`, yetki yok 403 `DENIED`, route yok 404 `UNKNOWN_TASK`, gövde `fields`'a uymuyor 400 `INVALID_REQUEST` (alan bazında `errors`), oturum okunamadı 503 `TECHNICAL_ERROR`. Application ve oturum eski broker'ın HTTP 200'lü gövdeleriyle döner (`yapi.compat.legacy-responses`, varsayılan açık; kapalıyken 403 ve 401 ortak formatta); login ve logout giriş servisinin gövdeleri.
 - **Log yazılamazsa:** `500` ve `{"result": false}`, outcome `LOG_UNAVAILABLE`; olaylar spool'a yazılır. Profil uygulanmaz.
 - **Logdaki oturum bilgisi:** `token`, `client_ip`, `user_agent` ve login yanıtındaki `X-Token` eskisi gibi olduğu gibi loglanır. Kullanıcı kararı: istek olduğu gibi loglanmalı; broker'ın Elasticsearch'ü ayrı, erişim çok sınırlı ve oturumlar kayıt altında.
 - **Profilsiz yanıt:** Gövde olduğu gibi döner. RESPONSE olayındaki `client_response` bu durumda yalnızca `{"status": <kod>}` olur, böylece loglanmamış veri `data_response`'a sızmaz; `logResponseBody` açıksa "Sıradaki iş" 2'deki kural geçerlidir.
 - **Dosya yanıtı** (`BINARY` route ya da servis `Content-Disposition` döndürdü): `client_response` = `{"info": <route'un binaryInfo'su ya da "Dosya yanıtı: <dosya adı>">}`; gövde loglanmaz, onaydan sonra stream edilir.
 - **Timeout ve bağlantı hatası, profil yoksa:** ortak formatta 504 `TIMEOUT` ve 502 `TECHNICAL_ERROR`.
-- **Oturum:** Eski broker'dan teyit edildi: kayıt `user:session:{uid}`, geçerlilik token, `X-Clientip` ve `X-User-Agent` eşleşmesiyle; login ve logout ayrı bir giriş servisinde. Oturum işlemleri parametre logu ve `broker.gelen.istekler` sayacı dışında kalır. Broker tarafı ("Sıradaki iş" 3) ve giriş servisi (`broker-login`, 4) uygulandı.
+- **Oturum:** Eski broker'dan teyit edildi: kayıt `user:session:{uid}`, geçerlilik token, `X-Clientip` ve `X-User-Agent` eşleşmesiyle; login ve logout ayrı bir giriş servisinde. Oturum işlemleri parametre logu ve `yapi.gelen.istekler` sayacı dışında kalır. Broker tarafı ("Sıradaki iş" 3) ve giriş servisi (`yapi-login`, 4) uygulandı.
 - **Anonim route + oturum:** Token geçerliyse kullanıcı yine çözülür (`X-uid`, `perm_list`); geçersizse anonim route yine çalışır.
 - **Servise giden header'lar:** `X-uid` (oturumdaki kullanıcı), `X-Request-Id`, `traceparent`; gizli anahtar ayarlıysa HMAC imzalı `X-User-Context`.
 - **Test çağrıları** Kafka'ya log yazmaz; merkezi admin bunları kendisi audit eder.
-- **Eski sayaç:** `broker.gelen.istekler` tag anahtarları ayarla verilir; eski controller'la teyit edildi (`maintask`, `subtask`). Bilinmeyenler "Bilinmeyen Proje" / "Bilinmeyen Endpoint".
+- **Eski sayaç:** Eski broker'ın `broker.gelen.istekler`'i Yapi'de `yapi.gelen.istekler` (2026-10-26 kararı). Tag anahtarları ayarla verilir; eski controller'la teyit edildi (`maintask`, `subtask`). Bilinmeyenler "Bilinmeyen Proje" / "Bilinmeyen Endpoint".
 - **Elastic aylık indeks:** Ay, request ID'deki (UUIDv7) zamandan, ayarlanabilir saat diliminde hesaplanır. Eski kod sunucunun saat dilimini (TSİ) kullanıyor; varsayılan `Europe/Istanbul`. Parametre dokümanı `_id`'si `UUID.nameUUIDFromBytes(requestId|alan|sıra)`.
-- **Admin kimliği:** OAuth2 resource server (JWT); rollerin geldiği claim ve grup→rol eşlemesi ayardan. `local` profilinde HTTP Basic: `viewer`, `editor`, `approver`, `lead` (şifre = kullanıcı adı; `lead` üç role de sahip).
-- **Roller:** `VIEWER`, `ROUTE_EDITOR`, `APPROVER`. `ROUTE_EDITOR` DEV'e doğrudan uygular (talep onaysız uygulanır), TEST ve PROD için talep açar.
+- **Admin kimliği:** Şirketin giriş uygulamasının oturumu (`X-Token`, `X-Uid`, `X-Clientip`, `X-User-Agent`), oturum ortamının env-admin'inde doğrulanır; roller oturumdaki Yapi yetkilerinden (ayardan). `local` profilinde HTTP Basic: `viewer`, `editor`, `approver`, `lead` (şifre = kullanıcı adı; `lead` üç role de sahip).
+- **Roller:** `VIEWER`, `ROUTE_EDITOR`, `APPROVER`. `ROUTE_EDITOR` DEV'e doğrudan uygular (talep onaysız uygulanır), PREPROD ve PROD için talep açar.
 - **Taşıma kuralları:** Onay gerekir = hedef ortam `requires_approval` **ya da** versiyon anonim erişimi açıyorsa (hangi ortam olursa olsun). Onay gerekenlerde gerekçe zorunlu. `ROLLBACK` yalnızca hedef ortama daha önce `APPLIED` olmuş bir versiyona; `DISABLE`/`ENABLE` hedefteki mevcut versiyonla. Profil önce, route sonra uygulanır. Ön kontroller ve adları `docs/frontend-guide.md`'de.
 - **Ortam ayarı:** `PUT /projects/{id}/environments/{env}` ortama hemen uygulanır; ortama ulaşılamazsa merkezde de değişmez (502 `ENV_UNREACHABLE`). Onay isteyen ortamda yalnızca `APPROVER` değiştirir (açık nokta).
 - **Arşiv:** Yalnızca hiçbir ortamda `ACTIVE` olmayan subtask arşivlenir (409 `ROUTE_DEPLOYED`).
@@ -308,9 +362,9 @@ Tasarım dokümanındakilere ek olarak netleşenler:
 
 ## Modüller ve durum
 
-Bu bölüm kodun güncel halini anlatır; "Sıradaki iş"teki maddeler bittikçe güncellenir. "Sıradaki iş"in 1–6. maddeleri bitti.
+Bu bölüm kodun güncel halini anlatır; "Sıradaki iş"teki maddeler bittikçe güncellenir. "Sıradaki iş"in 1–7. maddeleri bitti.
 
-### broker-core (yeşil)
+### yapi-core (yeşil)
 
 | Paket | İçerik |
 | --- | --- |
@@ -321,32 +375,33 @@ Bu bölüm kodun güncel halini anlatır; "Sıradaki iş"teki maddeler bittikçe
 | `request` | `RequestBodyValidator` (zorunlu/tip/varsayılan), `BackendRequestBuilder` (path, query, header, NONE/PASS_THROUGH/TEMPLATE/MULTIPART body), `RequestContext` |
 | `response` | `Outcome`, `ResponseProfile` (profil doğrulama ve zarflama; 5xx gövdesi şablona verilmez), `ClientResponse` |
 | `logging` | `LogEvent` + `EventCodec` (Kafka'daki snake_case şema), `Masker` (her derinlikte, harf duyarsız; kırpma) |
-| `legacy` | `LegacyDocuments`: olaylardan eski Elastic ana ve parametre dokümanları (`ElasticOperation`) |
+| `legacy` | `LegacyDocuments`: olaylardan eski Elastic ana ve parametre dokümanları ve alarm dokümanı (`ElasticOperation`) |
+| `alarm` | `AlarmValues`: alarm servisine giden değerler (yaprak değerler, zarf ve maskeli alanlar hariç) ve yanıttan alarm listesi (`resultPath`) |
 | `ids` | UUIDv7, trace/span ID, parametre dokümanı ID'si |
 | `spec` | `OpenApiSpec` ($ref çözümü, fingerprint), `SpecProposal` (operasyondan tanım önerisi) |
 | `sample` | `SampleParser` (JSON ya da bash/cmd "Copy as cURL"; kimlik header'larını atar), `SampleTemplate` (alan çıkarımı ve operasyona ad eşleme) |
 | `diff` | `JsonDiff`: alan yolu bazında fark |
 | `rules` | `DefinitionRules`: `GET /meta/definition-rules` yanıtı |
 
-Testleri `broker-core/src/test` altında; tasarım dokümanındaki örnekleri (add_order_note, log-project profili, eski Elastic dokümanları) doğruluyorlar.
+Testleri `yapi-core/src/test` altında; tasarım dokümanındaki örnekleri (add_order_note, log-project profili, eski Elastic dokümanları) doğruluyorlar.
 
 Modüller arası sözleşmeler de burada:
 
 | Paket | İçerik |
 | --- | --- |
-| `runtime` | `RuntimeSignals`: `broker:routes-changed` kanalı, `broker:loaded:{instanceId}` anahtarı ve değeri `{"version": 43, "loadedAt": "..."}` (60 sn TTL) |
-| `testcall` | `TestCallRequest` / `TestCallResult` / `TestInterpretation`: merkez → ortam Admin API → broker'ın iç endpoint'i (`POST /internal/v1/test`, `X-Broker-Test-Secret`) |
+| `runtime` | `RuntimeSignals`: `yapi:routes-changed` kanalı, `yapi:loaded:{instanceId}` anahtarı ve değeri `{"version": 43, "loadedAt": "..."}` (60 sn TTL) |
+| `testcall` | `TestCallRequest` / `TestCallResult` / `TestInterpretation`: merkez → ortam Admin API → broker'ın iç endpoint'i (`POST /internal/v1/test`, `X-Yapi-Test-Secret`) |
 
-Test-jar (`com.acme.broker.core.testing`): `CoreFixtures` (add_order_note, log-project, openapi-sample), `FakeHttpServer` (JDK `HttpServer` ile sahte servis), `JsonHttp` (test HTTP istemcisi) ve `TestCertificates` (keytool ile mTLS sertifikaları); diğer modüllerin testleri kullanır.
+Test-jar (`com.acme.yapi.core.testing`): `CoreFixtures` (add_order_note, log-project, openapi-sample), `FakeHttpServer` (JDK `HttpServer` ile sahte servis), `JsonHttp` (test HTTP istemcisi) ve `TestCertificates` (keytool ile mTLS sertifikaları); diğer modüllerin testleri kullanır.
 
-### broker-runtime (yeşil)
+### yapi-runtime (yeşil)
 
-Paket `com.acme.broker.runtime`. Tek endpoint `POST /broker`; akış `web/BrokerHandler`'da, tasarımdaki sırayla:
+Paket `com.acme.yapi.runtime`. Tek endpoint `POST /yapi`; akış `web/YapiHandler`'da, tasarımdaki sırayla:
 
 1. `requestId` UUIDv7, `queryId` rastgele UUID; trace gelen `traceparent`'tan (geçersizse yeni), servise yeni span ID ile gider.
-2. Gövde JSON nesnesi değilse 400; `X-Token` yoksa 400 (`INVALID_REQUEST`). Gövde üst sınırı `broker.forward.max-request-bytes`. `X-Token` login/logout değilse `broker.gelen.istekler` artar.
-3. `application` izinli değilse HTTP 200 `{"response": false}` (`ApplicationList`: `broker.applications.mode` redis/static/off, Redis'te `broker:applications`, 30 sn'de bir; liste okunmadan readiness hazır değil).
-4. Gövdedeki maintask `broker.session.public-maintasks`'ta değilse ve `X-Token` login/logout ise `broker.session.routes`'taki route (`giris/login`, `giris/logout`); yoksa ya da anonim değilse 503 ve hata logu. Oturum okunmaz.
+2. Gövde JSON nesnesi değilse 400; `X-Token` yoksa 400 (`INVALID_REQUEST`). Gövde üst sınırı `yapi.forward.max-request-bytes`. `X-Token` login/logout değilse `yapi.gelen.istekler` artar.
+3. `application` izinli değilse HTTP 200 `{"response": false}` (`ApplicationList`: `yapi.applications.mode` redis/static/off, Redis'te `yapi:applications`, 30 sn'de bir; liste okunmadan readiness hazır değil).
+4. Gövdedeki maintask `yapi.session.public-maintasks`'ta değilse ve `X-Token` login/logout ise `yapi.session.routes`'taki route (`giris/login`, `giris/logout`); yoksa ya da anonim değilse 503 ve hata logu. Oturum okunmaz.
 5. `RouteCache.find` (bellek, `Names.key`). Oturum: gövdedeki `uid` ile `user:session:{uid}`, tek Redis GET (`SessionStore`, `SessionRecordCodec`); geçerli = token, `X-Clientip`, `X-User-Agent` birebir aynı. Route yoksa geçersiz oturum 301 gövdesi, geçerliyse 404 `UNKNOWN_TASK`. Anonim olmayan route'ta geçersiz oturum HTTP 200 `{"response": false, "status": 301, "reason": "check X-Token"}`, yetki yoksa 403 (any-of), Redis okunamazsa 503 `TECHNICAL_ERROR`; anonim route oturum geçersizse ya da okunamazsa kullanıcısız devam eder. Eski gövdeler `client_response`'a `"data": ""` eklenerek yazılır.
 5. REQUEST olayı; onay yoksa servis çağrılmaz, 500 `{"result": false}`, olaylar spool'a.
 6. `RequestBodyValidator` + `BackendRequestBuilder`; servise `X-uid`, `X-Request-Id`, `traceparent`, ayarlıysa `X-User-Context` (`v1.<payload>.<HMAC-SHA256>`, payload `{userId, requestId, issuedAt}`).
@@ -354,82 +409,87 @@ Paket `com.acme.broker.runtime`. Tek endpoint `POST /broker`; akış `web/Broker
 8. Dosya yanıtı (`BINARY` ya da `Content-Disposition`): RESPONSE olayı onaylanınca stream; `client_response` `{"info": ...}`, `body_size` `Content-Length`'ten. Değilse gövde okunur, outcome gerçek status'tan; profil varsa zarflanır, yoksa gövde olduğu gibi döner. `client_response`: `logResponseBody` kapalıyken profilde `data` boş string, profilsizde `{"status": <kod>}`; açıkken maskeli zarf ya da gövde, `data` JSON metni, `maxBodyBytes`'ta kırpılır (`EventFactory`).
 9. Her yanıtta `X-Request-Id`; hata yollarında REQUEST ve RESPONSE birlikte gönderilip ikisi de beklenir.
 
+- **Alarm:** REQUEST olayı, alan doğrulaması ve servis isteğinin kurulmasından sonra, servis çağrısından önce `alarmPassed`: alarm route'u tanımdan (`ROUTE`) ya da snapshot'taki projenin `alarmRoute`'undan (`INHERIT`); `RouteCache`'te bulunur ve alarm servisi olmalıdır. Alarm varsa servis çağrılmaz: eski yanıtlar açıkken 200 `{"response": false, "badprocess": true, "status": 500}`, kapalıyken 403; outcome `ALARM`. Alarm servisi hatasında 503 `TECHNICAL_ERROR`. Frontend'den gelen istekte bulunan route alarm servisiyse bulunmamış sayılır (404).
+
 - **`status_code`:** Servis yanıt verdiyse servisin status'u; vermediyse (broker hataları, timeout, bağlantı hatası) frontend'e dönen status. ClickHouse kolonu böylece boş kalmaz.
 - **Log isteği gövdesi:** `logRequestBody=false` ise REQUEST olayında yalnızca zarf alanları yazılır (eski ana doküman zarfı yine taşır).
-- **RouteCache:** `RouteRepository.loadSnapshot()` tek bir `SET TRANSACTION READ ONLY` transaction'ında okur (Oracle'da REPEATABLE READ yok); bozuk route/profil atlanır (`broker.routes.skipped`). `broker:routes-changed` aboneliği, `broker.cache.verify-interval` (15 sn) kontrolü, her kontrolde `broker:loaded:{instanceId}` (60 sn TTL). İlk yükleme ve Kafka metadata ısınması `ApplicationRunner` (ısınma önce).
-- **Spool:** istek başına bir `.jsonl` dosyası (atomik taşıma), `broker.spool.resend-interval` ile eskiden yeniye gönderilir; ilk hatada durur. Gauge `broker.log.spool.files`.
-- **Metrikler:** `broker.requests` (maintask, subtask, outcome; bilinmeyen subtask `UNKNOWN`), `broker.gelen.istekler` (tag anahtarları ve "Bilinmeyen ..." değerleri `broker.legacy-counter.*`), `broker.log.ack`, `broker.log.unavailable`, `broker.routes.config.version`, `broker.applications.refresh.failed`.
-- **İç test endpoint'i:** `POST /internal/v1/test`, yalnızca `broker.test.enabled=true` iken oluşur; `X-Broker-Test-Secret` sabit zamanlı karşılaştırılır. Kafka'ya yazmaz.
-- **`local` profili:** `LocalOverrides` (`broker-local.json`, `baseUrls` + `routes`, dosya değişince 2 sn içinde uygulanır), `log-sink: console`, `broker.local.skip-permission-check-for-overrides`.
+- **RouteCache:** `RouteRepository.loadSnapshot()` tek bir `SET TRANSACTION READ ONLY` transaction'ında okur (Oracle'da REPEATABLE READ yok); bozuk route/profil atlanır (`yapi.routes.skipped`). `yapi:routes-changed` aboneliği, `yapi.cache.verify-interval` (15 sn) kontrolü, her kontrolde `yapi:loaded:{instanceId}` (60 sn TTL). İlk yükleme ve Kafka metadata ısınması `ApplicationRunner` (ısınma önce).
+- **Spool:** istek başına bir `.jsonl` dosyası (atomik taşıma), `yapi.spool.resend-interval` ile eskiden yeniye gönderilir; ilk hatada durur. Gauge `yapi.log.spool.files`.
+- **Metrikler:** `yapi.requests` (maintask, subtask, outcome; bilinmeyen subtask `UNKNOWN`), `yapi.gelen.istekler` (tag anahtarları ve "Bilinmeyen ..." değerleri `yapi.legacy-counter.*`), `yapi.log.ack`, `yapi.log.unavailable`, `yapi.routes.config.version`, `yapi.applications.refresh.failed`.
+- **İç test endpoint'i:** `POST /internal/v1/test`, yalnızca `yapi.test.enabled=true` iken oluşur; `X-Yapi-Test-Secret` sabit zamanlı karşılaştırılır. Kafka'ya yazmaz.
+- **`local` profili:** `LocalOverrides` (`yapi-local.json`, `baseUrls` + `routes`, dosya değişince 2 sn içinde uygulanır), `log-sink: console`, `yapi.local.skip-permission-check-for-overrides`.
 - **Flyway kapalı** (`spring.flyway.enabled=false`): broker şemaya hiç yazmaz.
-- **Veritabanı:** `broker_runtime_reader` kullanıcısıyla, `spring.datasource.hikari.schema` (varsayılan `BROKER_RUNTIME`) ile şemasız okur; Hikari havuzu `read-only`.
-- **Testler:** env-admin'in migration'ı ve `RuntimeStore`'u ile runtime DB, Testcontainers Oracle XE (broker okuyucu kullanıcıyla bağlanır) ve Redis, EmbeddedKafka, `FakeHttpServer`. Testlerin istekleri oturum kaydının uid'ini, `application: web`'i ve login'deki istemci header'larını taşır (`BrokerFlowTest.broker`). `CommonFormatTest` Kafka'sız (`log-sink: console`). Log kapısı topic'i olmayan bir Kafka ile denenir (servis çağrılmaz, 500, spool; topic açılınca spool gönderilir).
+- **Veritabanı:** `yapi_runtime_reader` kullanıcısıyla, `spring.datasource.hikari.schema` (varsayılan `YAPI_RUNTIME`) ile şemasız okur; Hikari havuzu `read-only`.
+- **Testler:** env-admin'in migration'ı ve `RuntimeStore`'u ile runtime DB, Testcontainers Oracle XE (broker okuyucu kullanıcıyla bağlanır) ve Redis, EmbeddedKafka, `FakeHttpServer`. Testlerin istekleri oturum kaydının uid'ini, `application: web`'i ve login'deki istemci header'larını taşır (`YapiFlowTest.broker`). `CommonFormatTest` Kafka'sız (`log-sink: console`). Log kapısı topic'i olmayan bir Kafka ile denenir (servis çağrılmaz, 500, spool; topic açılınca spool gönderilir).
 - **Tracing:** span adı ve attribute'lar OTel Java agent'ına bırakıldı; broker `traceparent`'ı taşır. Span'ı `maintask/subtask` diye adlandırmak için agent'ın API'si eklenmeli (açık).
 
-### broker-env-admin (yeşil)
+### yapi-env-admin (yeşil)
 
-Paket `com.acme.broker.envadmin`. Uçlar `/admin/v1` altında; hatalar merkezle aynı problem formatında (`code`, `detail`, `errors`).
+Paket `com.acme.yapi.envadmin`. Uçlar `/admin/v1` altında; hatalar merkezle aynı problem formatında (`code`, `detail`, `errors`).
 
 | Uç | Davranış |
 | --- | --- |
 | `PUT /routes/{maintask}/{subtask}` | Tasarımdaki tek ifadeyle uygular. Yanıt `{"applied", "configVersion", "alreadyApplied", "signalled"}`. Aynı `promotionId` tekrar gelirse `alreadyApplied: true`; daha yeni talep varsa 409 `STALE_PROMOTION` (`currentPromotionId`); proje ya da profil ortamda yoksa 409 `PROJECT_NOT_FOUND` / `PROFILE_NOT_FOUND`. Tanım `RouteValidator` ile (header okunabilirliği hariç) doğrulanır |
 | `PUT /response-profiles/{name}` | Aynı desen; `ResponseProfile.parse` ile doğrulanır |
 | `POST /routes/{m}/{s}/disable` | Kill switch, `promotionId` ile; route yoksa 404 `ROUTE_NOT_FOUND`. `ENABLE` ayrı uç değil: hedefteki versiyon `PUT` ile yeniden uygulanır |
-| `PUT /projects/{maintask}` | `{"baseUrl", "enabled", "actor"}`; değişiklik varsa config versiyonu artar ve sinyal gider (broker'lar base URL'i snapshot'la okur) |
+| `PUT /projects/{maintask}` | `{"baseUrl", "enabled", "alarmRoute", "actor"}`; değişiklik varsa config versiyonu artar ve sinyal gider (broker'lar base URL'i snapshot'la okur) |
 | `GET /routes` | Projeler, profiller, tüm route'lar (DISABLED dahil) ve config versiyonu |
-| `GET /cache-status` | `broker:loaded:*` (SCAN) → instance başına `loadedVersion`, `loadedAt`, `upToDate` |
+| `GET /cache-status` | `yapi:loaded:*` (SCAN) → instance başına `loadedVersion`, `loadedAt`, `upToDate` |
 | `GET /projects/{maintask}/spec?path=` | Base URL runtime DB'den; yol doğrulanır (`..`, `//`, şema, ters bölü reddedilir). Hata: 502 `UPSTREAM_ERROR` (`upstreamStatus`) |
 | `POST /probe` | `{"maintask", "httpMethod", "pathTemplate", "pathVariables"}` → `{"result", "status", "allow", "url", "message"}`; değeri verilmeyen path değişkeni `1` olur; redirect izlenmez; ulaşılamazsa `INCONCLUSIVE`, `status: null` |
-| `POST /test` | `TestCallRequest`'e kayıtlı base URL'i koyup broker'ın iç endpoint'ine iletir; kapalıysa 403 `TEST_NOT_ALLOWED`, broker'a ulaşılamazsa 502 `BROKER_UNREACHABLE` |
+| `POST /test` | `TestCallRequest`'e kayıtlı base URL'i koyup broker'ın iç endpoint'ine iletir; kapalıysa 403 `TEST_NOT_ALLOWED`, broker'a ulaşılamazsa 502 `YAPI_UNREACHABLE` |
+| `POST /sessions/verify` | Merkezi admin'in giriş kontrolü: `{"uid", "token", "clientIp", "userAgent"}` → `{"valid", "permissions"}`; kayıt core'daki codec'le, eşleşme broker'ın kuralıyla; Redis okunamazsa 503 `SESSION_UNAVAILABLE` |
 
-- **Şema:** `db/migration/broker_runtime/V1__runtime_schema.sql`, Oracle 19c (tasarımdaki modelin Oracle karşılığı; kullanıcı yoksa GRANT atlanır, ORA-01917). Flyway şema sahibiyle (`BROKER_RUNTIME_DB_OWNER_*`, `create-schemas: false`), uygulama `broker_runtime_writer` ile `BROKER_RUNTIME_DB_SCHEMA` (varsayılan `BROKER_RUNTIME`) üzerinden çalışır. Yazmalar `MERGE` + versiyon artışı, tek transaction.
-- **mTLS:** `server.ssl.bundle=env-admin`, `client-auth=need`; bundle `mtls` profilinde (`application-mtls.yml`). Profil açılmazsa uygulama başlamaz. `broker.env-admin.allowed-client-subjects` doluysa sertifika konusu da kontrol edilir (403 `CLIENT_NOT_ALLOWED`). Actuator ayrı portta (9090), TLS'siz.
-- **Audit:** `broker.audit` logger'ı; `operation`, `actor` (gövdeden ya da `X-Actor`), `promotion_id`, `client` alanları.
-- **Paketleme:** çalıştırılabilir jar `-exec` ekiyle; düz jar ve test-jar (`RuntimeContainers`: Oracle XE + Redis, okuyucu ve yazıcı kullanıcılar, şema sahibiyle temizlik) broker-runtime testlerinde kullanılır.
+- **Şema:** `db/migration/yapi_runtime/V1__runtime_schema.sql`, Oracle 19c (tasarımdaki modelin Oracle karşılığı; kullanıcı yoksa GRANT atlanır, ORA-01917). Flyway şema sahibiyle (`YAPI_RUNTIME_DB_OWNER_*`, `create-schemas: false`), uygulama `yapi_runtime_writer` ile `YAPI_RUNTIME_DB_SCHEMA` (varsayılan `YAPI_RUNTIME`) üzerinden çalışır. Yazmalar `MERGE` + versiyon artışı, tek transaction.
+- **mTLS:** `server.ssl.bundle=env-admin`, `client-auth=need`; bundle `mtls` profilinde (`application-mtls.yml`). Profil açılmazsa uygulama başlamaz. `yapi.env-admin.allowed-client-subjects` doluysa sertifika konusu da kontrol edilir (403 `CLIENT_NOT_ALLOWED`). Actuator ayrı portta (9090), TLS'siz.
+- **Audit:** `yapi.audit` logger'ı; `operation`, `actor` (gövdeden ya da `X-Actor`), `promotion_id`, `client` alanları.
+- **Paketleme:** çalıştırılabilir jar `-exec` ekiyle; düz jar ve test-jar (`RuntimeContainers`: Oracle XE + Redis, okuyucu ve yazıcı kullanıcılar, şema sahibiyle temizlik) yapi-runtime testlerinde kullanılır.
 - **Testler:** Testcontainers Oracle XE ve Redis, `FakeHttpServer`; mTLS keytool ile üretilen sertifikalarla uçtan uca denenir. 32 KB'tan büyük tanım, eşzamanlı ilk yazma ve ayrılmış kelime kontrolü dahil.
 
-### broker-admin (yeşil)
+### yapi-admin (yeşil)
 
-Paket `com.acme.broker.admin`. Sözleşme `docs/frontend-guide.md`; uygulama sırasında netleşen gövde ve yanıtlar oradaki "Gövde ve yanıt ayrıntıları" tablosunda.
+Paket `com.acme.yapi.admin`. Sözleşme `docs/frontend-guide.md`; uygulama sırasında netleşen gövde ve yanıtlar oradaki "Gövde ve yanıt ayrıntıları" tablosunda.
 
 | Paket | İçerik |
 | --- | --- |
-| `security` | `!local`: OAuth2 resource server (JWT); roller `broker.admin.security.roles-claim` claim'inden, rol adı değilse `group-roles` ile eşlenir; kullanıcı adı `preferred_username` (yoksa `sub`). `local`: HTTP Basic, `viewer`/`editor`/`approver`/`lead`. Rol kontrolleri serviste (`User.require`); rolü olmayan kullanıcı her uçta 403. 401/403 problem formatında |
+| `security` | `!local`: `SessionAuthenticationFilter` + `SessionVerifier` (oturum ortamının env-admin'i, 30 sn önbellek), roller `yapi.admin.session.roles`'tan; kullanıcı adı uid. `local`: HTTP Basic, `viewer`/`editor`/`approver`/`lead`. Rol kontrolleri serviste (`User.require`); rolü olmayan kullanıcı her uçta 403. 401/403 problem formatında |
 | `environment` | `EnvironmentRepository` (sıra, onay, test ayarı DB'den), `EnvironmentClient` (Admin API; `ssl-bundle` ile mTLS, redirect yok). Bağlanamama `UnreachableException` (hiçbir şey değişmedi), istek gitti ama yanıt yok `NoAnswerException` (uygulanmış olabilir) |
-| `project`, `catalog`, `authz` | Proje kaydı (önek çakışması `PREFIX_OVERLAP`, harf duyarsız `DUPLICATE`), ortam ayarı önce ortama, sonra merkeze. Proje ve yetkilendirme servisleri `mode: http` (varsayılan API'ler sınıf yorumlarında) ya da `memory` |
+| `project`, `catalog`, `authz` | Proje kaydı (önek çakışması `PREFIX_OVERLAP`, harf duyarsız `DUPLICATE`), ortam ayarı önce ortama, sonra merkeze. Katalog ve yetkiler `mode: http` (her ortamın Koordinatör'ü, `koordinator/KoordinatorProjects`, ortam başına önbellek) ya da `memory`; yetkiler salt okunur |
 | `route`, `profile` | Güncel satır + aynı transaction'da history (snapshot Java'da kurulur, snake_case anahtarlar), iyimser kilit (`VERSION_CONFLICT` + `currentVersion`), geri alma, arşiv (`ROUTE_DEPLOYED`), karşılaştırma, doğrulama, önizleme (`BackendRequestBuilder`) |
 | `promotion` | Ön kontroller, onay kuralı (hedef `requires_approval` ya da versiyon anonim erişimi açıyorsa), dört göz (`FOUR_EYES` + `ck_four_eyes`), uygulama: yoklama → Admin API (`promotionId` = talep ID'si) → `route_deployment`/`response_profile_deployment`. Yanıt kaybolursa talep `APPLYING`'de kalır, `RETRY` aynı ID ile tamamlar |
-| `spec` | Spec karşılaştırma (method + path, değişken adları yok sayılır; `CHANGED` saklanan `spec_fingerprint`'ten), istekten şablon, test (yalnızca `test_calls_allowed`; `broker.audit` logu), yoklama |
-| `jobs` | `DriftCheck` (gece; ortamın listesiyle karşılaştırma + her ACTIVE route'a yoklama, `broker.admin.drift` sayacı, `last_probe_status`), `CatalogSync` (ad yenileme, servisten kalkan proje `MISSING`). Birden çok instance'ta aynı anda çalışmaları zararsız (idempotent) |
+| `spec` | Spec karşılaştırma (method + path, değişken adları yok sayılır; `CHANGED` saklanan `spec_fingerprint`'ten), istekten şablon, test (yalnızca `test_calls_allowed`; `yapi.audit` logu), yoklama |
+| `jobs` | `DriftCheck` (gece; ortamın listesiyle karşılaştırma + her ACTIVE route'a yoklama, `yapi.admin.drift` sayacı, `last_probe_status`), `CatalogSync` (ad yenileme, servisten kalkan proje `MISSING`). Birden çok instance'ta aynı anda çalışmaları zararsız (idempotent) |
 
-- **Şema:** `db/migration/broker_admin/V1__central_schema.sql`, tasarımdaki modelin Oracle 19c karşılığı (yukarıda "Sıradaki iş" 1'deki kararlar: `route_permission`, tablo başına PL/SQL trigger'lar, `CASE`'li açık talep index'leri, `change_note`; kullanıcı yoksa GRANT atlanır). `V2__environments.sql` ortamları `dev/test/prod_admin_api_url` placeholder'larıyla `MERGE` ile seed eder. Uygulama `broker_admin_app` ile `BROKER_ADMIN_DB_SCHEMA` (varsayılan `BROKER_ADMIN`) üzerinden şemasız çalışır.
-- **Ayar:** SSO issuer'ı `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUERURI` ile verilir (boş varsayılan yok; boş issuer her token'ı reddeder). mTLS istemci sertifikası `mtls` profilinde (`application-mtls.yml`, bundle `env-client`).
-- **Testler:** Testcontainers Oracle XE (`CentralDatabase`: uygulama `broker_admin_app` ile, temizlik şema sahibiyle; history trigger'ları temizlik sırasında kapatılır), `local` profili ve bellek içi `FakeEnvironments` (üç ortamın Admin API'si; promotion ID idempotency'si, eski talebin reddi, proje/profil yokluğu, sessiz kalma). SSO testi gerçek imzalı JWT ile; ortam istemcisinin mTLS'i istemci sertifikası isteyen bir `HttpsServer`'a karşı.
+- **Şema:** `db/migration/yapi_admin/V1__central_schema.sql`, tasarımdaki modelin Oracle 19c karşılığı (yukarıda "Sıradaki iş" 1'deki kararlar: `route_permission`, tablo başına PL/SQL trigger'lar, `CASE`'li açık talep index'leri, `change_note`; kullanıcı yoksa GRANT atlanır). `V2__environments.sql` ortamları `dev/preprod/prod_admin_api_url` placeholder'larıyla `MERGE` ile seed eder. Uygulama `yapi_admin_app` ile `YAPI_ADMIN_DB_SCHEMA` (varsayılan `YAPI_ADMIN`) üzerinden şemasız çalışır.
+- **Ayar:** Oturum ortamı `YAPI_ADMIN_SESSION_ENVIRONMENT` (varsayılan PROD); Koordinatör adresleri `YAPI_KOORDINATOR_<ENV>_URL`. mTLS istemci sertifikası `mtls` profilinde (`application-mtls.yml`, bundle `env-client`).
+- **Testler:** Testcontainers Oracle XE (`CentralDatabase`: uygulama `yapi_admin_app` ile, temizlik şema sahibiyle; history trigger'ları temizlik sırasında kapatılır), `local` profili ve bellek içi `FakeEnvironments` (üç ortamın Admin API'si; promotion ID idempotency'si, eski talebin reddi, proje/profil yokluğu, sessiz kalma). `SessionLoginTest` oturumla giriş (`!local`); ortam istemcisinin mTLS'i istemci sertifikası isteyen bir `HttpsServer`'a karşı.
 
-### broker-login (yeşil)
+### yapi-login (yeşil)
 
-Paket `com.acme.broker.login`; çalıştırılabilir jar `-exec` ekiyle. Ayrıntılar `broker-login/README.md`'de.
+Paket `com.acme.yapi.login`; çalıştırılabilir jar `-exec` ekiyle. Ayrıntılar `yapi-login/README.md`'de.
 
 | Paket | İçerik |
 | --- | --- |
-| `web` | `LoginController` (`/login`, `/logout`, `/internal/v1/sessions/{uid}/logout`), `LegacyBodies` (eski gövdeler birebir), `UserContextFilter` |
-| `session` | `LoginService` (LDAP → Koordinatör → kayıt), `SessionStore` (core'daki `SessionRecordCodec` ile), `ApplicationSync` (5 dk'da bir `broker:applications`) |
-| `ldap` | `BindLdapAuthenticator` (Spring LDAP doğrudan bind), `StaticLdapAuthenticator` (yalnızca `local`) |
-| `koordinator` | `KoordinatorClient`: kullanıcı yetkileri ve proje kodları (varsayılan uçlar ayardan) |
+| `web` | `LoginController` (`/login`, `/logout`, `/internal/v1/sessions/{uid}/logout`), `LegacyBodies` (eski gövdeler birebir), `UserContextFilter` (imza; imzadaki kullanıcı) |
+| `settings` | `UserSettingsController`: `GET`/`PUT /users/me/settings/{name}` (`user:layout:{uid}`, `user:quick_link:{uid}`) |
+| `session` | `LoginService` (LDAP → Koordinatör → kayıt), `SessionStore` (core'daki `SessionRecordCodec` ile), `ApplicationSync` (5 dk'da bir `yapi:applications`) |
+| `ldap` | `BindLdapAuthenticator` (Spring LDAP doğrudan bind; PREPROD, PROD), `MagicKeyAuthenticator` (yalnızca `dev`), `StaticLdapAuthenticator` (yalnızca `local`) |
+| `koordinator` | `KoordinatorClient`: kullanıcının aktif yetkileri (`aktif-yetkiler/{uid}`) ve application listesi (`projeler-ve-yetkileri`, `is_yapi`) |
 
-- **Testler:** `LoginApiTest` (UnboundID gömülü LDAP, Testcontainers Redis, sahte Koordinatör; gövdelerin anahtar sırası ve tipleri, kayıt biçimi ve süresi, şifrenin loglarda olmaması, logout matrisi, Koordinatör çıkışı, imza, application senkronu), `LoginUnitTest` (yazılamayan kayıt), `LoginConfigurationTest` (static mod yalnızca local), `LocalProfileTest` (`local` profili DEV'in ortak anahtarlarına yazmaz), `UserContextSecretTest` (imza anahtarı `local` dışında zorunlu), `BindLdapAuthenticatorTest` (boşluklu şifre dizine gitmez), `HttpKoordinatorClientTest` (yetki cevabının biçimi). Redis container'ı modülde tek (`support/TestRedis`); her test sınıfı ayrı Redis veritabanı kullanır. Uçtan uca senaryo broker-runtime'da.
+- **Testler:** `LoginApiTest` (UnboundID gömülü LDAP, Testcontainers Redis, sahte Koordinatör; gövdelerin anahtar sırası ve tipleri, kayıt biçimi ve süresi, şifrenin loglarda olmaması, logout matrisi, Koordinatör çıkışı, imza, application senkronu), `LoginUnitTest` (yazılamayan kayıt), `LoginConfigurationTest` (static mod yalnızca local), `LocalProfileTest` (`local` profili DEV'in ortak anahtarlarına yazmaz), `UserContextSecretTest` (imza anahtarı `local` dışında zorunlu), `BindLdapAuthenticatorTest` (boşluklu şifre dizine gitmez), `HttpKoordinatorClientTest` (yetki cevabının biçimi). Redis container'ı modülde tek (`support/TestRedis`); her test sınıfı ayrı Redis veritabanı kullanır. Uçtan uca senaryo yapi-runtime'da.
 
-### broker-log-sink (yeşil)
+### yapi-log-sink (yeşil)
 
-Paket `com.acme.broker.sink`. İki `@KafkaListener` (toplu), her biri kendi consumer group'unda; `broker.sink.elastic.enabled` ve `broker.sink.clickhouse.enabled` ile ayrı ayrı açılır (aynı imaj iki deployment olarak da çalışabilir).
+Paket `com.acme.yapi.sink`. İki `@KafkaListener` (toplu), her biri kendi consumer group'unda; `yapi.sink.elastic.enabled` ve `yapi.sink.clickhouse.enabled` ile ayrı ayrı açılır (aynı imaj iki deployment olarak da çalışabilir).
 
-- **Elastic (`broker-logs-elastic`):** `LegacyDocuments` → tek `_bulk` NDJSON; indeks ayı request ID'nin zamanından, varsayılan `Europe/Istanbul`; ana doküman `update` + `doc_as_upsert` + `retry_on_conflict`, parametre dokümanları `index`. Kimlik `ApiKey` ya da basic. Öğe hatası 429/5xx → batch yeniden denenir; diğer 4xx → o olay DLQ'ya.
-- **ClickHouse (`broker-logs-clickhouse`):** `INSERT INTO broker_logs.broker_log FORMAT JSONEachRow`, `date_time_input_format=best_effort`; satırda `null` yok (varsayılanlar), `token`/`perm_list`/`client_response`/`query_id` yazılmaz. 400 → satır satır tekrar, kabul edilmeyen satır DLQ'ya; 401/403/404/5xx/bağlantı → batch yeniden denenir.
-- **DLQ:** `broker.logs.v1.dlq`, orijinal key/değer ve `broker.dlq.sink`, `broker.dlq.reason`, `broker.dlq.origin` header'ları; DLQ onayı gelmeden offset commit edilmez.
-- **Offset:** `ack-mode: batch`; hata durumunda `DefaultErrorHandler` sınırsız sabit aralıkla (`broker.sink.retry-interval`) aynı batch'i dener, kayıt atlanmaz. Batch: `max-poll-records` 10.000, `fetch-max-wait` 1 sn.
-- **Kurulum dosyaları:** `clickhouse/broker_logs.sql` (tasarımdaki DDL) ve `elastic/broker-fields.component-template.json` (mevcut `requests_*` şablonunun `composed_of` listesine eklenir). Sink tablo ya da şablon oluşturmaz.
-- **Testler:** EmbeddedKafka; Elastic ve ClickHouse HTTP sahteleri (`update`/`doc_as_upsert` birleştirmesini uygular). REQUEST/RESPONSE sırası, bir hedef düşükken diğerinin ilerlemesi ve düşük hedefin offset'inin commit edilmemesi, bozuk mesajın DLQ'ya gidip partition'ı durdurmaması, hedefin reddettiği olayların DLQ'ya gitmesi denenir. `RealTargetsTest` gerçek ClickHouse 24.8 ve Elasticsearch 8.15 ile: tasarımdaki DDL çalışır ve satırları kabul eder (metrik view'ı, `FINAL` tekilleştirmesi), bileşen şablonu `requests_*` şablonuna eklenince `broker.*` tipleri doğru, eşleme çakışması 400 ile DLQ'ya gider.
-- **Bilinen sınır:** Frontend gövdesinde üst seviyede `broker` adlı bir alan varsa eski ana dokümanda `broker` nesnesi onu ezer (tasarım böyle bir alan olmadığını varsayıyor). Elastic'teki son ayların alan adlarıyla teyit edilmeli.
+- **Elastic (`yapi-logs-elastic`):** `LegacyDocuments` → tek `_bulk` NDJSON; indeks ayı request ID'nin zamanından, varsayılan `Europe/Istanbul`; ana doküman `update` + `doc_as_upsert` + `retry_on_conflict`, parametre dokümanları `index`. Kimlik `ApiKey` ya da basic. Öğe hatası 429/5xx → batch yeniden denenir; diğer 4xx → o olay DLQ'ya.
+- **ClickHouse (`yapi-logs-clickhouse`):** `INSERT INTO yapi_logs.yapi_log FORMAT JSONEachRow`, `date_time_input_format=best_effort`; satırda `null` yok (varsayılanlar), `token`/`perm_list`/`client_response`/`query_id` yazılmaz. 400 → satır satır tekrar, kabul edilmeyen satır DLQ'ya; 401/403/404/5xx/bağlantı → batch yeniden denenir.
+- **DLQ:** `yapi.logs.v1.dlq`, orijinal key/değer ve `yapi.dlq.sink`, `yapi.dlq.reason`, `yapi.dlq.origin` header'ları; DLQ onayı gelmeden offset commit edilmez.
+- **Offset:** `ack-mode: batch`; hata durumunda `DefaultErrorHandler` sınırsız sabit aralıkla (`yapi.sink.retry-interval`) aynı batch'i dener, kayıt atlanmaz. Batch: `max-poll-records` 10.000, `fetch-max-wait` 1 sn.
+- **Alarm logu:** Alarm olan RESPONSE olayı ayrıca `yapi.sink.elastic.alarm-index` indeksine (`alarm`) `index` ile yazılır, `_id` = `query_id` (eski `alarm_log`).
+- **Kurulum dosyaları:** `clickhouse/yapi_logs.sql` (tasarımdaki DDL) ve `elastic/yapi-fields.component-template.json` (mevcut `requests_*` şablonunun `composed_of` listesine eklenir). Sink tablo ya da şablon oluşturmaz.
+- **Testler:** EmbeddedKafka; Elastic ve ClickHouse HTTP sahteleri (`update`/`doc_as_upsert` birleştirmesini uygular). REQUEST/RESPONSE sırası, bir hedef düşükken diğerinin ilerlemesi ve düşük hedefin offset'inin commit edilmemesi, bozuk mesajın DLQ'ya gidip partition'ı durdurmaması, hedefin reddettiği olayların DLQ'ya gitmesi denenir. `RealTargetsTest` gerçek ClickHouse 24.8 ve Elasticsearch 8.15 ile: tasarımdaki DDL çalışır ve satırları kabul eder (metrik view'ı, `FINAL` tekilleştirmesi), bileşen şablonu `requests_*` şablonuna eklenince `yapi.*` tipleri doğru, eşleme çakışması 400 ile DLQ'ya gider.
+- **Bilinen sınır:** Frontend gövdesinde üst seviyede `yapi` adlı bir alan varsa eski ana dokümanda `yapi` nesnesi onu ezer (tasarım böyle bir alan olmadığını varsayıyor). Elastic'teki son ayların alan adlarıyla teyit edilmeli.
 
 ## Spring Boot 4 notları
 
@@ -440,7 +500,7 @@ Derlemede doğrulandı (Boot 4.1.1, Spring Framework 7.0, Jackson 3.1, Kafka 4.2
 - springdoc `3.0.0` Boot 4.1.1 ile çalışıyor (`/v3/api-docs`, `/swagger-ui.html`).
 - `spring-boot-maven-plugin` `repackage` execution'ının id'si `repackage` olmalı; yoksa parent'ın execution'ı da çalışıp düz jar'ı çalıştırılabilir jar'la ezer. Modüllerde çalıştırılabilir jar `-exec` ekiyle.
 - JKS SSL bundle'ları açılışta yüklenir; dosyası olmayan bundle `server.ssl.enabled=false` olsa da uygulamayı düşürür. Bundle tanımları bu yüzden `mtls` profilinde.
-- Flyway auto-config, test sınıf yolunda Flyway olan her modülde çalışır; broker-runtime'da `spring.flyway.enabled=false`.
+- Flyway auto-config, test sınıf yolunda Flyway olan her modülde çalışır; yapi-runtime'da `spring.flyway.enabled=false`.
 - `jwt.issuer-uri` boş string verilirse Boot `iss` doğrulayıcısını boş değerle kurar.
 - Jackson 3'te `MissingNode.booleanValue()` (ve diğer `xxxValue()`) istisna atar; olmayabilecek alan `has(...)` ile kontrol edilir.
 - Boot 4'te sağlık göstergeleri `org.springframework.boot.health.contributor` paketinde (`spring-boot-health`).
@@ -448,7 +508,7 @@ Derlemede doğrulandı (Boot 4.1.1, Spring Framework 7.0, Jackson 3.1, Kafka 4.2
 
 ## Sonraki turlar
 
-1. Dağıtımı DevOps yapar ("Verilmiş kararlar"); imaj ve manifest bu repoda yazılmaz. Gerekirse onlar için bir devir notu: uygulamaların yerleri, portlar, ayarlar ve gizli anahtarlar, DB kullanıcıları; env-admin ve admin `mtls` profiliyle, broker'da kalıcı spool volume'u; Kafka topic'i ve DLQ tasarımdaki ayarlarla; ClickHouse DDL'i ve Elastic bileşen şablonu `broker-log-sink/src/main/resources` altında.
+1. Dağıtımı DevOps yapar ("Verilmiş kararlar"); imaj ve manifest bu repoda yazılmaz. Gerekirse onlar için bir devir notu: uygulamaların yerleri, portlar, ayarlar ve gizli anahtarlar, DB kullanıcıları; env-admin ve admin `mtls` profiliyle, broker'da kalıcı spool volume'u; Kafka topic'i ve DLQ tasarımdaki ayarlarla; ClickHouse DDL'i ve Elastic bileşen şablonu `yapi-log-sink/src/main/resources` altında. Admin API'nin önündeki proxy de gelen isteklere `X-Clientip`'i broker'dakiyle aynı biçimde koymalı (admin girişi oturumu broker'ın kuralıyla doğrular).
 2. Geçiş planı adım 1 (tasarım "Geçiş planı"): DEV'de eski broker ile sink'in Elastic dokümanlarını alan alan karşılaştırma. Eski sabit subtask'leri ve projeye özel response sınıflarını kullanıcı admin ekranından kendisi tanımlar; aktarım script'i yazılmaz (2026-10-21).
 3. Frontend: sözleşme `docs/frontend-guide.md`'de; canlı sürüm (artifact) bu dosyadan eşitlenir.
 
@@ -456,15 +516,24 @@ Derlemede doğrulandı (Boot 4.1.1, Spring Framework 7.0, Jackson 3.1, Kafka 4.2
 
 Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya yazılır; canlı doküman buradan güncellenir.
 
-- 2026-10-16 turunun maddeleri canlı dokümana işlendi (rev 180). 2026-10-26 turunun kararlarını (ad, ortamlar, Koordinatör, magic key, admin girişi, kullanıcı ayarları, alarm) Claude tur bitince tasarım dokümanına işler; buraya yalnızca uygulanırken netleşenler yazılır.
+- 2026-10-16 turunun maddeleri canlı dokümana işlendi (rev 180).
+- **Koordinatör (3):** Admin'in proje kataloğu tek ortamın Koordinatör'ünden (`yapi.admin.catalog.environment`, varsayılan PROD); projenin yetkileri ve yetkinin varlığı her ortamın kendi Koordinatör'ünden, ortam başına 5 dk önbellek. Yetkinin ortamda "var" sayılması: o ortamdaki herhangi bir Yapi projesinin `yetkiList`'inde olması. `UNLINKED` projenin yetki listesi boş. Evet/hayır alanları `true`/`1`/`"true"`/`"1"`. Yetki listesinde `description` yok (`null`).
+- **Kullanıcı ayarları (6):** `PUT` yazdığı JSON'u döner; bilinmeyen ad 404, imzada kullanıcı yoksa 403, gövde JSON değilse 400; yerelde `local:` önekli anahtarlar.
+- **Alarm (7):** "Sıradaki iş" 7'deki "Yapıldı" notunun tamamı: değerlerin kuralı (`null` yok, zarf yalnızca üst seviyede atlanır, maskeli alanlar her derinlikte), alarm yokken olaya bir şey yazılmaması, login/logout ve test çağrısında kontrolün olmaması, alarm servisinin tek denemeyle ve yetki aranmadan çağrılması, `ALARM_ROUTE_ACTIVE` ön kontrolü ve kuralları, ortam ayarında aktifliğin aranmaması, alarm dokümanında `params`'ın maskeli tam gövde olması, indeks adının ayarlanabilmesi, alarm servisinin frontend'e 404 olması. Runtime şemasında `runtime_project.alarm_maintask/alarm_subtask`, merkezde `project_environment.alarm_maintask/alarm_subtask`.
+- **Admin girişi (5):** env-admin'de yeni uç `POST /admin/v1/sessions/verify`; admin geçerli ve geçersiz cevapları 30 sn tutar (başarısız çağrıyı tutmaz); `username` ve `displayName` uid; dört header'dan biri eksikse 401; oturum doğrulanamazsa 502 `ENV_UNREACHABLE`.
+- **Magic key (4):** Başarısız denemeler de loglanır; anahtar boşsa servis başlamaz; `dev` profilinin varsayılan modu `magic-key`.
+- **Ortamlar (2):** Ön kontrol mesajları ortam kodunu "X ortamında ..." diye yazar, koda ek yapıştırılmaz ("v4 PREPROD ortamında aktif").
+- **Ad (1):** Listede olmayan, kuralla değişen adlar: olay alanı ve ClickHouse kolonu `broker_instance` → `yapi_instance`; ClickHouse `yapi_logs.yapi_metrics_1m` ve view'ı; consumer group'lar `yapi-logs-elastic`, `yapi-logs-clickhouse`; DLQ header'ları `yapi.dlq.*`; Elastic bileşen şablonu `yapi-fields`; test çağrısı header'ı `X-Yapi-Test-Secret`; audit logger'ı `yapi.audit`; yerel override dosyası `yapi-local.json`. 2026-10-26 turunun kararlarını (ad, ortamlar, Koordinatör, magic key, admin girişi, kullanıcı ayarları, alarm) Claude tur bitince tasarım dokümanına işler; buraya yalnızca uygulanırken netleşenler yazılır.
 
 ## Açık noktalar
 
 - **Oturum kaydındaki `permissions`:** Eski login'in Koordinatör cevabını nasıl çevirdiği görülmedi; `yetkiIsim` listesi varsayıldı. Pilot projede eski ve yeni broker'ın birbirinin oturumunu okuduğu teyit edilecek.
 - **`refresh_permissions`:** Koordinatör ekibi giriş servisinin iç ucuna geçecek (kullanıcı iletecek). Geçişte ortak Redis'te eski yol da aynı kaydı siler.
-- **`alarm_list`:** Alarm yoksa eski kod servise giden gövdeye `alarm_list` ekliyordu. Alarm şu an kullanılmadığı için eklenmiyor; kullanıcı ileride eklenebileceğini not ettirdi.- **`X-Clientip`:** Kullanıcı bu header'ı frontend'in değil, önündeki proxy'nin koyduğunu düşünüyor; teyit edilmedi. İstemci koyuyorsa IP bağlaması güvenlik sağlamaz; o durumda eski broker kapandıktan sonra IP bağlantıdan ya da güvenilir proxy'nin header'ından alınmalı.
-- **Hata yanıtlarında HTTP 200 (ileride):** Mevcut frontend'ler için korunuyor. Frontend'ler güncellenince `broker.compat.legacy-responses: false` ile ortak formata ve gerçek HTTP status'lara geçilebilir; kullanıcı açık kalmasını istedi.
+- **`alarm_list`:** Alarm yoksa eski kod servise giden gövdeye `alarm_list` ekliyordu. Alarm şu an kullanılmadığı için eklenmiyor; kullanıcı ileride eklenebileceğini not ettirdi.
+- **Alarm route'unun kapatılması:** Bir alarm servisi route'u `DISABLE` edilirse ya da başka bir versiyona geri alınırsa onu kullanan subtask'ler 503 döner; `DISABLE` ön kontrolü bu bağımlılığa bakmıyor. Gerekirse `DISABLE`'a "bu route'u kullanan aktif subtask yok" kontrolü eklenir.
+- **`X-Clientip`:** Kullanıcı bu header'ı frontend'in değil, önündeki proxy'nin koyduğunu düşünüyor; teyit edilmedi. İstemci koyuyorsa IP bağlaması güvenlik sağlamaz; o durumda eski broker kapandıktan sonra IP bağlantıdan ya da güvenilir proxy'nin header'ından alınmalı.
+- **Hata yanıtlarında HTTP 200 (ileride):** Mevcut frontend'ler için korunuyor. Frontend'ler güncellenince `yapi.compat.legacy-responses: false` ile ortak formata ve gerçek HTTP status'lara geçilebilir; kullanıcı açık kalmasını istedi.
 - Kullanıcı başına tek oturum ve 1 günlük sabit süre (eski davranış): yeni login eskisini ezer, kullanılsa da oturum 1 günde biter.
 - PROD'da base URL değişikliğinin onay akışına alınması; PROD'da `DISABLE`/`ROLLBACK` için acil durum politikası (şimdilik onay istiyor).
-- Frontend gövdesinde üst seviyede `broker` adlı alan gönderen istek var mı (eski dokümanda ezilir).
+- Frontend gövdesinde üst seviyede `yapi` adlı alan gönderen istek var mı (eski dokümanda ezilir).
 - Broker span'ının `maintask/subtask` diye adlandırılması için OTel agent API'si.

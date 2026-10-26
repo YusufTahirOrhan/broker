@@ -1,0 +1,116 @@
+{
+  "profiles": [
+    {
+      "name": "log-project",
+      "description": "LogProjectResponse karşılığı",
+      "definition": {
+        "success": {
+          "httpStatus": 200,
+          "body": { "BACKEND_STATUS": "${backend.status}", "status": 200, "data": "${backend.body}" }
+        },
+        "error": { "httpStatus": 400, "body": { "status": 400, "reason": "LogProject Hata!" } }
+      }
+    }
+  ],
+  "projects": [
+    {
+      "externalProjectId": "P-100",
+      "maintask": "order-service",
+      "permissionPrefix": "ORDER",
+      "ownerTeam": "siparis",
+      "description": "Sipariş servisi",
+      "baseUrl": "http://localhost:9001",
+      "routes": [
+        {
+          "subtask": "add_order_note", "httpMethod": "POST", "pathTemplate": "/orders/{id}/notes",
+          "permissions": ["ORDER_WRITE"],
+          "definition": {
+            "request": {
+              "fields": [
+                { "name": "siparisNo", "type": "integer", "required": true },
+                { "name": "notMetni", "type": "string", "required": true },
+                { "name": "bildir", "type": "boolean", "default": false }
+              ],
+              "pathVariables": { "id": "${request.siparisNo}" },
+              "queryParams": { "notify": "${request.bildir}" },
+              "headers": { "X-Channel": "WEB", "Accept-Language": "${header.Accept-Language}" },
+              "body": {
+                "mode": "TEMPLATE", "contentType": "application/json",
+                "template": { "text": "${request.notMetni}", "authorId": "${user.id}", "source": "WEB" }
+              }
+            },
+            "response": { "type": "JSON" },
+            "timeoutMs": 5000,
+            "logging": { "logRequestBody": true, "logResponseBody": false, "maskFields": ["cardNo", "tckn"] }
+          }
+        },
+        {
+          "subtask": "get_order", "httpMethod": "GET", "pathTemplate": "/orders/{id}",
+          "permissions": ["ORDER_READ"],
+          "definition": {
+            "request": {
+              "fields": [{ "name": "siparisNo", "type": "integer", "required": true }],
+              "pathVariables": { "id": "${request.siparisNo}" }
+            },
+            "retry": { "maxAttempts": 2 }
+          }
+        }
+      ]
+    },
+    {
+      "externalProjectId": "P-200",
+      "maintask": "LogProject",
+      "permissionPrefix": "LOGPROJECT",
+      "ownerTeam": "log",
+      "defaultResponseProfile": "log-project",
+      "baseUrl": "http://localhost:9002",
+      "routes": [
+        {
+          "subtask": "get_id", "httpMethod": "GET", "pathTemplate": "/logs/{id}",
+          "permissions": ["LOGPROJECT_TEMEL"], "responseProfile": "log-project",
+          "definition": {
+            "request": {
+              "fields": [{ "name": "id", "type": "integer", "required": true }],
+              "pathVariables": { "id": "${request.id}" }
+            },
+            "logging": { "logResponseBody": true, "maskFields": ["tckn"] }
+          }
+        }
+      ]
+    },
+    {
+      "externalProjectId": "P-900",
+      "maintask": "giris",
+      "permissionPrefix": "GIRIS",
+      "ownerTeam": "platform",
+      "description": "Giriş servisi (yapi-login)",
+      "baseUrl": "http://localhost:8082",
+      "routes": [
+        {
+          "subtask": "login", "httpMethod": "POST", "pathTemplate": "/login", "anonymous": true,
+          "definition": {
+            "request": {
+              "fields": [{ "name": "password", "type": "string", "required": true }],
+              "headers": { "X-Clientip": "${header.X-Clientip}", "X-User-Agent": "${header.X-User-Agent}" },
+              "body": {
+                "mode": "TEMPLATE", "contentType": "application/json",
+                "template": { "uid": "${request.uid}", "password": "${request.password}" }
+              }
+            }
+          }
+        },
+        {
+          "subtask": "logout", "httpMethod": "POST", "pathTemplate": "/logout", "anonymous": true,
+          "definition": {
+            "request": {
+              "headers": { "X-Clientip": "${header.X-Clientip}", "X-User-Agent": "${header.X-User-Agent}" },
+              "body": {
+                "mode": "TEMPLATE", "contentType": "application/json", "template": { "uid": "${request.uid}" }
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

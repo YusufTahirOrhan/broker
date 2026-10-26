@@ -1,14 +1,14 @@
 # Bir uygulamayı local profiliyle, DEV'e bağlı çalıştırır (docs/local-run.md).
-#   .\scripts\local-run.ps1 admin|broker|env-admin|login [-Build]
+#   .\scripts\local-run.ps1 admin|runtime|env-admin|login [-Build]
 # local.env varsa ortam değişkenleri ondan okunur. Jar yoksa ya da -Build verilmişse önce derlenir (testsiz).
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('admin', 'broker', 'env-admin', 'login')][string]$App,
+    [Parameter(Mandatory = $true)][ValidateSet('admin', 'runtime', 'env-admin', 'login')][string]$App,
     [switch]$Build
 )
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 
-$modules = @{ 'admin' = 'broker-admin'; 'broker' = 'broker-runtime'; 'env-admin' = 'broker-env-admin'; 'login' = 'broker-login' }
+$modules = @{ 'admin' = 'yapi-admin'; 'runtime' = 'yapi-runtime'; 'env-admin' = 'yapi-env-admin'; 'login' = 'yapi-login' }
 $module = $modules[$App]
 
 if (Test-Path 'local.env') {

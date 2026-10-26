@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # Bir uygulamayı local profiliyle, DEV'e bağlı çalıştırır (docs/local-run.md).
-#   scripts/local-run.sh admin|broker|env-admin|login [--build]
+#   scripts/local-run.sh admin|runtime|env-admin|login [--build]
 # local.env varsa ortam değişkenleri ondan okunur. Jar yoksa ya da --build verilmişse önce derlenir (testsiz).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 case "${1:-}" in
-  admin) module=broker-admin ;;
-  broker) module=broker-runtime ;;
-  env-admin) module=broker-env-admin ;;
-  login) module=broker-login ;;
-  *) echo "Kullanım: scripts/local-run.sh admin|broker|env-admin|login [--build]" >&2; exit 2 ;;
+  admin) module=yapi-admin ;;
+  runtime) module=yapi-runtime ;;
+  env-admin) module=yapi-env-admin ;;
+  login) module=yapi-login ;;
+  *) echo "Kullanım: scripts/local-run.sh admin|runtime|env-admin|login [--build]" >&2; exit 2 ;;
 esac
 
 if [ -f local.env ]; then

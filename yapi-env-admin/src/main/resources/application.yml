@@ -1,0 +1,71 @@
+spring:
+  application:
+    name: yapi-env-admin
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    # Oracle 19c; şema = şema sahibi kullanıcı (YAPI_RUNTIME), DBA açar
+    url: ${YAPI_RUNTIME_DB_URL:jdbc:oracle:thin:@//localhost:1521/XEPDB1}
+    username: ${YAPI_RUNTIME_DB_USER:yapi_runtime_writer}
+    password: ${YAPI_RUNTIME_DB_PASSWORD:}
+    hikari:
+      # tablolar şemasız yazılır; bağlantının CURRENT_SCHEMA'sı şema sahibi olur
+      schema: ${YAPI_RUNTIME_DB_SCHEMA:YAPI_RUNTIME}
+  flyway:
+    # DDL şema sahibiyle çalışır; uygulama yapi_runtime_writer ile yazar. Şemayı Flyway açmaz.
+    user: ${YAPI_RUNTIME_DB_OWNER_USER:${spring.datasource.username}}
+    password: ${YAPI_RUNTIME_DB_OWNER_PASSWORD:${spring.datasource.password}}
+    default-schema: ${YAPI_RUNTIME_DB_SCHEMA:YAPI_RUNTIME}
+    create-schemas: false
+    locations: classpath:db/migration/yapi_runtime
+  data:
+    redis:
+      host: ${YAPI_REDIS_HOST:localhost}
+      port: ${YAPI_REDIS_PORT:6379}
+      password: ${YAPI_REDIS_PASSWORD:}
+
+server:
+  port: ${YAPI_ENV_ADMIN_PORT:8443}
+  # mTLS: bundle "mtls" profilinde tanımlıdır (application-mtls.yml). Profil açılmazsa bundle bulunamaz ve
+  # uygulama başlamaz; TLS'siz bir Admin API yanlışlıkla ayağa kalkmaz.
+  ssl:
+    enabled: ${YAPI_ENV_ADMIN_SSL_ENABLED:true}
+    bundle: env-admin
+    client-auth: need
+
+management:
+  server:
+    # health ve metrikler ayrı portta, mTLS'siz (kubelet ve izleme istemci sertifikası taşımaz)
+    port: ${YAPI_ENV_ADMIN_MANAGEMENT_PORT:9090}
+    ssl:
+      enabled: false
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+yapi:
+  env-admin:
+    environment: ${YAPI_ENVIRONMENT:DEV}
+    # İzin verilen istemci sertifikası konuları (RFC 2253). DN virgül içerdiği için liste indeksle verilir:
+    # YAPI_ENVADMIN_ALLOWEDCLIENTSUBJECTS_0="CN=yapi-admin,O=Acme". Boş liste trust store'un kabul ettiği
+    # her sertifikayı kabul eder.
+    allowed-client-subjects: []
+    upstream:
+      connect-timeout: 2s
+      request-timeout: 10s
+    session:
+      # Merkezi admin'in giriş kontrolü (POST /admin/v1/sessions/verify): giriş servisinin kaydı, broker'ınkiyle aynı
+      key-pattern: "user:session:{uid}"
+    test:
+      # yalnızca test çağrısına açık ortamlarda (DEV, PREPROD); PROD'da kapalı kalır
+      enabled: ${YAPI_ENV_ADMIN_TEST_ENABLED:false}
+      yapi-url: ${YAPI_INTERNAL_URL:}
+      secret: ${YAPI_TEST_SECRET:}
+      timeout: 65s
+
+logging:
+  structured:
+    format:
+      console: ${YAPI_LOG_FORMAT:}

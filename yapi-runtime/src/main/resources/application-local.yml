@@ -1,0 +1,35 @@
+# Geliştiricinin makinesi, DEV'e bağlı (docs/local-run.md): route'lar DEV runtime DB'sinden salt okunur kullanıcıyla,
+# üstüne yapi-local.json; oturumlar ve route değişikliği sinyali DEV Redis'inden. DEV'e hiçbir şey yazmaz.
+spring:
+  datasource:
+    url: ${YAPI_DEV_RUNTIME_DB_URL:jdbc:oracle:thin:@//localhost:1521/XEPDB1}
+    username: ${YAPI_DEV_RUNTIME_DB_USER:yapi_runtime_reader}
+    password: ${YAPI_DEV_RUNTIME_DB_PASSWORD:}
+    hikari:
+      schema: ${YAPI_DEV_RUNTIME_DB_SCHEMA:YAPI_RUNTIME}
+
+server:
+  port: ${YAPI_PORT:8083}               # admin yerelde 8080'de
+
+yapi:
+  local-overrides: file:./yapi-local.json
+  log-sink: console                        # Kafka'ya yazmaz, DEV loglarını kirletmez
+  cache:
+    verify-interval: 2s                    # override dosyası değişince restart gerekmesin
+    # yerel instance DEV'in cache durumu ekranında (yapi:loaded:*) görünmesin
+    loaded-key-prefix: "yapi:loaded-local:"
+  session:
+    # Oturumlar DEV'deki giriş servisinin yazdığı kayıtlar. Giriş servisi yerelde çalışıyorsa (local:user:session:{uid}
+    # yazar) YAPI_SESSION_KEY_PREFIX=local: ile onunkiler okunur.
+    key-pattern: "${YAPI_SESSION_KEY_PREFIX:}user:session:{uid}"
+  applications:
+    # DEV'de giriş servisi listeyi yazıyorsa YAPI_APPLICATIONS_MODE=redis ile DEV'in listesi kullanılır
+    mode: ${YAPI_APPLICATIONS_MODE:static}
+    list: ${YAPI_LOCAL_APPLICATIONS:web}
+  spool:
+    directory: ./var/log-spool
+  local:
+    skip-permission-check-for-overrides: false
+  test:
+    enabled: true
+    secret: local-test-secret

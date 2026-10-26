@@ -1,0 +1,97 @@
+spring:
+  application:
+    name: yapi-admin
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    # Oracle 19c; şema = şema sahibi kullanıcı (YAPI_ADMIN), DBA açar
+    url: ${YAPI_ADMIN_DB_URL:jdbc:oracle:thin:@//localhost:1521/XEPDB1}
+    username: ${YAPI_ADMIN_DB_USER:yapi_admin_app}
+    password: ${YAPI_ADMIN_DB_PASSWORD:}
+    hikari:
+      # tablolar şemasız yazılır; bağlantının CURRENT_SCHEMA'sı şema sahibi olur
+      schema: ${YAPI_ADMIN_DB_SCHEMA:YAPI_ADMIN}
+  flyway:
+    # DDL şema sahibiyle çalışır; uygulama yapi_admin_app ile yazar. Şemayı Flyway açmaz.
+    user: ${YAPI_ADMIN_DB_OWNER_USER:${spring.datasource.username}}
+    password: ${YAPI_ADMIN_DB_OWNER_PASSWORD:${spring.datasource.password}}
+    default-schema: ${YAPI_ADMIN_DB_SCHEMA:YAPI_ADMIN}
+    create-schemas: false
+    locations: classpath:db/migration/yapi_admin
+    placeholders:
+      dev_admin_api_url: ${YAPI_DEV_ADMIN_API_URL:https://yapi-env-admin.dev.internal:8443}
+      preprod_admin_api_url: ${YAPI_PREPROD_ADMIN_API_URL:https://yapi-env-admin.preprod.internal:8443}
+      prod_admin_api_url: ${YAPI_PROD_ADMIN_API_URL:https://yapi-env-admin.prod.internal:8443}
+
+server:
+  port: ${YAPI_ADMIN_PORT:8080}
+
+# OpenAPI ve Swagger yalnızca local ve dev profillerinde açık (application-local.yml, application-dev.yml)
+springdoc:
+  api-docs:
+    enabled: false
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: false
+    path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+yapi:
+  admin:
+    # Broker'ların yapi.readable-headers listesiyle aynı olmalı
+    readable-headers:
+      - Accept-Language
+      - X-Clientip
+      - X-User-Agent
+    cors:
+      allowed-origins: ${YAPI_ADMIN_CORS_ORIGINS:}
+    # Giriş: şirketin giriş uygulamasının oturumu. Ekran her istekte X-Token, X-Uid, X-Clientip, X-User-Agent gönderir;
+    # oturum bu ortamın env-admin'ine sorulur (POST /admin/v1/sessions/verify), sonuç cache-ttl boyunca tutulur.
+    # local profilinde HTTP Basic.
+    session:
+      environment: ${YAPI_ADMIN_SESSION_ENVIRONMENT:PROD}
+      cache-ttl: 30s
+      # admin rolü ← oturumdaki Koordinatör yetkileri (biri yeterli)
+      roles:
+        VIEWER: [YAPI_DEVELOPER, YAPI_ADMIN]
+        ROUTE_EDITOR: [YAPI_DEVELOPER, YAPI_ADMIN]
+        APPROVER: [YAPI_ADMIN]
+    environments:
+      connect-timeout: 3s
+      timeout: 30s
+      lag-warning: 1m
+    catalog:
+      mode: http
+      # Proje kataloğu bu ortamın Koordinatör'ünden (yalnızca is_yapi projeler)
+      environment: ${YAPI_ADMIN_CATALOG_ENVIRONMENT:PROD}
+      sync-cron: "0 7 * * * *"
+    authorization:
+      # http: her ortamın Koordinatör'ü (projenin yetkileri ve yetkinin ortamda varlığı); yetkiler orada açılır
+      mode: http
+    drift:
+      cron: "0 23 2 * * *"
+
+# Yetki projesi: projeler ve yetkiler buradan; giriş servisiyle aynı ayarlar
+# Yetki projesi; her ortamda ayrı çalışır. Proje kataloğu, projelerin yetkileri ve yetkinin ortamda varlığı aynı uçtan.
+koordinator:
+  urls:
+    DEV: ${YAPI_KOORDINATOR_DEV_URL:}
+    PREPROD: ${YAPI_KOORDINATOR_PREPROD_URL:}
+    PROD: ${YAPI_KOORDINATOR_PROD_URL:}
+  # kimlik header'ı şimdilik gerekmiyor; auth-value boşken gönderilmez
+  auth-header: ${YAPI_KOORDINATOR_AUTH_HEADER:Authorization}
+  auth-value: ${YAPI_KOORDINATOR_AUTH_VALUE:}
+  # [{"projeId", "projeAdi", "is_yapi", "yetkiList": [{"yetki", ...}], ...}]
+  projects-path: /api/koordinator/projeler-ve-yetkileri
+  cache-ttl: 5m
+
+logging:
+  structured:
+    format:
+      console: ${YAPI_LOG_FORMAT:}
