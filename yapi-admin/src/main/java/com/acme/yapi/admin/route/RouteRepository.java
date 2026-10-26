@@ -87,6 +87,15 @@ public class RouteRepository {
                 .query(RouteRepository::row).list();
     }
 
+    /** Active subtasks of every project whose current definition is an alarm service. */
+    public List<Row> alarmServices() {
+        return jdbc.sql(SELECT + """
+                         WHERE r.status = 'ACTIVE' AND JSON_EXISTS(r.definition, '$.alarmService')
+                         ORDER BY p.maintask, r.subtask
+                        """)
+                .query(RouteRepository::row).list();
+    }
+
     public Optional<Row> find(long id) {
         return jdbc.sql(SELECT + " WHERE r.id = :id").param("id", id).query(RouteRepository::row).optional();
     }

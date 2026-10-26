@@ -78,6 +78,48 @@ class RoutesAndProfilesTest extends AdminTestBase {
     }
 
     @Test
+    void alarmServicesAreListedAcrossProjects() {
+        project("crm", "CRM", "P-300");
+        long security = project("guvenlik", "GUVENLIK", "P-400");
+        long alarmId = route(security, """
+                {"subtask": "alarm_kontrol", "httpMethod": "POST", "pathTemplate": "/alarm/check", "permissions": [], "foreignPermissions": ["CRM_AGENT"],
+                 "definition": {"alarmService": {"resultPath": "alarms"},
+                                "request": {"body": {"mode": "TEMPLATE", "contentType": "application/json",
+                                                     "template": {"values": "${alarm.values}"}}}}}
+                """);
+        long projectId = project("kredi", "KREDI", "P-100");
+        route(projectId, """
+                {"subtask": "sorgu", "httpMethod": "POST", "pathTemplate": "/sorgu", "permissions": [], "foreignPermissions": ["CRM_AGENT"], "definition": {}}
+                """);
+
+        assertThat(get("viewer", "/projects/" + projectId + "/routes").json().get(0).get("alarmService").booleanValue())
+                .isFalse();
+        assertThat(get("viewer", "/projects/" + security + "/routes").json().get(0).get("alarmService").booleanValue())
+                .isTrue();
+
+        long archived = route(projectId, """
+                {"subtask": "eski_alarm", "httpMethod": "POST", "pathTemplate": "/alarm", "permissions": [], "foreignPermissions": ["CRM_AGENT"],
+                 "definition": {"alarmService": {}}}
+                """);
+        assertStatus(post("editor", "/routes/" + archived + "/archive", null), 200);
+        JsonHttp.Response deployed = post("editor", "/promotions", """
+                {"subjectType": "ROUTE", "subjectId": %d, "version": 1, "targetEnv": "DEV", "action": "DEPLOY"}
+                """.formatted(alarmId));
+        assertStatus(deployed, 201);
+        JsonNode services = get("viewer", "/routes?alarmService=true").json();
+        assertThat(services.size()).isEqualTo(1);
+        assertThat(services.get(0).get("id").longValue()).isEqualTo(alarmId);
+        assertThat(services.get(0).get("maintask").stringValue()).isEqualTo("guvenlik");
+        assertThat(services.get(0).get("alarmService").booleanValue()).isTrue();
+        assertThat(services.get(0).get("deployments").get(0).get("environment").stringValue()).isEqualTo("DEV");
+
+        JsonHttp.Response unfiltered = get("viewer", "/routes");
+        assertStatus(unfiltered, 400);
+        assertThat(unfiltered.json().get("errors").get(0).get("field").stringValue()).isEqualTo("alarmService");
+        assertStatus(get("viewer", "/routes?alarmService=false"), 400);
+    }
+
+    @Test
     void definitionsAreValidatedWithFormPaths() {
         project("crm", "CRM", "P-300");
         long projectId = project("order-service", "ORDER", "P-100");
