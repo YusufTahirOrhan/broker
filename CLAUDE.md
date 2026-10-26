@@ -1,6 +1,6 @@
-# broker-platform
+# yapi-platform
 
-Kurum içi istek broker'ının yeni backend'i: subtask'leri koddan değil versiyonlu tanımlardan çalıştıran broker, ortam Admin API'si, merkezi admin ve log sink'leri. İşe başlamadan önce `HANDOFF.md`'yi oku; durum, kararlar ve sıradaki adımlar orada.
+Yapi, kurum içi istek broker'ının yeni backend'i: subtask'leri koddan değil versiyonlu tanımlardan çalıştıran broker, ortam Admin API'si, merkezi admin ve log sink'leri. İşe başlamadan önce `HANDOFF.md`'yi oku; durum, kararlar ve sıradaki adımlar orada.
 
 ## Belgeler
 
@@ -18,6 +18,6 @@ Kurum içi istek broker'ının yeni backend'i: subtask'leri koddan değil versiy
 - Push'tan önce `mvn -B verify` yeşil olmalı. Yeni modül, yazıldığında kök `pom.xml`'e eklenir.
 - Harf duyarsız karşılaştırma her zaman `Names.key` / `Locale.ROOT` ile; varsayılan locale'li `toLowerCase()` kullanılmaz.
 - Jackson ağaç API'si yalnızca `Json` yardımcıları üzerinden kullanılır.
-- Eski Elastic dokümanlarının alanları ve değerleri değişmez; yeni bilgi yalnızca `broker` nesnesine eklenir.
+- Eski Elastic dokümanlarının alanları ve değerleri değişmez; yeni bilgi yalnızca `yapi` nesnesine eklenir.
 - Kullanıcıya dönen mesajlar Türkçe; kod, isimler ve yorumlar İngilizce.
 - Admin API sözleşmesi değişirse `docs/frontend-guide.md` ve sonundaki "Değişiklik kaydı" aynı commit'te güncellenir; commit mesajına "Frontend rehberi değişti" yazılır.

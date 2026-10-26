@@ -1,0 +1,20 @@
+# Ortamların Admin API'lerine istemci sertifikasıyla (mTLS) bağlanır.
+spring:
+  ssl:
+    bundle:
+      jks:
+        env-client:
+          keystore:
+            location: ${YAPI_ADMIN_CLIENT_KEYSTORE:file:/etc/yapi/admin/client.p12}
+            password: ${YAPI_ADMIN_CLIENT_KEYSTORE_PASSWORD:}
+            type: PKCS12
+          truststore:
+            # ortam Admin API'lerinin sunucu sertifikaları (ya da CA'sı)
+            location: ${YAPI_ADMIN_CLIENT_TRUSTSTORE:file:/etc/yapi/admin/truststore.p12}
+            password: ${YAPI_ADMIN_CLIENT_TRUSTSTORE_PASSWORD:}
+            type: PKCS12
+
+yapi:
+  admin:
+    environments:
+      ssl-bundle: env-client

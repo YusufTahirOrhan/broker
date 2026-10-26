@@ -1,0 +1,15 @@
+# Ortamlarda açılan profil: Admin API yalnızca merkezi admin'in sertifikasını kabul eder.
+spring:
+  ssl:
+    bundle:
+      jks:
+        env-admin:
+          keystore:
+            location: ${YAPI_ENV_ADMIN_KEYSTORE:file:/etc/yapi/env-admin/keystore.p12}
+            password: ${YAPI_ENV_ADMIN_KEYSTORE_PASSWORD:}
+            type: PKCS12
+          truststore:
+            # yalnızca merkezi admin'in sertifikası (ya da CA'sı)
+            location: ${YAPI_ENV_ADMIN_TRUSTSTORE:file:/etc/yapi/env-admin/truststore.p12}
+            password: ${YAPI_ENV_ADMIN_TRUSTSTORE_PASSWORD:}
+            type: PKCS12

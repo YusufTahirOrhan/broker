@@ -1,0 +1,35 @@
+# Yerel geliştirme (docs/local-run.md): SSO yerine HTTP Basic (viewer, editor, approver, lead; şifre = kullanıcı adı),
+# proje ve yetkiler bellekte, ortam Admin API'leri yerelde (yapi-env-admin local profili 8081'de). Merkezi DB olarak
+# DEV Oracle'daki yerel bir şema kullanılır (YAPI_ADMIN_DB_*); boşsa örnek veriyle dolar.
+spring:
+  flyway:
+    placeholders:
+      dev_admin_api_url: http://localhost:8081
+      test_admin_api_url: http://localhost:8081
+      prod_admin_api_url: http://localhost:8081
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+
+yapi:
+  admin:
+    local:
+      # boş merkezi DB'ye örnek projeler, subtask'ler ve profil (local-seed.json); dolu DB'ye dokunmaz
+      seed: ${YAPI_ADMIN_LOCAL_SEED:true}
+    cors:
+      allowed-origins: http://localhost:5173
+    catalog:
+      mode: memory
+      projects:
+        P-100: Sipariş Servisi
+        P-200: Log Projesi
+        P-900: Giriş Servisi
+    authorization:
+      mode: memory
+      permissions:
+        DEV: [ORDER_READ, ORDER_WRITE, LOGPROJECT_TEMEL]
+        TEST: [ORDER_READ, ORDER_WRITE, LOGPROJECT_TEMEL]
+        PROD: [ORDER_READ, ORDER_WRITE, LOGPROJECT_TEMEL]

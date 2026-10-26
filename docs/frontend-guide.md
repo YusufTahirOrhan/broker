@@ -1,4 +1,4 @@
-# Broker Admin — Frontend Rehberi
+# Yapi Admin — Frontend Rehberi
 
 Oct 13, 2026 · @Yusuf
 
@@ -6,7 +6,7 @@ Bu rehber, broker yönetim ekranlarını geliştirecek frontend için ekranları
 
 ## Genel bakış
 
-Broker Admin, DevOps'un subtask'leri, yetkileri ve yanıt profillerini kod yazmadan tanımladığı ve DEV → TEST → PROD sırasıyla taşıdığı yönetim ekranıdır. Ekran yalnızca merkezi admin backend'iyle (`broker-admin`) konuşur; ortamlara, broker'lara ve proje servisine backend bağlanır.
+Yapi Admin, DevOps'un subtask'leri, yetkileri ve yanıt profillerini kod yazmadan tanımladığı ve DEV → TEST → PROD sırasıyla taşıdığı yönetim ekranıdır. Ekran yalnızca merkezi admin backend'iyle (`yapi-admin`) konuşur; ortamlara, broker'lara ve proje servisine backend bağlanır.
 
 - **Ekrandan yapılanlar:** Proje kaydı ve ortam adresleri, proje yetkileri, subtask tanımı (servisin spec'inden, yapıştırılan bir istekten ya da elle), yanıt profilleri, test çağrısı, versiyon geçmişi ve geri alma, taşıma talebi ve onay.
 - **Ekranın dışında kalanlar:** Kullanıcılara yetki atamak yetkilendirme servisinde kalır. Uygulamaların broker trafiği ve logları bu ekrandan geçmez.
@@ -77,7 +77,7 @@ Yeni ve mevcut subtask aynı formu kullanır (`POST /projects/{id}/routes`, `PUT
 - **Test:** Yalnızca test çağrısına açık ortamlarda (DEV, TEST) görünür ve kaydedilmemiş tanımla gerçek istek atar (`POST /projects/{id}/test`). Sonuçta üretilen istek, servisin yanıtı (status, header'lar, body, süre), profil varsa frontend'in alacağı zarflı yanıt ve backend'in yorumu gösterilir.
 - **Yoklama:** "Endpoint var mı?" düğmesi OPTIONS yoklaması yapar (`POST /projects/{id}/probe`): `OK`, `WRONG_METHOD`, `PATH_NOT_FOUND` ya da `INCONCLUSIVE`.
 - **Çakışma:** Başkası aynı subtask'i kaydettiyse `PUT` 409 `VERSION_CONFLICT` döner. Ekran kullanıcının değişikliklerini kaybetmeden güncel hali yükler ve farkı gösterir.
-- **JSON'dan içe aktar:** Yerel broker'ın `broker-local.json` dosyasındaki bir route forma yüklenir. `permissions` önekle ayrılır: projenin önekiyle başlayanlar proje yetkisine, diğerleri başka projeden yetkiye gider. `responseProfile` adı profil listesinden ID'ye çevrilir.
+- **JSON'dan içe aktar:** Yerel broker'ın `yapi-local.json` dosyasındaki bir route forma yüklenir. `permissions` önekle ayrılır: projenin önekiyle başlayanlar proje yetkisine, diğerleri başka projeden yetkiye gider. `responseProfile` adı profil listesinden ID'ye çevrilir.
 
 ### İstekten şablon
 
@@ -137,7 +137,7 @@ Backend REST ve JSON konuşur; bütün yollar `/api/v1` altındadır ve alan adl
 
 - **Kimlik:** Her istek `Authorization: Bearer <SSO access token>` taşır. Token yoksa ya da geçersizse 401, rol yetmiyorsa 403 döner. `ROUTE_EDITOR` ve `APPROVER` rolleri okuma iznini de kapsar.
 - **Yerel geliştirme:** Backend `local` profiliyle çalışınca SSO yerine HTTP Basic kabul eder. Hazır kullanıcılar `viewer`, `editor`, `approver` ve üç role birden sahip `lead`'dir; şifre kullanıcı adıyla aynıdır. Dört göz kuralı `lead` ile talep açıp `approver` ile onaylayarak denenir.
-- **CORS:** İzinli adresler `broker.admin.cors.allowed-origins` ayarındadır; yerelde varsayılan `http://localhost:5173`'tür.
+- **CORS:** İzinli adresler `yapi.admin.cors.allowed-origins` ayarındadır; yerelde varsayılan `http://localhost:5173`'tür.
 - **Zaman:** ISO 8601 ve UTC: `2026-10-13T13:04:00Z`.
 - **Kimlikler:** Sayısal ID'ler JSON number olarak gelir.
 - **Büyük/küçük harf:** maintask ve subtask tekliliği harf duyarsızdır; `LogProject` varken `logproject` 409 `DUPLICATE` alır. Ekran her zaman kayıtlı yazımı gösterir.
@@ -525,6 +525,7 @@ Backend geliştirildikçe bu tablo güncellenir; en yeni kayıt en üsttedir. Bi
 
 | Tarih | Değişiklik |
 | --- | --- |
+| 2026-10-26 | Ad değişikliği: proje Yapi, ekranın adı Yapi Admin. Merkezi admin `yapi-admin`, yerel broker'ın dosyası `yapi-local.json`, CORS ayarı `yapi.admin.cors.allowed-origins`. Admin API'nin yolları, gövdeleri ve hata kodları değişmedi. |
 | 2026-10-16 | Yeni yer tutucu `${user.permission}`: kullanıcıda olan ilk route yetkisi (önce `permissions`, sonra `foreignPermissions`). Önizleme ve test gövdesi isteğe bağlı `permissions` ve `foreignPermissions` alır; `definition-rules`'daki `placeholders.definition` yeni yer tutucuyu listeler |
 | 2026-10-16 | Swagger ve OpenAPI yalnızca `local` ve `dev` profillerinde açık. Yerel çalıştırma `docs/local-run.md`'de: admin API `local` profilinde DEV Oracle'daki yerel bir şemaya bağlanır ve boş şemayı örnek veriyle doldurur |
 | 2026-10-16 | Broker'ın uygulamalara döndüğü yanıtlar, `application` kontrolü, oturum kaydı ve zarf alanlarının `${request.*}` ile okunması uygulandı. `X-User-Agent` route header'ı olarak tanımlanabilir; `X-User-*` yasağının tek istisnası. `GET /meta/definition-rules` yanıtına `forbiddenHeaderExceptions` eklendi, `placeholders.definition` zarf yer tutucularını (`${request.uid}`, `${request.application}`, `${request.maintask}`, `${request.subtask}`) da listeler |

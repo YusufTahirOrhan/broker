@@ -1,0 +1,21 @@
+# Yerel geliştirme: TLS yok, test çağrıları yerel broker'a gider. Runtime DB olarak DEV Oracle'daki yerel bir şema
+# kullanılır (YAPI_RUNTIME_DB_*); DEV'in runtime şeması değil, yoksa yerel uygulamalar DEV'in route'larını değiştirir.
+# Sinyaller ayrı bir kanalda: DEV broker'ları yerel değişiklikleri duymaz.
+server:
+  port: 8081
+  ssl:
+    enabled: false
+
+management:
+  server:
+    port: 9091
+
+yapi:
+  env-admin:
+    signals:
+      routes-changed-channel: "yapi:routes-changed:local"
+      loaded-key-prefix: "yapi:loaded-local:"
+    test:
+      enabled: true
+      yapi-url: ${YAPI_INTERNAL_URL:http://localhost:8083}
+      secret: local-test-secret

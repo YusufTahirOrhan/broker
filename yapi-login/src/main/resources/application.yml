@@ -1,0 +1,69 @@
+spring:
+  application:
+    name: yapi-login
+  threads:
+    virtual:
+      enabled: true
+  data:
+    redis:
+      host: ${YAPI_REDIS_HOST:localhost}
+      port: ${YAPI_REDIS_PORT:6379}
+      password: ${YAPI_REDIS_PASSWORD:}
+      timeout: 2s
+
+server:
+  port: ${LOGIN_PORT:8082}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+login:
+  ldap:
+    # bind: kullanıcının şifresiyle doğrudan bind (eski Ldap sınıfları gibi); static yalnızca local profilinde
+    mode: ${LOGIN_LDAP_MODE:bind}
+    urls: ${LOGIN_LDAP_URLS:}
+    # Active Directory UPN; preprod'da {uid}@test.com.tr. Ortam değişkeni: LOGIN_LDAP_PRINCIPALPATTERN
+    principal-pattern: "{uid}@test.com.tr"
+    connect-timeout: 3s
+    read-timeout: 5s
+  session:
+    key-pattern: "user:session:{uid}"
+    ttl: 86400s
+  logout:
+    # kaydı yalnızca açan istemci (X-Clientip + X-User-Agent) kapatabilir
+    require-client-match: true
+  # Koordinatör'ün zorla çıkışı (X-Koordinator-Secret); boşken uç her çağrıyı reddeder
+  koordinator-secret: ${LOGIN_KOORDINATOR_SECRET:}
+  # broker'ın X-User-Context anahtarı (yapi.forward.user-context-secret): /actuator/ ve /internal/ dışındaki her uç
+  # imza ister, imzasız çağrı 403. Boşken kontrol kapalı; bu yalnızca local profilinde olabilir, başka profilde
+  # servis başlamaz.
+  user-context-secret: ${YAPI_USER_CONTEXT_SECRET:}
+  user-context-max-age: 60s
+  applications:
+    key: yapi:applications
+    refresh-interval: 5m
+
+# Yetki projesi; gerçek uçlar gelince yalnızca bu ayarlar değişir
+koordinator:
+  # http; static yalnızca local profilinde (sabit yetkiler)
+  mode: http
+  url: ${KOORDINATOR_URL:}
+  auth-header: ${KOORDINATOR_AUTH_HEADER:Authorization}
+  auth-value: ${KOORDINATOR_AUTH_VALUE:}
+  permissions-path: "/users/{uid}/permissions"
+  permissions-field: yetkiler
+  projects-path: /projects
+  project-code-field: code
+  timeout: 5s
+
+logging:
+  structured:
+    format:
+      console: ${YAPI_LOG_FORMAT:}
