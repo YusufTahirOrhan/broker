@@ -46,6 +46,14 @@ final class YapiErrors {
         return body;
     }
 
+    /** The legacy broker's answer to a request the alarm check stopped ({@code isAlarmQuery}), with HTTP 200. */
+    static ObjectNode legacyAlarm() {
+        ObjectNode body = legacyRefused();
+        body.put("badprocess", true);
+        body.put("status", 500);
+        return body;
+    }
+
     /** What the frontend gets when the log could not be written, exactly as today. */
     static ObjectNode logUnavailableBody() {
         ObjectNode body = Json.object();

@@ -15,6 +15,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.acme.yapi.core.json.Json;
+import com.acme.yapi.core.route.AlarmRoute;
 import com.acme.yapi.core.testing.OracleDatabase;
 import com.acme.yapi.envadmin.runtime.ApplyResult;
 import com.acme.yapi.envadmin.runtime.RuntimeStore;
@@ -66,7 +67,12 @@ public final class RuntimeFixture {
     }
 
     public static long project(String maintask, String baseUrl) {
-        STORE.upsertProject(maintask, baseUrl, true);
+        return project(maintask, baseUrl, null);
+    }
+
+    /** A project whose subtasks inherit {@code alarmRoute} (null: none). */
+    public static long project(String maintask, String baseUrl, AlarmRoute alarmRoute) {
+        STORE.upsertProject(maintask, baseUrl, true, alarmRoute);
         return configVersion();
     }
 

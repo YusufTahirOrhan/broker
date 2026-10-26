@@ -83,7 +83,7 @@ public class LocalSeed implements ApplicationRunner {
                     defaultProfile == null ? null : profileIds.get(defaultProfile))).id();
             for (Environment environment : environments.all()) {
                 projects.upsertEnvironment(id, environment.code(), Json.stringField(project, "baseUrl"),
-                        "/v3/api-docs", true);
+                        "/v3/api-docs", true, null);
             }
             for (JsonNode route : project.get("routes")) {
                 String profile = Json.stringField(route, "responseProfile");

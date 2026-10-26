@@ -1,6 +1,6 @@
 # Devir notu
 
-Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; çekirdek ve beş modül (giriş servisi dahil) yazıldı, `mvn -B verify` yeşil. 2026-10-16 turunda "Sıradaki iş"in 1–6. maddeleri yapıldı: Oracle 19c, yanıt verisinin loglanması, eski broker'la aynı oturum ve yanıtlar, giriş servisi, DEV'e bağlı yerel çalıştırma, `${user.permission}`; alarm (7) sonraki tur. Hepsi PR #1 ile, inceleme düzeltmeleriyle birlikte main'e merge edildi (2026-10-16). Düzeltmeler: yerel giriş servisi DEV'in ortak Redis anahtarlarına yazmaz (madde 5), giriş servisinin imza kontrolü `/actuator/` ve `/internal/` dışındaki her yolda ve imza anahtarı `local` dışında zorunlu, boşluklu şifre LDAP'a gitmez, yetki listesiz Koordinatör cevabı hata (madde 4). `mvn -B verify`: 203 test. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
+Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; çekirdek ve beş modül (giriş servisi dahil) yazıldı, `mvn -B verify` yeşil. 2026-10-16 turunda "Sıradaki iş"in 1–6. maddeleri yapıldı: Oracle 19c, yanıt verisinin loglanması, eski broker'la aynı oturum ve yanıtlar, giriş servisi, DEV'e bağlı yerel çalıştırma, `${user.permission}`; alarm (7) sonraki tur. Hepsi PR #1 ile, inceleme düzeltmeleriyle birlikte main'e merge edildi (2026-10-16). Düzeltmeler: yerel giriş servisi DEV'in ortak Redis anahtarlarına yazmaz (madde 5), giriş servisinin imza kontrolü `/actuator/` ve `/internal/` dışındaki her yolda ve imza anahtarı `local` dışında zorunlu, boşluklu şifre LDAP'a gitmez, yetki listesiz Koordinatör cevabı hata (madde 4). 2026-10-26 turunda "Sıradaki iş (2026-10-26)"in 1–7. maddeleri yapıldı: ad değişikliği (broker → yapi), ortam adları (TEST → PREPROD), Koordinatör'ün gerçek uçları, DEV'de magic key, admin'e giriş uygulamasının oturumuyla giriş, kullanıcı ayarları, alarm; her madde kendi commit'inde, main'e PR'la (merge edilmedi). `mvn -B verify`: 234 test. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
 
 Son güncelleme: 2026-10-26.
 
@@ -17,7 +17,7 @@ Son güncelleme: 2026-10-26.
 
 ## Sıradaki iş (2026-10-26)
 
-**Durum:** Yapılacak. Kararlar kullanıcıyla 2026-10-21 ve 2026-10-26'da netleşti ("Eski broker'dan teyit edilenler", "Verilmiş kararlar").
+**Durum:** 1–7 yapıldı (2026-10-26); her maddenin "Yapıldı" notu altında. Kararlar kullanıcıyla 2026-10-21 ve 2026-10-26'da netleşti ("Eski broker'dan teyit edilenler", "Verilmiş kararlar").
 
 Maddeler sırayla yapılır; her biri kendi commit'leriyle biter, her push'tan önce `mvn -B verify` yeşildir. API sözleşmesi değişen her maddede `docs/frontend-guide.md` ve değişiklik kaydı aynı commit'te güncellenir. `docs/design.md`'ye dokunulmaz: tasarım dokümanını tur bitince Claude günceller, uygulanırken netleşenler "Tasarıma yansıtılacaklar"a yazılır. Eski broker'dan gelen gövdeler, anahtarlar ve alan adları korunur.
 
@@ -120,6 +120,18 @@ Eski akış ve kararlar "Eski broker'dan teyit edilenler" ve "Verilmiş kararlar
 - **Elastic:** Log sink, alarm olan olaylardan `alarm` indeksine doküman yazar: `_id` = `query_id`; gövde eski `alarm_log` gibi isteğin parametreleri olduğu gibi; yeni bilgi `yapi` nesnesinde (request_id, uid, client_ip, alarm listesi, alarm route'u, zaman).
 - **`alarm_list`:** Alarm yoksa servise giden gövdeye eklenmez (açık nokta).
 - Rehber: proje ortam ayarı, subtask formu, `definition-rules`, yeni outcome, değişiklik kaydı.
+- **Yapıldı (2026-10-26):** Core'da `AlarmSpec`, `AlarmServiceSpec`, `AlarmRoute`, `alarm/AlarmValues` (değerler ve `resultPath`'ten alarm listesi), `Placeholder.ALARM`, `Outcome.ALARM`, `LogEvent.alarm`, `LegacyDocuments`'ta alarm dokümanı; runtime'da `YapiHandler.alarmPassed`; env-admin `runtime_project.alarm_maintask/alarm_subtask`; admin `project_environment.alarm_*`, ortam ayarında doğrulama ve `ALARM_ROUTE_ACTIVE` ön kontrolü; sink `yapi.sink.elastic.alarm-index` (`YAPI_ELASTIC_ALARM_INDEX`, varsayılan `alarm`). Uygulanırken netleşenler ve varsayımlar:
+  - **Değerler:** `null`'lar alınmaz; boolean ve sayılar metne çevrilir (`true`, `10`), boş metin alınır. Zarf alanları yalnızca üst seviyede atlanır; maskelenen alanlar (`password` + route'un `maskFields`'ı) her derinlikte, harf duyarsız. Dizinin elemanları sırayla.
+  - **Alarm listesi:** `resultPath` noktalı yol; yoldaki değer dizi değilse ya da yanıt JSON değilse alarm servisi hatası (503). Liste elemanları metne çevrilir. Boş dizi: alarm yok, istek devam eder ve olaya `alarm` yazılmaz (kontrolün yapıldığı iz bırakmaz; varsayım).
+  - **Hangi istekler:** Login/logout ve test çağrısı alarm kontrolünden geçmez. Alarm servisi route'u frontend'den çağrılınca bulunmamış sayılır (404 `UNKNOWN_TASK`, oturum geçersizse 301 gövdesi).
+  - **Alarm servisi çağrısı:** Alarm route'unun kendi `timeoutMs`'iyle, tek deneme (retry yok), `traceparent` ve varsa `X-User-Context` ile; tanımdaki diğer yer tutucular gelen isteğin bağlamından (`${request.*}`, `${header.*}`, `${user.id}`, `${requestId}`). Alarm route'unun yetkisi ve anonimliği aranmaz; kendi yetkisi olması önerilir ama runtime kontrol etmez. Alarm servisinin cevabı ve hatası ayrı bir olay olarak loglanmaz; ana isteğin RESPONSE olayının `alarm` nesnesinde (`maintask`, `subtask`, `alarms`, `params` ya da `error`).
+  - **Seçilen route ortamda yoksa** (silinmiş, `DISABLED`, alarm servisi olmayan versiyon): istek 503 ile reddedilir ve hata logu yazılır; ön kontrol bunu taşımada engeller, ama alarm route'u sonradan `DISABLE` edilirse onu kullanan subtask'ler 503 döner (`DISABLE`'da bu bağımlılığa bakılmıyor; açık nokta).
+  - **Ön kontrol:** `ALARM_ROUTE_ACTIVE` subtask taşımalarında (`DEPLOY`, `ROLLBACK`, `ENABLE`), alarm servislerinde ve `OFF`'ta çalışmaz. `INHERIT`'te projenin hedef ortamda alarm route'u yoksa geçer ("alarm kontrolü yapılmaz"). Hedefte `ACTIVE` versiyonun alarm servisi olması da aranır. Proje ortam ayarı kaydında alarm route'unun ortamda aktif olması aranmaz (yalnızca kayıtlı ve güncel versiyonu alarm servisi); harf farkıyla gelen ad kayıtlı yazımıyla saklanır.
+  - **Ortam ayarı:** `PUT /projects/{id}/environments/{env}`'de `alarmRoute` gönderilmezse `null` (her kayıt tam ayardır, diğer alanlar gibi). env-admin'de `alarm_maintask` ve `alarm_subtask` ikisi birden dolu ya da boş (`ck_runtime_project_alarm`); değişiklik config versiyonunu artırır.
+  - **`params`:** Elastic'teki alarm dokümanına isteğin gövdesi maskelenmiş haliyle ve zarf alanları dahil yazılır (eski `alarm_log` parametreleri olduğu gibi yazıyordu; `password` maskeleniyor). `_id` = `query_id`; `yapi` nesnesinde `request_id`, `uid`, `client_ip`, `alarms`, `alarm_route`, `time`, `environment`. İndeks adı ayarlanabilir; aylık değil (eski indeks tek).
+  - **Önizleme ve test:** `${alarm.values}`'un değeri yoktur, alan yazılmaz; alarm servisi önizlemede bu yüzden boş değerle görünür.
+  - **`alarm_list`:** eklenmedi (açık nokta olarak kaldı).
+  - **Testler:** core `AlarmTest` (değerler, liste, şablon, doğrulama kuralları) ve `LegacyDocumentsTest` (alarm dokümanı); runtime `YapiFlowTest` (alarm: servis çağrılmaz, eski gövde, olay ve metrik; `OFF`, `ROUTE`, alarm servisine doğrudan çağrı 404; alarm servisi hatası 503) ve `CommonFormatTest` (eski yanıtlar kapalıyken 403); env-admin `AdminApiTest` (ortam ayarında alarm route'u); admin `PromotionFlowTest` (ortam ayarı doğrulaması, ön kontrol); sink `ElasticBulkWriterTest` ve `RealTargetsTest` (gerçek Elastic'te alarm dokümanı).
 
 ## Tamamlanan iş (2026-10-16)
 
@@ -273,9 +285,9 @@ Kullanıcıda olan ilk route yetkisi: önce `permissions`, sonra `foreignPermiss
 
 - **Yapıldı (2026-10-16):** `RequestContext.permission` ve `RequestContext.firstPermission(routePermissions, userPermissions)` core'da; doğrulayıcı `${user.permission}`'ı kabul eder, `definition-rules` listeler. Broker'da route yetkileri artık sıralı (`Route.permissions` `List`; runtime DB'deki dizi zaten önce proje, sonra başka proje yetkilerini sırayla taşıyordu). Önizleme ve test çağrısında kullanıcının formdaki yetkilere sahip olduğu varsayılır: `Trial` ve `TestCallRequest` isteğe bağlı `permissions`/`foreignPermissions` (test çağrısında `permission`) taşır; rehber ve değişiklik kaydı güncellendi. Testler: core (sıra, yokken alanın yazılmaması), broker (`sorgu` örneği, anonim route), admin önizlemesi.
 
-### 7. Alarm (2026-10-26 turuna taşındı)
+### 7. Alarm (2026-10-26 turunda yapıldı)
 
-Her şey bittikten sonra yapılacak. Eski akış: `maintask = sorgu` ve `reason` 5 karakterden uzunsa `alarmService.checkAlarm(params, client_ip, query_id)`; `isAlarmQuery` true ise HTTP 200 `{"response": false, "badprocess": true, "status": 500}`, değilse gövdeye `alarm_list` eklenir. Alarm logu Elastic'te `alarm` indeksine yazılıyor. Ayrıntılar `alarmService` koduyla gelecek.
+2026-10-26 turunun 7. maddesi olarak yapıldı. Eski akış: `maintask = sorgu` ve `reason` 5 karakterden uzunsa `alarmService.checkAlarm(params, client_ip, query_id)`; `isAlarmQuery` true ise HTTP 200 `{"response": false, "badprocess": true, "status": 500}`, değilse gövdeye `alarm_list` eklenir. Alarm logu Elastic'te `alarm` indeksine yazılıyor. Ayrıntılar `alarmService` koduyla gelecek.
 
 ## Eski broker'dan teyit edilenler
 
@@ -350,7 +362,7 @@ Tasarım dokümanındakilere ek olarak netleşenler:
 
 ## Modüller ve durum
 
-Bu bölüm kodun güncel halini anlatır; "Sıradaki iş"teki maddeler bittikçe güncellenir. "Sıradaki iş"in 1–6. maddeleri bitti.
+Bu bölüm kodun güncel halini anlatır; "Sıradaki iş"teki maddeler bittikçe güncellenir. "Sıradaki iş"in 1–7. maddeleri bitti.
 
 ### yapi-core (yeşil)
 
@@ -363,7 +375,8 @@ Bu bölüm kodun güncel halini anlatır; "Sıradaki iş"teki maddeler bittikçe
 | `request` | `RequestBodyValidator` (zorunlu/tip/varsayılan), `BackendRequestBuilder` (path, query, header, NONE/PASS_THROUGH/TEMPLATE/MULTIPART body), `RequestContext` |
 | `response` | `Outcome`, `ResponseProfile` (profil doğrulama ve zarflama; 5xx gövdesi şablona verilmez), `ClientResponse` |
 | `logging` | `LogEvent` + `EventCodec` (Kafka'daki snake_case şema), `Masker` (her derinlikte, harf duyarsız; kırpma) |
-| `legacy` | `LegacyDocuments`: olaylardan eski Elastic ana ve parametre dokümanları (`ElasticOperation`) |
+| `legacy` | `LegacyDocuments`: olaylardan eski Elastic ana ve parametre dokümanları ve alarm dokümanı (`ElasticOperation`) |
+| `alarm` | `AlarmValues`: alarm servisine giden değerler (yaprak değerler, zarf ve maskeli alanlar hariç) ve yanıttan alarm listesi (`resultPath`) |
 | `ids` | UUIDv7, trace/span ID, parametre dokümanı ID'si |
 | `spec` | `OpenApiSpec` ($ref çözümü, fingerprint), `SpecProposal` (operasyondan tanım önerisi) |
 | `sample` | `SampleParser` (JSON ya da bash/cmd "Copy as cURL"; kimlik header'larını atar), `SampleTemplate` (alan çıkarımı ve operasyona ad eşleme) |
@@ -396,6 +409,8 @@ Paket `com.acme.yapi.runtime`. Tek endpoint `POST /yapi`; akış `web/YapiHandle
 8. Dosya yanıtı (`BINARY` ya da `Content-Disposition`): RESPONSE olayı onaylanınca stream; `client_response` `{"info": ...}`, `body_size` `Content-Length`'ten. Değilse gövde okunur, outcome gerçek status'tan; profil varsa zarflanır, yoksa gövde olduğu gibi döner. `client_response`: `logResponseBody` kapalıyken profilde `data` boş string, profilsizde `{"status": <kod>}`; açıkken maskeli zarf ya da gövde, `data` JSON metni, `maxBodyBytes`'ta kırpılır (`EventFactory`).
 9. Her yanıtta `X-Request-Id`; hata yollarında REQUEST ve RESPONSE birlikte gönderilip ikisi de beklenir.
 
+- **Alarm:** REQUEST olayı, alan doğrulaması ve servis isteğinin kurulmasından sonra, servis çağrısından önce `alarmPassed`: alarm route'u tanımdan (`ROUTE`) ya da snapshot'taki projenin `alarmRoute`'undan (`INHERIT`); `RouteCache`'te bulunur ve alarm servisi olmalıdır. Alarm varsa servis çağrılmaz: eski yanıtlar açıkken 200 `{"response": false, "badprocess": true, "status": 500}`, kapalıyken 403; outcome `ALARM`. Alarm servisi hatasında 503 `TECHNICAL_ERROR`. Frontend'den gelen istekte bulunan route alarm servisiyse bulunmamış sayılır (404).
+
 - **`status_code`:** Servis yanıt verdiyse servisin status'u; vermediyse (broker hataları, timeout, bağlantı hatası) frontend'e dönen status. ClickHouse kolonu böylece boş kalmaz.
 - **Log isteği gövdesi:** `logRequestBody=false` ise REQUEST olayında yalnızca zarf alanları yazılır (eski ana doküman zarfı yine taşır).
 - **RouteCache:** `RouteRepository.loadSnapshot()` tek bir `SET TRANSACTION READ ONLY` transaction'ında okur (Oracle'da REPEATABLE READ yok); bozuk route/profil atlanır (`yapi.routes.skipped`). `yapi:routes-changed` aboneliği, `yapi.cache.verify-interval` (15 sn) kontrolü, her kontrolde `yapi:loaded:{instanceId}` (60 sn TTL). İlk yükleme ve Kafka metadata ısınması `ApplicationRunner` (ısınma önce).
@@ -417,7 +432,7 @@ Paket `com.acme.yapi.envadmin`. Uçlar `/admin/v1` altında; hatalar merkezle ay
 | `PUT /routes/{maintask}/{subtask}` | Tasarımdaki tek ifadeyle uygular. Yanıt `{"applied", "configVersion", "alreadyApplied", "signalled"}`. Aynı `promotionId` tekrar gelirse `alreadyApplied: true`; daha yeni talep varsa 409 `STALE_PROMOTION` (`currentPromotionId`); proje ya da profil ortamda yoksa 409 `PROJECT_NOT_FOUND` / `PROFILE_NOT_FOUND`. Tanım `RouteValidator` ile (header okunabilirliği hariç) doğrulanır |
 | `PUT /response-profiles/{name}` | Aynı desen; `ResponseProfile.parse` ile doğrulanır |
 | `POST /routes/{m}/{s}/disable` | Kill switch, `promotionId` ile; route yoksa 404 `ROUTE_NOT_FOUND`. `ENABLE` ayrı uç değil: hedefteki versiyon `PUT` ile yeniden uygulanır |
-| `PUT /projects/{maintask}` | `{"baseUrl", "enabled", "actor"}`; değişiklik varsa config versiyonu artar ve sinyal gider (broker'lar base URL'i snapshot'la okur) |
+| `PUT /projects/{maintask}` | `{"baseUrl", "enabled", "alarmRoute", "actor"}`; değişiklik varsa config versiyonu artar ve sinyal gider (broker'lar base URL'i snapshot'la okur) |
 | `GET /routes` | Projeler, profiller, tüm route'lar (DISABLED dahil) ve config versiyonu |
 | `GET /cache-status` | `yapi:loaded:*` (SCAN) → instance başına `loadedVersion`, `loadedAt`, `upToDate` |
 | `GET /projects/{maintask}/spec?path=` | Base URL runtime DB'den; yol doğrulanır (`..`, `//`, şema, ters bölü reddedilir). Hata: 502 `UPSTREAM_ERROR` (`upstreamStatus`) |
@@ -471,6 +486,7 @@ Paket `com.acme.yapi.sink`. İki `@KafkaListener` (toplu), her biri kendi consum
 - **ClickHouse (`yapi-logs-clickhouse`):** `INSERT INTO yapi_logs.yapi_log FORMAT JSONEachRow`, `date_time_input_format=best_effort`; satırda `null` yok (varsayılanlar), `token`/`perm_list`/`client_response`/`query_id` yazılmaz. 400 → satır satır tekrar, kabul edilmeyen satır DLQ'ya; 401/403/404/5xx/bağlantı → batch yeniden denenir.
 - **DLQ:** `yapi.logs.v1.dlq`, orijinal key/değer ve `yapi.dlq.sink`, `yapi.dlq.reason`, `yapi.dlq.origin` header'ları; DLQ onayı gelmeden offset commit edilmez.
 - **Offset:** `ack-mode: batch`; hata durumunda `DefaultErrorHandler` sınırsız sabit aralıkla (`yapi.sink.retry-interval`) aynı batch'i dener, kayıt atlanmaz. Batch: `max-poll-records` 10.000, `fetch-max-wait` 1 sn.
+- **Alarm logu:** Alarm olan RESPONSE olayı ayrıca `yapi.sink.elastic.alarm-index` indeksine (`alarm`) `index` ile yazılır, `_id` = `query_id` (eski `alarm_log`).
 - **Kurulum dosyaları:** `clickhouse/yapi_logs.sql` (tasarımdaki DDL) ve `elastic/yapi-fields.component-template.json` (mevcut `requests_*` şablonunun `composed_of` listesine eklenir). Sink tablo ya da şablon oluşturmaz.
 - **Testler:** EmbeddedKafka; Elastic ve ClickHouse HTTP sahteleri (`update`/`doc_as_upsert` birleştirmesini uygular). REQUEST/RESPONSE sırası, bir hedef düşükken diğerinin ilerlemesi ve düşük hedefin offset'inin commit edilmemesi, bozuk mesajın DLQ'ya gidip partition'ı durdurmaması, hedefin reddettiği olayların DLQ'ya gitmesi denenir. `RealTargetsTest` gerçek ClickHouse 24.8 ve Elasticsearch 8.15 ile: tasarımdaki DDL çalışır ve satırları kabul eder (metrik view'ı, `FINAL` tekilleştirmesi), bileşen şablonu `requests_*` şablonuna eklenince `yapi.*` tipleri doğru, eşleme çakışması 400 ile DLQ'ya gider.
 - **Bilinen sınır:** Frontend gövdesinde üst seviyede `yapi` adlı bir alan varsa eski ana dokümanda `yapi` nesnesi onu ezer (tasarım böyle bir alan olmadığını varsayıyor). Elastic'teki son ayların alan adlarıyla teyit edilmeli.
@@ -503,6 +519,7 @@ Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya ya
 - 2026-10-16 turunun maddeleri canlı dokümana işlendi (rev 180).
 - **Koordinatör (3):** Admin'in proje kataloğu tek ortamın Koordinatör'ünden (`yapi.admin.catalog.environment`, varsayılan PROD); projenin yetkileri ve yetkinin varlığı her ortamın kendi Koordinatör'ünden, ortam başına 5 dk önbellek. Yetkinin ortamda "var" sayılması: o ortamdaki herhangi bir Yapi projesinin `yetkiList`'inde olması. `UNLINKED` projenin yetki listesi boş. Evet/hayır alanları `true`/`1`/`"true"`/`"1"`. Yetki listesinde `description` yok (`null`).
 - **Kullanıcı ayarları (6):** `PUT` yazdığı JSON'u döner; bilinmeyen ad 404, imzada kullanıcı yoksa 403, gövde JSON değilse 400; yerelde `local:` önekli anahtarlar.
+- **Alarm (7):** "Sıradaki iş" 7'deki "Yapıldı" notunun tamamı: değerlerin kuralı (`null` yok, zarf yalnızca üst seviyede atlanır, maskeli alanlar her derinlikte), alarm yokken olaya bir şey yazılmaması, login/logout ve test çağrısında kontrolün olmaması, alarm servisinin tek denemeyle ve yetki aranmadan çağrılması, `ALARM_ROUTE_ACTIVE` ön kontrolü ve kuralları, ortam ayarında aktifliğin aranmaması, alarm dokümanında `params`'ın maskeli tam gövde olması, indeks adının ayarlanabilmesi, alarm servisinin frontend'e 404 olması. Runtime şemasında `runtime_project.alarm_maintask/alarm_subtask`, merkezde `project_environment.alarm_maintask/alarm_subtask`.
 - **Admin girişi (5):** env-admin'de yeni uç `POST /admin/v1/sessions/verify`; admin geçerli ve geçersiz cevapları 30 sn tutar (başarısız çağrıyı tutmaz); `username` ve `displayName` uid; dört header'dan biri eksikse 401; oturum doğrulanamazsa 502 `ENV_UNREACHABLE`.
 - **Magic key (4):** Başarısız denemeler de loglanır; anahtar boşsa servis başlamaz; `dev` profilinin varsayılan modu `magic-key`.
 - **Ortamlar (2):** Ön kontrol mesajları ortam kodunu "X ortamında ..." diye yazar, koda ek yapıştırılmaz ("v4 PREPROD ortamında aktif").
@@ -512,7 +529,9 @@ Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya ya
 
 - **Oturum kaydındaki `permissions`:** Eski login'in Koordinatör cevabını nasıl çevirdiği görülmedi; `yetkiIsim` listesi varsayıldı. Pilot projede eski ve yeni broker'ın birbirinin oturumunu okuduğu teyit edilecek.
 - **`refresh_permissions`:** Koordinatör ekibi giriş servisinin iç ucuna geçecek (kullanıcı iletecek). Geçişte ortak Redis'te eski yol da aynı kaydı siler.
-- **`alarm_list`:** Alarm yoksa eski kod servise giden gövdeye `alarm_list` ekliyordu. Alarm şu an kullanılmadığı için eklenmiyor; kullanıcı ileride eklenebileceğini not ettirdi.- **`X-Clientip`:** Kullanıcı bu header'ı frontend'in değil, önündeki proxy'nin koyduğunu düşünüyor; teyit edilmedi. İstemci koyuyorsa IP bağlaması güvenlik sağlamaz; o durumda eski broker kapandıktan sonra IP bağlantıdan ya da güvenilir proxy'nin header'ından alınmalı.
+- **`alarm_list`:** Alarm yoksa eski kod servise giden gövdeye `alarm_list` ekliyordu. Alarm şu an kullanılmadığı için eklenmiyor; kullanıcı ileride eklenebileceğini not ettirdi.
+- **Alarm route'unun kapatılması:** Bir alarm servisi route'u `DISABLE` edilirse ya da başka bir versiyona geri alınırsa onu kullanan subtask'ler 503 döner; `DISABLE` ön kontrolü bu bağımlılığa bakmıyor. Gerekirse `DISABLE`'a "bu route'u kullanan aktif subtask yok" kontrolü eklenir.
+- **`X-Clientip`:** Kullanıcı bu header'ı frontend'in değil, önündeki proxy'nin koyduğunu düşünüyor; teyit edilmedi. İstemci koyuyorsa IP bağlaması güvenlik sağlamaz; o durumda eski broker kapandıktan sonra IP bağlantıdan ya da güvenilir proxy'nin header'ından alınmalı.
 - **Hata yanıtlarında HTTP 200 (ileride):** Mevcut frontend'ler için korunuyor. Frontend'ler güncellenince `yapi.compat.legacy-responses: false` ile ortak formata ve gerçek HTTP status'lara geçilebilir; kullanıcı açık kalmasını istedi.
 - Kullanıcı başına tek oturum ve 1 günlük sabit süre (eski davranış): yeni login eskisini ezer, kullanılsa da oturum 1 günde biter.
 - PROD'da base URL değişikliğinin onay akışına alınması; PROD'da `DISABLE`/`ROLLBACK` için acil durum politikası (şimdilik onay istiyor).

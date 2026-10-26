@@ -22,9 +22,22 @@ import tools.jackson.databind.node.ObjectNode;
  * @param userId        user of the verified session, null for anonymous calls without a session
  * @param permission    {@code ${user.permission}}: the first of the route's permissions the user has
  *                      ({@link #firstPermission}); null without a session or without such a permission
+ * @param alarmValues   {@code ${alarm.values}} in an alarm service route: the checked request's values; null elsewhere
  */
 public record RequestContext(ObjectNode originalBody, ObjectNode effectiveBody, Function<String, String> headerLookup,
-                             RouteValidator.Context readable, String userId, String permission, String requestId) {
+                             RouteValidator.Context readable, String userId, String permission, String requestId,
+                             List<String> alarmValues) {
+
+    public RequestContext(ObjectNode originalBody, ObjectNode effectiveBody, Function<String, String> headerLookup,
+                          RouteValidator.Context readable, String userId, String permission, String requestId) {
+        this(originalBody, effectiveBody, headerLookup, readable, userId, permission, requestId, null);
+    }
+
+    /** The context of an alarm service call made for this request. */
+    public RequestContext withAlarmValues(List<String> values) {
+        return new RequestContext(originalBody, effectiveBody, headerLookup, readable, userId, permission, requestId,
+                List.copyOf(values));
+    }
 
     /**
      * The first of {@code routePermissions} (the route's own permissions, then the ones added from other projects, in
@@ -51,6 +64,8 @@ public record RequestContext(ObjectNode originalBody, ObjectNode effectiveBody, 
             case Placeholder.HEADER -> header(placeholder.path());
             case Placeholder.USER -> user(placeholder.path());
             case Placeholder.REQUEST_ID -> Json.string(requestId);
+            case Placeholder.ALARM -> "values".equals(placeholder.path()) && alarmValues != null
+                    ? Json.stringArray(alarmValues) : Json.missing();
             default -> Json.missing();
         };
     }

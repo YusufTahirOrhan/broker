@@ -19,11 +19,13 @@ import com.acme.yapi.admin.environment.Environment;
 import com.acme.yapi.admin.environment.EnvironmentClient;
 import com.acme.yapi.admin.environment.EnvironmentRepository;
 import com.acme.yapi.admin.profile.ProfileRepository;
+import com.acme.yapi.admin.route.RouteRepository;
 import com.acme.yapi.admin.security.Role;
 import com.acme.yapi.admin.security.User;
 import com.acme.yapi.admin.web.ApiException;
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.naming.Names;
+import com.acme.yapi.core.route.AlarmRoute;
 import com.acme.yapi.core.validation.FieldError;
 
 import tools.jackson.databind.JsonNode;
@@ -40,22 +42,25 @@ public class ProjectService {
     private final AuthorizationService authorization;
     private final EnvironmentRepository environments;
     private final EnvironmentClient environmentClient;
+    private final RouteRepository routes;
 
     public ProjectService(ProjectRepository projects, ProfileRepository profiles, ProjectCatalog catalog,
                           AuthorizationService authorization, EnvironmentRepository environments,
-                          EnvironmentClient environmentClient) {
+                          EnvironmentClient environmentClient, RouteRepository routes) {
         this.projects = projects;
         this.profiles = profiles;
         this.catalog = catalog;
         this.authorization = authorization;
         this.environments = environments;
         this.environmentClient = environmentClient;
+        this.routes = routes;
     }
 
     public record ProfileRef(long id, String name) {
     }
 
-    public record EnvironmentView(String environment, String baseUrl, String specPath, boolean enabled) {
+    public record EnvironmentView(String environment, String baseUrl, String specPath, boolean enabled,
+                                  AlarmRoute alarmRoute) {
     }
 
     public record View(long id, String externalProjectId, String maintask, String name, String permissionPrefix,
@@ -71,11 +76,12 @@ public class ProjectService {
                            String ownerTeam, String description, Long defaultResponseProfileId) {
     }
 
-    public record EnvironmentSettings(String baseUrl, String specPath, Boolean enabled) {
+    /** @param alarmRoute the alarm service route of the subtasks whose alarm check is {@code INHERIT}; null: none */
+    public record EnvironmentSettings(String baseUrl, String specPath, Boolean enabled, AlarmRoute alarmRoute) {
     }
 
     public record EnvironmentResult(String environment, String baseUrl, String specPath, boolean enabled,
-                                    Long configVersion) {
+                                    AlarmRoute alarmRoute, Long configVersion) {
     }
 
     public List<CatalogView> searchCatalog(String query) {
@@ -207,6 +213,7 @@ public class ProjectService {
         if (!specPath.startsWith("/") || specPath.length() > 256 || specPath.contains("..")) {
             errors.add(new FieldError("specPath", "/ ile başlayan bir yol olmalı, en fazla 256 karakter"));
         }
+        AlarmRoute alarm = alarmRoute(body.alarmRoute(), errors);
         if (!errors.isEmpty()) {
             throw ApiException.validation("Ortam ayarı", errors);
         }
@@ -214,12 +221,43 @@ public class ProjectService {
         ObjectNode request = Json.object();
         request.put("baseUrl", body.baseUrl());
         request.put("enabled", enabled);
+        if (alarm == null) {
+            request.putNull("alarmRoute");
+        } else {
+            request.putObject("alarmRoute").put("maintask", alarm.maintask()).put("subtask", alarm.subtask());
+        }
         request.put("actor", user.username());
         JsonNode applied = environmentClient.call(environment, "PUT", "/admin/v1/projects/" + project.maintask(), request);
-        projects.upsertEnvironment(id, code, body.baseUrl(), specPath, enabled);
+        projects.upsertEnvironment(id, code, body.baseUrl(), specPath, enabled, alarm);
         JsonNode version = applied == null ? null : applied.get("configVersion");
-        return new EnvironmentResult(code, body.baseUrl(), specPath, enabled,
+        return new EnvironmentResult(code, body.baseUrl(), specPath, enabled, alarm,
                 version == null || version.isNull() ? null : version.longValue());
+    }
+
+    /**
+     * The registered spelling of an alarm route, which must be a subtask whose current version is an alarm service
+     * route. Whether it is active in the environment is checked when a subtask that uses it is promoted.
+     */
+    private AlarmRoute alarmRoute(AlarmRoute requested, List<FieldError> errors) {
+        if (requested == null) {
+            return null;
+        }
+        if (!Names.isValidMaintask(requested.maintask()) || !Names.isValidSubtask(requested.subtask())) {
+            errors.add(new FieldError("alarmRoute", "maintask ve subtask gerekli"));
+            return null;
+        }
+        Optional<RouteRepository.Row> route = routes.find(requested.maintask(), requested.subtask());
+        if (route.isEmpty()) {
+            errors.add(new FieldError("alarmRoute", "Böyle bir subtask yok: " + requested.maintask() + "/"
+                    + requested.subtask()));
+            return null;
+        }
+        if (route.get().definition() == null || !route.get().definition().has("alarmService")) {
+            errors.add(new FieldError("alarmRoute", "Alarm servisi route'u değil: " + route.get().maintask() + "/"
+                    + route.get().subtask()));
+            return null;
+        }
+        return new AlarmRoute(route.get().maintask(), route.get().subtask());
     }
 
     /** @param suffix the code after the project's prefix; null when the Koordinatör's code does not start with it */
@@ -258,7 +296,8 @@ public class ProjectService {
                         : new ProfileRef(row.defaultResponseProfileId(), row.defaultProfileName()),
                 row.createdBy(), row.createdAt(),
                 projects.environments(row.id()).stream()
-                        .map(env -> new EnvironmentView(env.environment(), env.baseUrl(), env.specPath(), env.enabled()))
+                        .map(env -> new EnvironmentView(env.environment(), env.baseUrl(), env.specPath(), env.enabled(),
+                                env.alarmRoute()))
                         .toList());
     }
 

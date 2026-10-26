@@ -7,9 +7,14 @@ CREATE TABLE runtime_project (
     maintask    VARCHAR2(100 CHAR) NOT NULL,
     base_url    VARCHAR2(512 CHAR) NOT NULL,
     enabled     NUMBER(1)          DEFAULT 1 NOT NULL,
+    -- projenin alarm servisi route'u (alarm.check INHERIT olan subtask'ler); ikisi birlikte ya da hiç
+    alarm_maintask VARCHAR2(100 CHAR),
+    alarm_subtask  VARCHAR2(100 CHAR),
     updated_at  TIMESTAMP(6) WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
     CONSTRAINT pk_runtime_project PRIMARY KEY (maintask),
-    CONSTRAINT ck_runtime_project_enabled CHECK (enabled IN (0, 1))
+    CONSTRAINT ck_runtime_project_enabled CHECK (enabled IN (0, 1)),
+    CONSTRAINT ck_runtime_project_alarm CHECK ((alarm_maintask IS NULL AND alarm_subtask IS NULL)
+                                           OR (alarm_maintask IS NOT NULL AND alarm_subtask IS NOT NULL))
 );
 
 CREATE TABLE runtime_response_profile (

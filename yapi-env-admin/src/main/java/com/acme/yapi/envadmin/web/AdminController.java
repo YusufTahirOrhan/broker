@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.naming.Names;
 import com.acme.yapi.core.response.ResponseProfile;
+import com.acme.yapi.core.route.AlarmRoute;
 import com.acme.yapi.core.route.HttpMethodName;
 import com.acme.yapi.core.route.RouteValidator;
 import com.acme.yapi.core.testcall.TestCallRequest;
@@ -147,8 +148,8 @@ public class AdminController {
         return response;
     }
 
-    public record ProjectResponse(String maintask, String baseUrl, boolean enabled, boolean changed,
-                                  long configVersion, boolean signalled) {
+    public record ProjectResponse(String maintask, String baseUrl, boolean enabled, AlarmRoute alarmRoute,
+                                  boolean changed, long configVersion, boolean signalled) {
     }
 
     @PutMapping("/projects/{maintask}")
@@ -158,13 +159,20 @@ public class AdminController {
         checkMaintask(maintask, errors);
         checkActor(body.actor(), errors);
         UpstreamPaths.baseUrlProblems(body.baseUrl()).forEach(problem -> errors.add(new FieldError("baseUrl", problem)));
+        AlarmRoute alarm = body.alarmRoute();
+        if (alarm != null && !Names.isValidMaintask(alarm.maintask())) {
+            errors.add(new FieldError("alarmRoute.maintask", "Geçerli bir maintask olmalı"));
+        }
+        if (alarm != null && !Names.isValidSubtask(alarm.subtask())) {
+            errors.add(new FieldError("alarmRoute.subtask", "Geçerli bir subtask olmalı"));
+        }
         if (!errors.isEmpty()) {
             throw ApiException.validation(errors);
         }
         boolean enabled = body.enabled() == null || body.enabled();
-        Optional<Long> version = store.upsertProject(maintask, body.baseUrl(), enabled);
+        Optional<Long> version = store.upsertProject(maintask, body.baseUrl(), enabled, alarm);
         boolean signalled = version.isPresent() && signals.publishRoutesChanged(version.get());
-        ProjectResponse response = new ProjectResponse(maintask, body.baseUrl(), enabled, version.isPresent(),
+        ProjectResponse response = new ProjectResponse(maintask, body.baseUrl(), enabled, alarm, version.isPresent(),
                 version.orElseGet(() -> store.configVersion().version()), signalled);
         Audit.record(http, "project.apply", body.actor(), null, maintask,
                 (response.changed() ? "changed" : "unchanged") + " v" + response.configVersion());

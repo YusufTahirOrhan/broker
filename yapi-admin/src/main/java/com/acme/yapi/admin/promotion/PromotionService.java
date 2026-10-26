@@ -24,6 +24,8 @@ import com.acme.yapi.admin.route.RouteSnapshots;
 import com.acme.yapi.admin.security.Role;
 import com.acme.yapi.admin.security.User;
 import com.acme.yapi.admin.web.ApiException;
+import com.acme.yapi.core.json.Json;
+import com.acme.yapi.core.route.AlarmRoute;
 import com.acme.yapi.core.validation.FieldError;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -270,6 +272,7 @@ public class PromotionService {
             checks.add(permissionsCheck(subject, target));
             checks.add(profileCheck(subject, target));
             checks.add(projectCheck(subject, target));
+            alarmCheck(subject, target).ifPresent(checks::add);
         }
         return checks;
     }
@@ -308,6 +311,47 @@ public class PromotionService {
         boolean ok = settings.isPresent() && settings.get().enabled();
         return new Check("PROJECT_ENABLED", ok, settings.isEmpty() ? "Proje " + target.code() + " ortamında tanımlı değil"
                 : ok ? "Proje " + target.code() + " ortamında açık" : "Proje " + target.code() + " ortamında kapalı");
+    }
+
+    /**
+     * The alarm service route a subtask's requests go through must be active in the target, or every request to it
+     * would fail its alarm check. None for alarm service routes themselves and for subtasks with the check off.
+     */
+    private Optional<Check> alarmCheck(Subject subject, Environment target) {
+        JsonNode definition = subject.snapshot().path("definition");
+        if (definition.has("alarmService")) {
+            return Optional.empty();
+        }
+        String check = Json.text(definition.path("alarm").get("check"));
+        if ("OFF".equals(check)) {
+            return Optional.empty();
+        }
+        AlarmRoute alarm;
+        if ("ROUTE".equals(check)) {
+            alarm = new AlarmRoute(Json.text(definition.path("alarm").get("maintask")),
+                    Json.text(definition.path("alarm").get("subtask")));
+        } else {
+            alarm = projects.environment(subject.projectId(), target.code())
+                    .map(ProjectRepository.EnvironmentRow::alarmRoute).orElse(null);
+            if (alarm == null) {
+                return Optional.of(new Check("ALARM_ROUTE_ACTIVE", true,
+                        "Projenin " + target.code() + " ortamında alarm route'u yok; alarm kontrolü yapılmaz"));
+            }
+        }
+        String name = alarm.maintask() + "/" + alarm.subtask();
+        Optional<RouteRepository.Row> route = routes.find(alarm.maintask(), alarm.subtask());
+        if (route.isEmpty()) {
+            return Optional.of(new Check("ALARM_ROUTE_ACTIVE", false, "Alarm route'u yok: " + name));
+        }
+        Optional<RouteRepository.Deployment> deployed = routes.deployment(route.get().id(), target.code())
+                .filter(deployment -> "ACTIVE".equals(deployment.status()));
+        boolean service = deployed.flatMap(deployment -> routes.history(route.get().id(), deployment.version()))
+                .map(history -> history.snapshot().path("definition").has("alarmService")).orElse(false);
+        return Optional.of(new Check("ALARM_ROUTE_ACTIVE", deployed.isPresent() && service, deployed.isEmpty()
+                ? "Alarm route'u " + name + " " + target.code() + " ortamında aktif değil; önce o taşınmalı"
+                : service ? "Alarm route'u " + name + " v" + deployed.get().version() + " " + target.code()
+                        + " ortamında aktif"
+                        : "Alarm route'u " + name + " " + target.code() + " ortamındaki versiyonunda alarm servisi değil"));
     }
 
     private boolean activeIn(Subject subject, int version, String environment) {

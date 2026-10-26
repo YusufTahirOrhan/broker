@@ -184,7 +184,7 @@ class EventFactory {
                 x.application, x.uid, x.session == null ? null : x.session.userId(), x.queryId,
                 x.session == null ? null : x.session.permissionList(), x.token, x.sessionOperation, x.clientIp,
                 x.userAgent, httpMethod, path, statusCode, outcome, durationMs, body, bodySize, truncated,
-                clientResponse, errorMessage, instance);
+                clientResponse, errorMessage, instance, type == LogEvent.EventType.RESPONSE ? x.alarm : null);
     }
 
     private static Set<String> maskFields(Exchange x) {

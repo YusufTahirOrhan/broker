@@ -88,6 +88,8 @@ public final class RouteValidator {
         }
         RouteDefinition route = parsed.definition();
         RequestSpec request = route.request();
+        boolean alarmService = route.isAlarmService();
+        checkAlarm(route, errors);
 
         if (pathProblems.isEmpty()) {
             Set<String> variables = PathTemplate.parse(pathTemplate).variables();
@@ -106,11 +108,11 @@ public final class RouteValidator {
         }
         for (Map.Entry<String, TemplateString> entry : request.pathVariables().entrySet()) {
             checkTemplate(entry.getValue(), "definition.request.pathVariables." + entry.getKey(), request, context,
-                    true, errors);
+                    true, alarmService, errors);
         }
         for (Map.Entry<String, TemplateString> entry : request.queryParams().entrySet()) {
             checkTemplate(entry.getValue(), "definition.request.queryParams." + entry.getKey(), request, context,
-                    false, errors);
+                    false, alarmService, errors);
         }
         for (Map.Entry<String, TemplateString> entry : request.headers().entrySet()) {
             String path = "definition.request.headers." + entry.getKey();
@@ -119,7 +121,7 @@ public final class RouteValidator {
             } else if (isForbiddenHeader(entry.getKey())) {
                 errors.add(new FieldError(path, "Bu header'ı yalnızca broker doldurur: " + entry.getKey()));
             }
-            checkTemplate(entry.getValue(), path, request, context, false, errors);
+            checkTemplate(entry.getValue(), path, request, context, false, alarmService, errors);
         }
 
         BodySpec body = request.body();
@@ -131,7 +133,7 @@ public final class RouteValidator {
                 String path = located.path().isEmpty()
                         ? "definition.request.body.template"
                         : "definition.request.body.template." + located.path();
-                checkPlaceholder(located.placeholder(), path, request, context, false, errors);
+                checkPlaceholder(located.placeholder(), path, request, context, false, alarmService, errors);
             }
             checkUnclosed(body.rawTemplate(), "definition.request.body.template", errors);
         }
@@ -139,7 +141,7 @@ public final class RouteValidator {
             for (int i = 0; i < body.parts().size(); i++) {
                 PartSpec part = body.parts().get(i);
                 String path = "definition.request.body.parts[" + i + "].value";
-                checkTemplate(part.value(), path, request, context, false, errors);
+                checkTemplate(part.value(), path, request, context, false, alarmService, errors);
                 if (part.file()) {
                     checkFilePart(part, path, request, errors);
                 }
@@ -151,18 +153,38 @@ public final class RouteValidator {
         return errors;
     }
 
+    /** {@code ROUTE} names its alarm service route; an alarm service route has no alarm check of its own. */
+    private static void checkAlarm(RouteDefinition route, List<FieldError> errors) {
+        AlarmSpec alarm = route.alarm();
+        boolean named = alarm.maintask() != null || alarm.subtask() != null;
+        if (alarm.check() == AlarmSpec.Check.ROUTE) {
+            if (!Names.isValidMaintask(alarm.maintask())) {
+                errors.add(new FieldError("definition.alarm.maintask", "Alarm servisi route'unun maintask'i gerekli"));
+            }
+            if (!Names.isValidSubtask(alarm.subtask())) {
+                errors.add(new FieldError("definition.alarm.subtask", "Alarm servisi route'unun subtask'i gerekli"));
+            }
+            if (route.isAlarmService()) {
+                errors.add(new FieldError("definition.alarm.check", "Alarm servisi route'unda alarm kontrolü olmaz"));
+            }
+        } else if (named) {
+            errors.add(new FieldError("definition.alarm.check",
+                    "maintask ve subtask yalnızca check ROUTE iken verilir"));
+        }
+    }
+
     private static void checkTemplate(TemplateString template, String path, RequestSpec request, Context context,
-                                      boolean pathVariable, List<FieldError> errors) {
+                                      boolean pathVariable, boolean alarmService, List<FieldError> errors) {
         if (template.hasUnclosedPlaceholder()) {
             errors.add(new FieldError(path, "Kapanmamış yer tutucu: " + template.source()));
         }
         for (Placeholder placeholder : template.placeholders()) {
-            checkPlaceholder(placeholder, path, request, context, pathVariable, errors);
+            checkPlaceholder(placeholder, path, request, context, pathVariable, alarmService, errors);
         }
     }
 
     private static void checkPlaceholder(Placeholder placeholder, String path, RequestSpec request, Context context,
-                                         boolean pathVariable, List<FieldError> errors) {
+                                         boolean pathVariable, boolean alarmService, List<FieldError> errors) {
         switch (placeholder.root()) {
             case Placeholder.REQUEST -> checkRequestReference(placeholder, path, request, pathVariable, errors);
             case Placeholder.HEADER -> {
@@ -181,6 +203,13 @@ public final class RouteValidator {
             case Placeholder.REQUEST_ID -> {
                 if (!placeholder.path().isEmpty()) {
                     errors.add(new FieldError(path, "Bilinmeyen yer tutucu: " + placeholder));
+                }
+            }
+            case Placeholder.ALARM -> {
+                if (!"values".equals(placeholder.path())) {
+                    errors.add(new FieldError(path, "Alarm için yalnızca ${alarm.values} kullanılabilir"));
+                } else if (!alarmService) {
+                    errors.add(new FieldError(path, "${alarm.values} yalnızca alarm servisi route'unda kullanılır"));
                 }
             }
             case Placeholder.BACKEND, Placeholder.OUTCOME ->

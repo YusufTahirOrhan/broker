@@ -122,10 +122,15 @@ CREATE TABLE project_environment (
     base_url     VARCHAR2(512 CHAR) NOT NULL,                  -- forward hedefi, ortama özgü
     spec_path    VARCHAR2(256 CHAR) DEFAULT '/v3/api-docs' NOT NULL,
     enabled      NUMBER(1)          DEFAULT 1 NOT NULL,
+    -- alarm.check INHERIT olan subtask'lerin alarm servisi route'u; ikisi birlikte ya da hiç
+    alarm_maintask VARCHAR2(100 CHAR),
+    alarm_subtask  VARCHAR2(100 CHAR),
     CONSTRAINT pk_project_environment PRIMARY KEY (project_id, environment),
     CONSTRAINT fk_project_environment_project FOREIGN KEY (project_id) REFERENCES project (id),
     CONSTRAINT fk_project_environment_env FOREIGN KEY (environment) REFERENCES environment (code),
-    CONSTRAINT ck_project_environment_enabled CHECK (enabled IN (0, 1))
+    CONSTRAINT ck_project_environment_enabled CHECK (enabled IN (0, 1)),
+    CONSTRAINT ck_project_environment_alarm CHECK ((alarm_maintask IS NULL AND alarm_subtask IS NULL)
+                                                OR (alarm_maintask IS NOT NULL AND alarm_subtask IS NOT NULL))
 );
 
 -- Güncel hal: subtask başına tek satır. Yetkiler route_permission'da.

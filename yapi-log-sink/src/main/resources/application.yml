@@ -45,6 +45,8 @@ yapi:
       index-prefix: requests_
       # Aylık indeksin ayı bu saat diliminde hesaplanır; eski broker sunucunun saat dilimini (TSİ) kullanıyor
       index-zone: ${YAPI_ELASTIC_INDEX_ZONE:Europe/Istanbul}
+      # Alarm kontrolüne takılan isteklerin eski alarm logu
+      alarm-index: ${YAPI_ELASTIC_ALARM_INDEX:alarm}
       api-key: ${YAPI_ELASTIC_API_KEY:}
       username: ${YAPI_ELASTIC_USERNAME:}
       password: ${YAPI_ELASTIC_PASSWORD:}

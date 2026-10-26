@@ -3,6 +3,8 @@ package com.acme.yapi.envadmin.web;
 import java.util.List;
 import java.util.Map;
 
+import com.acme.yapi.core.route.AlarmRoute;
+
 import tools.jackson.databind.JsonNode;
 
 /** Request bodies of the Admin API, as the central admin sends them. */
@@ -25,8 +27,8 @@ public final class Requests {
     public record Disable(Long promotionId, String actor) {
     }
 
-    /** {@code PUT /admin/v1/projects/{maintask}}. */
-    public record ProjectApply(String baseUrl, Boolean enabled, String actor) {
+    /** {@code PUT /admin/v1/projects/{maintask}}; {@code alarmRoute} null clears it. */
+    public record ProjectApply(String baseUrl, Boolean enabled, AlarmRoute alarmRoute, String actor) {
     }
 
     /** {@code POST /admin/v1/probe}; path variables without a value are filled with a sample. */

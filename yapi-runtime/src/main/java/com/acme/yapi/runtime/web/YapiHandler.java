@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -18,8 +19,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import com.acme.yapi.core.alarm.AlarmValues;
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.logging.LogEvent;
+import com.acme.yapi.core.logging.Masker;
 import com.acme.yapi.core.request.BackendRequest;
 import com.acme.yapi.core.request.BackendRequestBuilder;
 import com.acme.yapi.core.request.RequestBodyValidator;
@@ -28,6 +31,8 @@ import com.acme.yapi.core.request.RequestContext;
 import com.acme.yapi.core.response.ClientResponse;
 import com.acme.yapi.core.response.Outcome;
 import com.acme.yapi.core.response.ResponseProfile;
+import com.acme.yapi.core.route.AlarmRoute;
+import com.acme.yapi.core.route.AlarmSpec;
 import com.acme.yapi.core.route.RouteDefinition;
 import com.acme.yapi.core.route.RouteValidator;
 import com.acme.yapi.core.validation.FieldError;
@@ -141,7 +146,8 @@ public class YapiHandler {
         }
         boolean sessionToken = sessions.isSessionOperation(x.token);
         RouteSnapshot snapshot = routes.snapshot();
-        Optional<Route> found = snapshot.find(x.maintask, x.subtask);
+        // alarm service routes are called by the broker only; for frontends they do not exist
+        Optional<Route> found = snapshot.find(x.maintask, x.subtask).filter(route -> !route.definition().isAlarmService());
         x.knownProject = snapshot.project(x.maintask).orElse(null);
         if (!sessionToken) {
             metrics.legacyIncoming(found.map(Route::maintask).orElse(x.knownProject),
@@ -257,17 +263,23 @@ public class YapiHandler {
         String userId = x.session == null ? null : x.session.userId();
         String permission = x.session == null ? null
                 : RequestContext.firstPermission(route.permissions(), x.session.permissions());
+        RequestContext context = new RequestContext(x.body, validated.effectiveBody(), request::getHeader, readable,
+                userId, permission, x.requestId);
         BackendRequest backendRequest;
         try {
             backendRequest = BackendRequestBuilder.build(route.method(), route.pathTemplate(), definition,
-                    route.baseUrl(), new RequestContext(x.body, validated.effectiveBody(), request::getHeader,
-                            readable, userId, permission, x.requestId));
+                    route.baseUrl(), context);
         } catch (RequestBuildException e) {
             reject(x, response, 400, Outcome.INVALID_REQUEST, "İstek gövdesi alan tanımına uymuyor.",
                     List.of(e.error()));
             return;
         }
         x.targetPath = backendRequest.uri().getRawPath();
+
+        // 6. Alarm kontrolü: servisten önce, alarm servisi route'unun kendi timeout'uyla
+        if (x.sessionOperation == null && !alarmPassed(x, response, context, userId)) {
+            return;
+        }
 
         // 6. Forward
         Map<String, String> extra = new LinkedHashMap<>();
@@ -284,6 +296,116 @@ public class YapiHandler {
                     "Servise ulaşılamadı.", "Servise ulaşılamadı: " + failed.error());
             case Forwarder.Responded responded -> backendResponded(x, response, responded.response());
         }
+    }
+
+    /**
+     * The subtask's alarm check ({@code alarm} of its definition; {@code INHERIT} takes the project's
+     * {@code alarmRoute}): the request's values go to the alarm service route and the request stops here when the
+     * answer lists any, or when there is no usable answer. True when the service may be called.
+     */
+    private boolean alarmPassed(Exchange x, HttpServletResponse response, RequestContext context, String userId)
+            throws IOException {
+        Optional<AlarmRoute> target = alarmRouteOf(x.route);
+        if (target.isEmpty()) {
+            return true;
+        }
+        x.alarm = Json.object();
+        x.alarm.put("maintask", target.get().maintask());
+        x.alarm.put("subtask", target.get().subtask());
+        Optional<Route> service = routes.find(target.get().maintask(), target.get().subtask())
+                .filter(route -> route.definition().isAlarmService());
+        if (service.isEmpty()) {
+            log.error("Alarm servisi route'u ortamda yok ya da alarm servisi değil: {}/{} (requestId={})",
+                    target.get().maintask(), target.get().subtask(), x.requestId);
+            return alarmFailed(x, response, "Alarm servisi route'u yok: " + target.get().maintask() + "/"
+                    + target.get().subtask());
+        }
+        Route alarmRoute = service.get();
+        RouteDefinition definition = alarmRoute.definition();
+        Set<String> masked = x.route.definition().logging().effectiveMaskFields();
+        BackendRequest alarmRequest;
+        try {
+            alarmRequest = BackendRequestBuilder.build(alarmRoute.method(), alarmRoute.pathTemplate(), definition,
+                    alarmRoute.baseUrl(), context.withAlarmValues(AlarmValues.of(x.body, masked)));
+        } catch (RequestBuildException e) {
+            return alarmFailed(x, response, "Alarm isteği kurulamadı: " + e.error().message());
+        }
+        Map<String, String> extra = new LinkedHashMap<>();
+        extra.put("traceparent", x.trace.traceparent());
+        if (userContext.enabled() && userId != null) {
+            extra.put(userContext.header(), userContext.sign(userId, x.requestId, Instant.now()));
+        }
+        Forwarder.Result result = forwarder.send(alarmRequest, definition.timeoutMs(), 1, extra);
+        JsonNode answer;
+        switch (result) {
+            case Forwarder.TimedOut timedOut -> {
+                return alarmFailed(x, response, "Alarm servisi " + definition.timeoutMs() + " ms içinde yanıt vermedi");
+            }
+            case Forwarder.Failed failed -> {
+                return alarmFailed(x, response, "Alarm servisine ulaşılamadı: " + failed.error());
+            }
+            case Forwarder.Responded responded -> {
+                HttpResponse<InputStream> reply = responded.response();
+                BackendResponses.Body body;
+                try {
+                    body = BackendResponses.read(reply, forward.maxResponseBytes(),
+                            System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(definition.timeoutMs()));
+                } catch (TimeoutException | IOException e) {
+                    return alarmFailed(x, response, "Alarm servisinin yanıtı okunamadı: " + e);
+                }
+                if (reply.statusCode() < 200 || reply.statusCode() >= 300) {
+                    return alarmFailed(x, response, "Alarm servisi " + reply.statusCode() + " döndü");
+                }
+                answer = body.tooLarge() ? null : Json.tryParse(body.bytes());
+            }
+        }
+        Optional<List<String>> alarms = AlarmValues.alarms(answer, definition.alarmService().resultPath());
+        if (alarms.isEmpty()) {
+            return alarmFailed(x, response, "Alarm servisinin yanıtında alarm listesi yok");
+        }
+        if (alarms.get().isEmpty()) {
+            x.alarm = null;
+            return true;
+        }
+        x.alarm.set("alarms", Json.stringArray(alarms.get()));
+        x.alarm.set("params", Masker.mask(x.body, masked));
+        log.warn("İstek alarm kontrolüne takıldı: {}/{}, uid={}, alarm={} (requestId={})", x.route.maintask(),
+                x.route.subtask(), x.uid, alarms.get().size(), x.requestId);
+        if (legacyResponses) {
+            ObjectNode legacy = YapiErrors.legacyAlarm();
+            finish(x, response, Reply.json(200, Outcome.ALARM, legacy),
+                    events.response(x, 200, Outcome.ALARM, null, null, EventFactory.legacyLogged(legacy), null));
+        } else {
+            ObjectNode error = YapiErrors.body(403, Outcome.ALARM, "İstek alarm kontrolüne takıldı; servis çağrılmadı.",
+                    x.requestId, List.of());
+            finish(x, response, Reply.json(403, Outcome.ALARM, error),
+                    events.response(x, 403, Outcome.ALARM, null, null, error, null));
+        }
+        return false;
+    }
+
+    private Optional<AlarmRoute> alarmRouteOf(Route route) {
+        if (route.definition().isAlarmService()) {
+            return Optional.empty();
+        }
+        AlarmSpec alarm = route.definition().alarm();
+        return switch (alarm.check()) {
+            case OFF -> Optional.empty();
+            case ROUTE -> Optional.of(new AlarmRoute(alarm.maintask(), alarm.subtask()));
+            case INHERIT -> routes.snapshot().projectOf(route.maintask())
+                    .map(RouteSnapshot.Project::alarmRoute);
+        };
+    }
+
+    /** The check could not be made: the request is refused, the service is not called. */
+    private boolean alarmFailed(Exchange x, HttpServletResponse response, String error) throws IOException {
+        x.alarm.put("error", error);
+        log.error("Alarm kontrolü yapılamadı: {} (requestId={})", error, x.requestId);
+        ObjectNode body = YapiErrors.body(503, Outcome.TECHNICAL_ERROR, "Alarm kontrolü yapılamadı; istek gönderilmedi.",
+                x.requestId, List.of());
+        finish(x, response, Reply.json(503, Outcome.TECHNICAL_ERROR, body),
+                events.response(x, 503, Outcome.TECHNICAL_ERROR, null, null, body, error));
+        return false;
     }
 
     // 7-8. Servis yanıtı: outcome gerçek status'tan, sonra zarf

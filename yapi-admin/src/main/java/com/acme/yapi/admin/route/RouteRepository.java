@@ -91,6 +91,14 @@ public class RouteRepository {
         return jdbc.sql(SELECT + " WHERE r.id = :id").param("id", id).query(RouteRepository::row).optional();
     }
 
+    /** By name, without case, as the broker finds it. */
+    public Optional<Row> find(String maintask, String subtask) {
+        return jdbc.sql(SELECT + " WHERE LOWER(p.maintask) = LOWER(:maintask) AND LOWER(r.subtask) = LOWER(:subtask)")
+                .param("maintask", maintask)
+                .param("subtask", subtask)
+                .query(RouteRepository::row).optional();
+    }
+
     public long insert(long projectId, String subtask, Content content, String user, String comment) {
         KeyHolder keys = new GeneratedKeyHolder();
         jdbc.sql("""

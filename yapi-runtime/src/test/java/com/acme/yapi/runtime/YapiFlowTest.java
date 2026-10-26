@@ -28,6 +28,7 @@ import org.springframework.test.context.DynamicPropertySource;
 
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.logging.LogEvent;
+import com.acme.yapi.core.route.AlarmRoute;
 import com.acme.yapi.core.runtime.RuntimeSignals;
 import com.acme.yapi.core.session.SessionRecord;
 import com.acme.yapi.core.session.SessionRecordCodec;
@@ -58,6 +59,7 @@ import tools.jackson.databind.JsonNode;
 class YapiFlowTest {
 
     static final FakeHttpServer backend = FakeHttpServer.start();
+    static final FakeHttpServer alarmService = FakeHttpServer.start();
     static final Path spool = temporaryDirectory();
 
     @DynamicPropertySource
@@ -69,6 +71,7 @@ class YapiFlowTest {
     @AfterAll
     static void stop() {
         backend.close();
+        alarmService.close();
     }
 
     @LocalServerPort
@@ -730,5 +733,131 @@ class YapiFlowTest {
         } catch (java.io.IOException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    /**
+     * An alarm service that finds an alarm in one value: answers {@code {"result": {"alarms": [...]}}} with the values
+     * of the request equal to {@code 10000000146}.
+     */
+    private void alarmService() {
+        alarmService.reset();
+        alarmService.on("POST", "/check", (exchange, request) -> {
+            JsonNode values = Json.parse(request.bodyText()).get("values");
+            tools.jackson.databind.node.ArrayNode alarms = Json.array();
+            values.forEach(value -> {
+                if ("10000000146".equals(value.stringValue())) {
+                    alarms.add(value.stringValue());
+                }
+            });
+            tools.jackson.databind.node.ObjectNode answer = Json.object();
+            answer.putObject("result").set("alarms", alarms);
+            FakeHttpServer.respond(exchange, 200, Map.of("Content-Type", "application/json"), Json.writeBytes(answer));
+        });
+        RuntimeFixture.project("guvenlik", alarmService.baseUrl());
+        RuntimeFixture.route("guvenlik", "alarm_kontrol", "POST", "/check", List.of(), true, null, """
+                {"alarmService": {"resultPath": "result.alarms"}, "timeoutMs": 500,
+                 "request": {"headers": {"X-Clientip": "${header.X-Clientip}"},
+                             "body": {"mode": "TEMPLATE", "contentType": "application/json",
+                                      "template": {"values": "${alarm.values}", "uid": "${request.uid}",
+                                                   "requestId": "${requestId}"}}}}
+                """);
+        RuntimeFixture.project("sorgu", backend.baseUrl(), new AlarmRoute("guvenlik", "alarm_kontrol"));
+        RuntimeFixture.route("sorgu", "kisi_sorgu", "POST", "/kisi", List.of("ORDER_READ"), false, null, """
+                {"request": {"fields": [{"name": "reason", "type": "string", "required": true}],
+                             "body": {"mode": "PASS_THROUGH"}},
+                 "logging": {"maskFields": ["kart"]}}
+                """);
+        RuntimeFixture.route("sorgu", "duyuru", "POST", "/duyuru", List.of("ORDER_READ"), false, null,
+                "{\"alarm\": {\"check\": \"OFF\"}, \"request\": {\"body\": {\"mode\": \"PASS_THROUGH\"}}}");
+        RuntimeFixture.route("order-service", "find_by_tckn", "POST", "/customers/search", List.of("ORDER_READ"), false,
+                null, """
+                {"alarm": {"check": "ROUTE", "maintask": "guvenlik", "subtask": "alarm_kontrol"},
+                 "request": {"body": {"mode": "PASS_THROUGH"}}}
+                """);
+        cache.reload();
+        backend.json("POST", "/kisi", 200, "{\"ad\": \"Ali\"}");
+        backend.json("POST", "/duyuru", 200, "[]");
+        backend.json("POST", "/customers/search", 200, "[]");
+    }
+
+    @Test
+    void theAlarmServiceSeesTheRequestsValuesBeforeTheServiceIsCalled() {
+        alarmService();
+
+        JsonHttp.Response clean = yapi("tok-1", """
+                {"maintask": "sorgu", "subtask": "kisi_sorgu", "reason": "Müşteri talebi", "tckn": "12345678950",
+                 "password": "gizli", "kisi": {"kart": "4111", "yas": 42}}
+                """);
+
+        assertThat(clean.status()).as(clean.text()).isEqualTo(200);
+        assertThat(backend.requests("/kisi")).hasSize(1);
+        FakeHttpServer.Recorded check = alarmService.requests("/check").getFirst();
+        assertThat(Json.parse(check.bodyText())).isEqualTo(Json.parse("""
+                {"values": ["Müşteri talebi", "12345678950", "42"], "uid": "u12345", "requestId": "%s"}
+                """.formatted(clean.header("X-Request-Id"))));
+        assertThat(check.header("X-Clientip")).isEqualTo(CLIENT_IP);
+        assertThat(events.awaitType(clean.header("X-Request-Id"), LogEvent.EventType.RESPONSE).alarm()).isNull();
+
+        JsonHttp.Response alarmed = yapi("tok-1", """
+                {"maintask": "sorgu", "subtask": "kisi_sorgu", "reason": "Rutin", "tckn": "10000000146",
+                 "kisi": {"kart": "4111"}}
+                """);
+
+        assertThat(alarmed.status()).isEqualTo(200);
+        assertThat(alarmed.json()).isEqualTo(Json.parse("{\"response\": false, \"badprocess\": true, \"status\": 500}"));
+        assertThat(alarmed.text()).isEqualTo("{\"response\":false,\"badprocess\":true,\"status\":500}");
+        assertThat(backend.requests("/kisi")).hasSize(1);
+        LogEvent event = events.awaitType(alarmed.header("X-Request-Id"), LogEvent.EventType.RESPONSE);
+        assertThat(event.outcome()).isEqualTo("ALARM");
+        assertThat(event.alarm()).isEqualTo(Json.parse("""
+                {"maintask": "guvenlik", "subtask": "alarm_kontrol", "alarms": ["10000000146"],
+                 "params": {"maintask": "sorgu", "subtask": "kisi_sorgu", "reason": "Rutin", "tckn": "10000000146",
+                            "kisi": {"kart": "xxxx"}, "uid": "u12345", "application": "web"}}
+                """));
+        assertThat(event.clientResponse()).isEqualTo(Json.parse(
+                "{\"response\": false, \"badprocess\": true, \"status\": 500, \"data\": \"\"}"));
+        assertThat(meters.find("yapi.requests").tags("maintask", "sorgu", "subtask", "kisi_sorgu", "outcome", "ALARM")
+                .timer().count()).isEqualTo(1L);
+    }
+
+    @Test
+    void theAlarmCheckFollowsTheSubtasksSetting() {
+        alarmService();
+
+        assertThat(yapi("tok-1", "{\"maintask\": \"sorgu\", \"subtask\": \"duyuru\", \"q\": \"10000000146\"}")
+                .status()).isEqualTo(200);
+        assertThat(alarmService.requests("/check")).isEmpty();
+
+        JsonHttp.Response named = yapi("tok-1",
+                "{\"maintask\": \"order-service\", \"subtask\": \"find_by_tckn\", \"tckn\": \"10000000146\"}");
+        assertThat(named.json().get("badprocess").booleanValue()).isTrue();
+        assertThat(alarmService.requests("/check")).hasSize(1);
+        assertThat(backend.requests("/customers/search")).isEmpty();
+
+        // the alarm service route is the broker's own: frontends do not see it
+        JsonHttp.Response direct = yapi("tok-1", "{\"maintask\": \"guvenlik\", \"subtask\": \"alarm_kontrol\"}");
+        assertThat(direct.status()).isEqualTo(404);
+        assertThat(direct.json().get("outcome").stringValue()).isEqualTo("UNKNOWN_TASK");
+        assertThat(alarmService.requests("/check")).hasSize(1);
+    }
+
+    @Test
+    void withoutAnAnswerFromTheAlarmServiceTheRequestIsRefused() {
+        alarmService();
+        for (int[] status : new int[][]{{500}, {200}}) {
+            alarmService.json("POST", "/check", status[0], status[0] == 200 ? "{\"result\": {}}" : "{}");
+
+            JsonHttp.Response refused = yapi("tok-1", "{\"maintask\": \"sorgu\", \"subtask\": \"kisi_sorgu\", "
+                    + "\"reason\": \"Rutin\"}");
+
+            assertThat(refused.status()).isEqualTo(503);
+            assertThat(refused.json().get("outcome").stringValue()).isEqualTo("TECHNICAL_ERROR");
+            assertThat(refused.json().get("message").stringValue())
+                    .isEqualTo("Alarm kontrolü yapılamadı; istek gönderilmedi.");
+            LogEvent event = events.awaitType(refused.header("X-Request-Id"), LogEvent.EventType.RESPONSE);
+            assertThat(Json.stringField(event.alarm(), "error")).isNotBlank();
+            assertThat(event.errorMessage()).isEqualTo(Json.stringField(event.alarm(), "error"));
+        }
+        assertThat(backend.requests("/kisi")).isEmpty();
     }
 }

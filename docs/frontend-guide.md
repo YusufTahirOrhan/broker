@@ -56,7 +56,7 @@ Uygulama dört ana bölümden oluşur: Projeler, Yanıt profilleri, Talepler ve 
 Sekmeler: Genel, Ortamlar, Yetkiler, Subtask'ler ve Spec.
 
 - **Genel:** Görünen ad, takım, açıklama ve varsayılan yanıt profili (`PATCH /projects/{id}`). Varsayılan profil yeni subtask formunda ön seçim olur.
-- **Ortamlar:** Ortam başına base URL, spec yolu ve açık/kapalı (`PUT /projects/{id}/environments/{env}`). Kayıt o ortama hemen uygulanır; ortama ulaşılamazsa 502 `ENV_UNREACHABLE` döner ve hiçbir şey değişmez. Onay isteyen ortamda (PROD) bu ayarı yalnızca `APPROVER` değiştirebilir.
+- **Ortamlar:** Ortam başına base URL, spec yolu, açık/kapalı ve alarm route'u (`PUT /projects/{id}/environments/{env}`). Alarm route'u, alarm kontrolü `INHERIT` olan subtask'lerin o ortamda gittiği alarm servisi route'udur; seçim listesi alarm servisi olan subtask'lerdir, boş bırakılırsa o ortamda bu subtask'lere alarm kontrolü yapılmaz. Kayıt o ortama hemen uygulanır; ortama ulaşılamazsa 502 `ENV_UNREACHABLE` döner ve hiçbir şey değişmez. Onay isteyen ortamda (PROD) bu ayarı yalnızca `APPROVER` değiştirebilir.
 - **Yetkiler:** Projenin yetkileri seçilen ortamın Koordinatör'ünden listelenir (`GET /projects/{id}/permissions?env=DEV`): Koordinatör'deki projesinin yetki listesi (`projeId` eşleşmesi); Koordinatör'e bağlı olmayan (`UNLINKED`) projede liste boştur. Yetkiler Koordinatör'de açılır; ekranda "yetki ekle" yoktur. Her yetkinin yanında onu kullanan subtask sayısı durur; tıklanınca liste açılır (`GET /permissions/{code}/routes`).
 - **Subtask'ler:** Liste (`GET /projects/{id}/routes`) ve her satırda ortam rozetleri: `DEV v4 · PREPROD v4 · PROD v3`. Rozet, güncel versiyonun aktif olduğunu, eski bir versiyonun aktif olduğunu, `DISABLED` olduğunu ya da hiç taşınmadığını ayırt etmelidir.
 
@@ -69,8 +69,9 @@ Yeni ve mevcut subtask aynı formu kullanır (`POST /projects/{id}/routes`, `PUT
 3. **Alanlar:** `fields` tablosu: ad (noktalı yol), tip, zorunlu, varsayılan.
 4. **Eşleme:** Path şablonundaki her `{değişken}` için bir satır kendiliğinden açılır. Query, header ve body için anahtar-değer satırları vardır; değer alanına `${` yazılınca alanlar ve diğer yer tutucular önerilir. Body modu `NONE`, `PASS_THROUGH`, `TEMPLATE` ya da `MULTIPART`'tır; `TEMPLATE`'te JSON editörü açılır.
 5. **Yanıt:** Tip (`JSON`, `TEXT`, `BINARY`) ve yanıt profili; profil boş bırakılabilir.
-6. **Çalışma ve log:** Timeout, retry, istek gövdesinin loglanması, "Yanıt verisi loglansın" seçeneği (`logResponseBody`, varsayılan kapalı), maskelenecek alanlar, en fazla body boyutu ve dosya yanıtları için `binaryInfo` metni. "Yanıt verisi loglansın" açılınca editör, yanıttaki kişisel verilerin maskelenecek alanlara eklenmesini hatırlatır.
-7. **Değişiklik notu:** Kayıtla birlikte geçmişe yazılır.
+6. **Alarm:** "Alarm kontrolü" seçimi: projenin ortam ayarındaki alarm route'u (`INHERIT`, varsayılan), kapalı (`OFF`) ya da seçilen bir alarm servisi route'u (`ROUTE`, maintask ve subtask). "Bu bir alarm servisi" anahtarı açılınca subtask alarm servisi olur: alarm listesinin yanıttaki yolu (`resultPath`) girilir, gövde şablonunda `${alarm.values}` önerilir ve alarm kontrolü seçimi gizlenir. Alarm servisi frontend'den çağrılamaz.
+7. **Çalışma ve log:** Timeout, retry, istek gövdesinin loglanması, "Yanıt verisi loglansın" seçeneği (`logResponseBody`, varsayılan kapalı), maskelenecek alanlar, en fazla body boyutu ve dosya yanıtları için `binaryInfo` metni. "Yanıt verisi loglansın" açılınca editör, yanıttaki kişisel verilerin maskelenecek alanlara eklenmesini hatırlatır.
+8. **Değişiklik notu:** Kayıtla birlikte geçmişe yazılır.
 
 - **Anlık doğrulama:** Form değiştikçe (yaklaşık 500 ms bekleyerek) `POST /routes/validate` çağrılır. Dönen `errors[].field` yolu forma eşlenir, örneğin `definition.request.pathVariables.id`. Aynı doğrulama kayıtta da çalışır.
 - **Önizleme:** Örnek bir frontend gövdesiyle servise gidecek isteği (method, URL, header'lar, body) kaydetmeden gösterir (`POST /routes/preview`).
@@ -203,7 +204,7 @@ Tüm yollar `/api/v1` altındadır. Rol sütunu en az gereken roldür; şemalar�
 | POST | `/projects` | ROUTE\_EDITOR | Projeyi kaydeder |
 | GET | `/projects/{id}` | VIEWER | Proje ve ortam ayarları |
 | PATCH | `/projects/{id}` | ROUTE\_EDITOR | Ad, takım, açıklama, varsayılan profil; `UNLINKED` projeyi Koordinatör'deki projesine bağlama |
-| PUT | `/projects/{id}/environments/{env}` | ROUTE\_EDITOR (onaylı ortamda APPROVER) | Base URL, spec yolu, açık/kapalı; ortama hemen uygulanır |
+| PUT | `/projects/{id}/environments/{env}` | ROUTE\_EDITOR (onaylı ortamda APPROVER) | Base URL, spec yolu, açık/kapalı, alarm route'u; ortama hemen uygulanır |
 | GET | `/projects/{id}/permissions?env=` | VIEWER | Projenin ortamdaki Koordinatör yetkileri ve kullanan subtask sayısı |
 | GET | `/permissions/{code}/routes` | VIEWER | Yetkiyi kullanan subtask'ler, `OWN` ya da `FOREIGN` |
 
@@ -385,8 +386,8 @@ Yukarıdaki örneklerde görünmeyen gövde ve yanıt alanları. Alan adları ca
 | `GET /environments/{env}/status` | — | `{"environment", "configVersion", "configUpdatedAt", "instanceCount", "upToDateCount", "instances": [{"instanceId", "loadedVersion", "loadedAt", "upToDate", "lagging"}]}`. `lagging`: bir dakikadan uzun süredir geride. Ortama ulaşılamazsa 502 `ENV_UNREACHABLE` |
 | `POST /projects` | `{"externalProjectId", "maintask", "permissionPrefix", "name", "ownerTeam", "description", "defaultResponseProfileId"}` | `externalProjectId` Koordinatör'deki `projeId`; `name` boşsa Koordinatör'deki `projeAdi`. `externalProjectId` olmadan kayıt `UNLINKED` olur (geçiş için). 201 ve proje |
 | `PATCH /projects/{id}` | Değişecek alanlar: `name`, `ownerTeam`, `description`, `defaultResponseProfileId` (`null` temizler), `externalProjectId` | `externalProjectId` yalnızca `UNLINKED` projeyi bağlar, proje `LINKED` olur. `maintask` ya da `permissionPrefix` farklı gönderilirse 400 |
-| `GET /projects`, `GET /projects/{id}` | — | Proje alanları, `defaultResponseProfile: {id, name}` ve `environments: [{environment, baseUrl, specPath, enabled}]` |
-| `PUT /projects/{id}/environments/{env}` | `{"baseUrl", "specPath", "enabled"}` | `specPath` varsayılan `/v3/api-docs`, `enabled` varsayılan `true`. Yanıt `{"environment", "baseUrl", "specPath", "enabled", "configVersion"}` |
+| `GET /projects`, `GET /projects/{id}` | — | Proje alanları, `defaultResponseProfile: {id, name}` ve `environments: [{environment, baseUrl, specPath, enabled, alarmRoute}]` |
+| `PUT /projects/{id}/environments/{env}` | `{"baseUrl", "specPath", "enabled", "alarmRoute"}` | `specPath` varsayılan `/v3/api-docs`, `enabled` varsayılan `true`. `alarmRoute` `{"maintask", "subtask"}` ya da `null` (yok; gönderilmezse de `null`). Route kayıtlı ve güncel versiyonu alarm servisi olmalı, yoksa 400 (`field: alarmRoute`); harf farkı kabul edilir, kayıtlı yazımıyla saklanır. Ortamda aktif olması burada değil, taşımada aranır (`ALARM_ROUTE_ACTIVE`). Yanıt `{"environment", "baseUrl", "specPath", "enabled", "alarmRoute", "configVersion"}` |
 | `GET /projects/{id}/permissions?env=` | — | `env` verilmezse ilk ortam. Öğe `{"code", "suffix", "description", "routeCount"}`; `suffix` kodun önekten sonraki kısmı (kod önekle başlamıyorsa `null`), `description` Koordinatör vermediği için `null`; `routeCount` tüm projelerde yetkiyi kullanan, arşivde olmayan subtask sayısı. Ortamın listesi birkaç dakika önbellekte tutulur |
 | `POST /projects/{id}/routes`, `PUT /routes/{id}` | Örnekteki gövde ve isteğe bağlı `specOperation` | `specOperation`, spec karşılaştırmasındaki öğenin aynı adlı alanıdır; kaydedilince `specFingerprint` hesaplanır ve `CHANGED` bundan bulunur. Kayıtta her yetki ilk ortamın (DEV) yetkilendirme servisinde aranır; yoksa alan hatası döner |
 | `POST /routes/{id}/archive`, `/restore` | İsteğe bağlı `{"version", "comment"}` | Güncel subtask |
@@ -438,6 +439,8 @@ Ekran bu kuralları `GET /meta/definition-rules` yanıtından okur ve kendi içi
 | `logging.maskFields` | Alan adları | `password` her zaman maskelenir; listedekiler ona eklenir |
 | `logging.maxBodyBytes` | 1–262144 | Varsayılan 65536; yalnızca yanıt body'si için |
 | `logging.binaryInfo` | Metin | Dosya yanıtında Elastic'e yazılan `info` mesajı |
+| `alarm.check` | `INHERIT`, `OFF`, `ROUTE` | Varsayılan `INHERIT`: projenin ortamdaki `alarmRoute`'u, yoksa kontrol yok. `ROUTE`'ta `alarm.maintask` ve `alarm.subtask` zorunlu, diğerlerinde verilmez. Alarm servisinde `alarm` olmaz |
+| `alarmService.resultPath` | Noktalı JSON yolu ya da boş | Varsa subtask alarm servisidir. Yanıtta alarm listesinin yolu (`data.alarms`); boşsa yanıtın kendisi dizi. Liste dolu dönerse istek durdurulur |
 
 ### Yer tutucular
 
@@ -450,6 +453,7 @@ Değeri yalnızca bir yer tutucudan oluşan alan değerin tipini korur: `"${requ
 | `${user.id}` | Tanım | Oturum kaydıyla doğrulanan kullanıcı: kayıt gövdedeki `uid` ile bulunur, token, `X-Clientip` ve `X-User-Agent` eşleşmelidir. Oturum yoksa boş |
 | `${user.permission}` | Tanım | Kullanıcıda olan ilk route yetkisi: önce `permissions`, sonra `foreignPermissions`, tanımdaki sırayla. Oturum yoksa ya da kullanıcıda bu yetkilerden hiçbiri yoksa değeri yoktur, alan yazılmaz. Önizleme ve testte kullanıcının formdaki yetkilere sahip olduğu varsayılır |
 | `${requestId}` | Tanım, profil | İsteğin ID'si |
+| `${alarm.values}` | Yalnızca alarm servisi tanımı | Gelen isteğin gövdesindeki bütün yaprak değerler (iç içe dahil), metin olarak ve sırayla, JSON dizisi. Zarf alanları (`definition-rules`'da `alarm.excludedFromValues`), maskelenen alanlar ve `null`'lar hariç. Önizleme ve testte değeri yoktur, alan yazılmaz |
 | `${backend.status}` | Profil | Servisin HTTP status kodu; timeout'ta null |
 | `${backend.body}` | Profil | Servisin yanıt gövdesi; `error` şablonunda yalnızca 4xx'te dolu |
 | `${outcome}` | Profil | `SUCCESS`, `BUSINESS_ERROR`, `TECHNICAL_ERROR`, `TIMEOUT` |
@@ -467,7 +471,8 @@ Değeri yalnızca bir yer tutucudan oluşan alan değerin tipini korur: `"${requ
 | Talep durumu | `PENDING_APPROVAL`, `APPROVED`, `REJECTED`, `APPLYING`, `APPLIED`, `FAILED`, `CANCELLED` |
 | `allowedActions` | `APPROVE`, `REJECT`, `CANCEL`, `RETRY` |
 | Yoklama sonucu | `OK`, `WRONG_METHOD`, `PATH_NOT_FOUND`, `INCONCLUSIVE` |
-| Outcome | `SUCCESS`, `BUSINESS_ERROR`, `TECHNICAL_ERROR`, `TIMEOUT`, `DENIED`, `UNKNOWN_TASK`, `INVALID_REQUEST`, `LOG_UNAVAILABLE` |
+| Outcome | `SUCCESS`, `BUSINESS_ERROR`, `TECHNICAL_ERROR`, `TIMEOUT`, `DENIED`, `UNKNOWN_TASK`, `INVALID_REQUEST`, `ALARM`, `LOG_UNAVAILABLE` |
+| `alarm.check` | `INHERIT`, `OFF`, `ROUTE` |
 
 ### Ön kontroller
 
@@ -480,10 +485,11 @@ Değeri yalnızca bir yer tutucudan oluşan alan değerin tipini korur: `"${requ
 | `PERMISSIONS_EXIST` | Yetkiler hedef ortamın Koordinatör'ünde, bir Yapi projesinin yetkileri arasında |
 | `PROFILE_ACTIVE` | Subtask'in yanıt profili hedef ortamda aktif |
 | `PROJECT_ENABLED` | Proje hedef ortamda tanımlı ve açık |
+| `ALARM_ROUTE_ACTIVE` | Subtask'in alarm route'u (`ROUTE`'ta tanımdaki, `INHERIT`'te projenin hedef ortamdaki `alarmRoute`'u) hedef ortamda aktif ve oradaki versiyonu alarm servisi. `INHERIT`'te projenin hedefte alarm route'u yoksa geçer. Alarm servislerinde ve `OFF`'ta çalışmaz |
 | `DEPLOYED_IN_TARGET` | `DISABLE` ve `ENABLE`'da subtask hedef ortamda var |
 | `PREVIOUSLY_APPLIED` | `ROLLBACK`'te versiyon hedef ortama daha önce uygulanmış |
 
-Aksiyona göre çalışan kontroller: `DEPLOY`'da `SUBJECT_ACTIVE`, `NEXT_ENVIRONMENT`, `SOURCE_ACTIVE` (ilk ortamda yok), `NO_OPEN_REQUEST`, `PERMISSIONS_EXIST`, `PROFILE_ACTIVE`, `PROJECT_ENABLED`. `ROLLBACK`'te `NEXT_ENVIRONMENT` ve `SOURCE_ACTIVE` yerine `PREVIOUSLY_APPLIED`. `DISABLE`'da `NO_OPEN_REQUEST` ve `DEPLOYED_IN_TARGET` (hedefte `ACTIVE`). `ENABLE`'da `SUBJECT_ACTIVE`, `NO_OPEN_REQUEST`, `DEPLOYED_IN_TARGET` (hedefte `DISABLED`) ile yetki, profil ve proje kontrolleri. Profil taleplerinde yalnızca `NEXT_ENVIRONMENT`, `SOURCE_ACTIVE`, `NO_OPEN_REQUEST` ve `PREVIOUSLY_APPLIED`. `422` yanıtı çalışan kontrollerin hepsini `ok` bilgisiyle listeler.
+Aksiyona göre çalışan kontroller: `DEPLOY`'da `SUBJECT_ACTIVE`, `NEXT_ENVIRONMENT`, `SOURCE_ACTIVE` (ilk ortamda yok), `NO_OPEN_REQUEST`, `PERMISSIONS_EXIST`, `PROFILE_ACTIVE`, `PROJECT_ENABLED`, `ALARM_ROUTE_ACTIVE`. `ROLLBACK`'te `NEXT_ENVIRONMENT` ve `SOURCE_ACTIVE` yerine `PREVIOUSLY_APPLIED`. `DISABLE`'da `NO_OPEN_REQUEST` ve `DEPLOYED_IN_TARGET` (hedefte `ACTIVE`). `ENABLE`'da `SUBJECT_ACTIVE`, `NO_OPEN_REQUEST`, `DEPLOYED_IN_TARGET` (hedefte `DISABLED`) ile yetki, profil, proje ve alarm kontrolleri. Profil taleplerinde yalnızca `NEXT_ENVIRONMENT`, `SOURCE_ACTIVE`, `NO_OPEN_REQUEST` ve `PREVIOUSLY_APPLIED`. `422` yanıtı çalışan kontrollerin hepsini `ok` bilgisiyle listeler.
 
 ### Broker'ın uygulamalara döndüğü yanıtlar
 
@@ -514,6 +520,10 @@ Test panelindeki `clientResponse` bu kurallarla üretilir; uygulama frontend'ler
 | maintask/subtask kayıtlı değil (oturum geçersizse yukarıdaki 301 yanıtı döner) | 404 | Ortak format, `UNKNOWN_TASK` |
 | Gövde `fields` tanımına uymuyor | 400 | Ortak format, `INVALID_REQUEST`; `errors` alan bazında |
 | Oturum okunamadı (Redis) | 503 | Ortak format, `TECHNICAL_ERROR` |
+| Alarm kontrolü alarm buldu; servis çağrılmadı | 200 | `{"response": false, "badprocess": true, "status": 500}`, `ALARM`. Eski yanıtlar kapalıysa (`legacy-responses`) 403 ortak format, `ALARM` |
+| Alarm servisine ulaşılamadı, 2xx dışı döndü ya da yanıtı okunamadı | 503 | Ortak format, `TECHNICAL_ERROR`; "Alarm kontrolü yapılamadı; istek gönderilmedi." |
+
+Alarm kontrolü oturum, yetki ve alan doğrulamasından sonra, servis çağrısından önce yapılır; test çağrısında yapılmaz. Alarm servisi route'u kendi timeout'uyla, tek denemeyle çağrılır. Alarm olan istek Elastic'te eski `alarm` indeksine de yazılır.
 
 `X-Token: login` ve `logout` istekleri gövdedeki maintask'a bakılmadan giriş servisinin route'larına gider; yanıtları eski broker'la birebir aynıdır (tasarım dokümanında "Giriş ve oturum").
 
@@ -523,6 +533,7 @@ Backend geliştirildikçe bu tablo güncellenir; en yeni kayıt en üsttedir. Bi
 
 | Tarih | Değişiklik |
 | --- | --- |
+| 2026-10-26 | Alarm: proje ortam ayarında `alarmRoute` (`{"maintask", "subtask"}` ya da `null`; gövdede, yanıtta ve `environments[]`'de), subtask tanımında `alarm` (`check`: `INHERIT`, `OFF`, `ROUTE`) ve `alarmService` (`resultPath`), yeni yer tutucu `${alarm.values}` (yalnızca alarm servisinde), yeni outcome `ALARM`, yeni ön kontrol `ALARM_ROUTE_ACTIVE`. `definition-rules`'da `placeholders.alarmService` ve `alarm` (`checks`, `default`, `excludedFromValues`). Alarm servisi frontend'den çağrılamaz (404 `UNKNOWN_TASK`). |
 | 2026-10-26 | Admin'e giriş: SSO ve `Authorization: Bearer` kalktı. Ekran her istekte giriş uygulamasının oturumunu gönderir (`X-Token`, `X-Uid`, `X-Clientip`, `X-User-Agent`); oturum geçersizse 401, Yapi yetkisi (`YAPI_DEVELOPER`, `YAPI_ADMIN`) yoksa ya da rol yetmezse 403. `GET /me`'de `username` ve `displayName` sicil. `local` profilinde HTTP Basic aynı. |
 | 2026-10-26 | Koordinatör'ün gerçek uçları: proje kataloğu (`/catalog/projects`) Koordinatör'ün Yapi projeleri (`is_yapi`), ID `projeId`, ad `projeAdi`; projenin yetkileri ortamın Koordinatör'ündeki projesinin listesi (`UNLINKED` projede boş), `description` `null`, `suffix` önekle başlamayan kodda `null`. Yetki açma kalktı: `POST /projects/{id}/permissions` yok (405), ekranda "yetki ekle" yok; yetkiler Koordinatör'de açılır. Hata ve ön kontrol mesajlarında "yetkilendirme servisi" yerine "Koordinatör". |
 | 2026-10-26 | Ortamlar DEV, PREPROD, PROD: TEST'in kodu `PREPROD` oldu (`GET /environments`, `env` parametreleri, taşıma talepleri, rozetler). Ön kontrol mesajı "v4 PREPROD ortamında aktif" biçiminde. |

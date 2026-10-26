@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import com.acme.yapi.core.naming.Names;
+import com.acme.yapi.core.route.AlarmRoute;
 
 /**
  * An immutable view of the runtime DB at one config version. Lookups ignore case with {@link Names#key}, so
@@ -15,8 +16,12 @@ public final class RouteSnapshot {
 
     public static final RouteSnapshot EMPTY = new RouteSnapshot(-1, Map.of(), Map.of(), Map.of());
 
-    /** A project of the environment; disabled projects are known but serve no routes. */
-    public record Project(String maintask, String baseUrl, boolean enabled) {
+    /**
+     * A project of the environment; disabled projects are known but serve no routes.
+     *
+     * @param alarmRoute the alarm service route of its subtasks that inherit one; null when none
+     */
+    public record Project(String maintask, String baseUrl, boolean enabled, AlarmRoute alarmRoute) {
     }
 
     private final long version;

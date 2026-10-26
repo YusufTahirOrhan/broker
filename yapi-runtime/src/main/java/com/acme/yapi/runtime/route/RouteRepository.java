@@ -16,6 +16,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.acme.yapi.core.json.Json;
+import com.acme.yapi.core.route.AlarmRoute;
 import com.acme.yapi.runtime.metrics.YapiMetrics;
 
 /**
@@ -82,10 +83,11 @@ public class RouteRepository {
                             rs.getString("response_profile"), rs.getString("definition"), rs.getString("base_url")))
                     .list();
             List<RouteSnapshot.Project> projects = jdbc.sql("""
-                            SELECT maintask, base_url, enabled FROM runtime_project
+                            SELECT maintask, base_url, enabled, alarm_maintask, alarm_subtask FROM runtime_project
                             """)
                     .query((rs, row) -> new RouteSnapshot.Project(rs.getString("maintask"), rs.getString("base_url"),
-                            rs.getBoolean("enabled")))
+                            rs.getBoolean("enabled"), rs.getString("alarm_maintask") == null ? null
+                            : new AlarmRoute(rs.getString("alarm_maintask"), rs.getString("alarm_subtask"))))
                     .list();
 
             Map<String, CompiledProfile> profiles = new HashMap<>();

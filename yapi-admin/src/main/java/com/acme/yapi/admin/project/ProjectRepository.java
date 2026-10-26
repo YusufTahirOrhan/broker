@@ -13,6 +13,7 @@ import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
 import com.acme.yapi.admin.db.Rows;
+import com.acme.yapi.core.route.AlarmRoute;
 
 @Repository
 public class ProjectRepository {
@@ -34,7 +35,8 @@ public class ProjectRepository {
                       Long defaultResponseProfileId, String defaultProfileName, String createdBy, Instant createdAt) {
     }
 
-    public record EnvironmentRow(long projectId, String environment, String baseUrl, String specPath, boolean enabled) {
+    public record EnvironmentRow(long projectId, String environment, String baseUrl, String specPath, boolean enabled,
+                                 AlarmRoute alarmRoute) {
     }
 
     private static Row row(ResultSet rs, int index) throws SQLException {
@@ -132,13 +134,16 @@ public class ProjectRepository {
 
     public List<EnvironmentRow> environments(long projectId) {
         return jdbc.sql("""
-                        SELECT pe.project_id, pe.environment, pe.base_url, pe.spec_path, pe.enabled
+                        SELECT pe.project_id, pe.environment, pe.base_url, pe.spec_path, pe.enabled,
+                               pe.alarm_maintask, pe.alarm_subtask
                           FROM project_environment pe JOIN environment e ON e.code = pe.environment
                          WHERE pe.project_id = :id ORDER BY e.sort_order
                         """)
                 .param("id", projectId)
                 .query((rs, index) -> new EnvironmentRow(rs.getLong("project_id"), rs.getString("environment"),
-                        rs.getString("base_url"), rs.getString("spec_path"), rs.getBoolean("enabled")))
+                        rs.getString("base_url"), rs.getString("spec_path"), rs.getBoolean("enabled"),
+                        rs.getString("alarm_maintask") == null ? null
+                                : new AlarmRoute(rs.getString("alarm_maintask"), rs.getString("alarm_subtask"))))
                 .list();
     }
 
@@ -146,20 +151,25 @@ public class ProjectRepository {
         return environments(projectId).stream().filter(row -> row.environment().equals(environment)).findFirst();
     }
 
-    public void upsertEnvironment(long projectId, String environment, String baseUrl, String specPath, boolean enabled) {
+    public void upsertEnvironment(long projectId, String environment, String baseUrl, String specPath, boolean enabled,
+                                  AlarmRoute alarmRoute) {
         Rows.merge(() -> jdbc.sql("""
                         MERGE INTO project_environment pe
                         USING dual ON (pe.project_id = :id AND pe.environment = :environment)
                          WHEN MATCHED THEN UPDATE
-                              SET pe.base_url = :baseUrl, pe.spec_path = :specPath, pe.enabled = :enabled
-                         WHEN NOT MATCHED THEN INSERT (project_id, environment, base_url, spec_path, enabled)
-                              VALUES (:id, :environment, :baseUrl, :specPath, :enabled)
+                              SET pe.base_url = :baseUrl, pe.spec_path = :specPath, pe.enabled = :enabled,
+                                  pe.alarm_maintask = :alarmMaintask, pe.alarm_subtask = :alarmSubtask
+                         WHEN NOT MATCHED THEN INSERT (project_id, environment, base_url, spec_path, enabled,
+                                                       alarm_maintask, alarm_subtask)
+                              VALUES (:id, :environment, :baseUrl, :specPath, :enabled, :alarmMaintask, :alarmSubtask)
                         """)
                 .param("id", projectId)
                 .param("environment", environment)
                 .param("baseUrl", baseUrl)
                 .param("specPath", specPath)
                 .param("enabled", Rows.flag(enabled))
+                .param("alarmMaintask", alarmRoute == null ? null : alarmRoute.maintask())
+                .param("alarmSubtask", alarmRoute == null ? null : alarmRoute.subtask())
                 .update());
     }
 

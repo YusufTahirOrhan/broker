@@ -25,7 +25,10 @@ public final class RouteDefinitionParser {
     /** Fields every request carries; a definition cannot redefine them. */
     public static final Set<String> ENVELOPE_FIELDS = Set.of("maintask", "subtask", "application", "uid");
 
-    private static final Set<String> DEFINITION_KEYS = Set.of("request", "response", "timeoutMs", "retry", "logging");
+    private static final Set<String> DEFINITION_KEYS =
+            Set.of("request", "response", "timeoutMs", "retry", "logging", "alarm", "alarmService");
+    private static final Set<String> ALARM_KEYS = Set.of("check", "maintask", "subtask");
+    private static final Set<String> ALARM_SERVICE_KEYS = Set.of("resultPath");
     private static final Set<String> REQUEST_KEYS = Set.of("fields", "pathVariables", "queryParams", "headers", "body");
     private static final Set<String> FIELD_KEYS = Set.of("name", "type", "required", "default");
     private static final Set<String> BODY_KEYS = Set.of("mode", "contentType", "template", "parts");
@@ -59,8 +62,11 @@ public final class RouteDefinitionParser {
                 RouteDefinition.MIN_TIMEOUT_MS, RouteDefinition.MAX_TIMEOUT_MS, errors);
         int maxAttempts = parseRetry(node.get("retry"), errors);
         LoggingSpec logging = parseLogging(node.get("logging"), errors);
+        AlarmSpec alarm = parseAlarm(node.get("alarm"), errors);
+        AlarmServiceSpec alarmService = parseAlarmService(node.get("alarmService"), errors);
 
-        RouteDefinition definition = new RouteDefinition(request, responseType, timeoutMs, maxAttempts, logging);
+        RouteDefinition definition = new RouteDefinition(request, responseType, timeoutMs, maxAttempts, logging,
+                alarm, alarmService);
         return new Parsed(errors.isEmpty() ? definition : null, errors);
     }
 
@@ -275,6 +281,60 @@ public final class RouteDefinitionParser {
         }
         errors.add(new FieldError("response.type", "JSON, TEXT ya da BINARY olmalı"));
         return ResponseType.JSON;
+    }
+
+    private static AlarmSpec parseAlarm(JsonNode node, List<FieldError> errors) {
+        if (node == null || node.isNull()) {
+            return AlarmSpec.inherit();
+        }
+        if (!node.isObject()) {
+            errors.add(new FieldError("alarm", "Nesne olmalı"));
+            return AlarmSpec.inherit();
+        }
+        unknownKeys(node, ALARM_KEYS, "alarm", errors);
+        AlarmSpec.Check check = AlarmSpec.Check.INHERIT;
+        JsonNode value = node.get("check");
+        if (value != null && !value.isNull()) {
+            check = null;
+            for (AlarmSpec.Check candidate : AlarmSpec.Check.values()) {
+                if (value.isString() && candidate.name().equals(value.stringValue())) {
+                    check = candidate;
+                }
+            }
+            if (check == null) {
+                errors.add(new FieldError("alarm.check", "INHERIT, OFF ya da ROUTE olmalı"));
+                check = AlarmSpec.Check.INHERIT;
+            }
+        }
+        return new AlarmSpec(check, text(node.get("maintask"), "alarm.maintask", errors),
+                text(node.get("subtask"), "alarm.subtask", errors));
+    }
+
+    private static AlarmServiceSpec parseAlarmService(JsonNode node, List<FieldError> errors) {
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        if (!node.isObject()) {
+            errors.add(new FieldError("alarmService", "Nesne olmalı"));
+            return null;
+        }
+        unknownKeys(node, ALARM_SERVICE_KEYS, "alarmService", errors);
+        String resultPath = text(node.get("resultPath"), "alarmService.resultPath", errors);
+        if (resultPath != null && !resultPath.isEmpty() && !FIELD_NAME.matcher(resultPath).matches()) {
+            errors.add(new FieldError("alarmService.resultPath", "Noktalı bir JSON yolu olmalı, ör. data.alarms"));
+        }
+        return new AlarmServiceSpec(resultPath == null || resultPath.isEmpty() ? null : resultPath);
+    }
+
+    private static String text(JsonNode node, String path, List<FieldError> errors) {
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        if (!node.isString()) {
+            errors.add(new FieldError(path, "Metin olmalı"));
+            return null;
+        }
+        return node.stringValue();
     }
 
     private static int parseRetry(JsonNode node, List<FieldError> errors) {

@@ -41,6 +41,12 @@ public final class Json {
         return MAPPER.createArrayNode();
     }
 
+    public static ArrayNode stringArray(java.util.Collection<String> values) {
+        ArrayNode array = array();
+        values.forEach(array::add);
+        return array;
+    }
+
     public static JsonNode string(String value) {
         return value == null ? NullNode.getInstance() : NODES.stringNode(value);
     }

@@ -6,6 +6,7 @@ import java.util.List;
 
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.naming.Names;
+import com.acme.yapi.core.route.AlarmSpec;
 import com.acme.yapi.core.route.BodyMode;
 import com.acme.yapi.core.route.FieldType;
 import com.acme.yapi.core.route.HttpMethodName;
@@ -69,6 +70,12 @@ public final class DefinitionRules {
                         "${requestId}"));
         strings(placeholders.putArray("profile"),
                 List.of("${backend.status}", "${backend.body}", "${outcome}", "${requestId}"));
+        strings(placeholders.putArray("alarmService"), List.of("${alarm.values}"));
+
+        ObjectNode alarm = rules.putObject("alarm");
+        strings(alarm.putArray("checks"), Arrays.stream(AlarmSpec.Check.values()).map(Enum::name).toList());
+        alarm.put("default", AlarmSpec.Check.INHERIT.name());
+        strings(alarm.putArray("excludedFromValues"), RouteDefinitionParser.ENVELOPE_FIELDS.stream().sorted().toList());
         return rules;
     }
 

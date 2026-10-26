@@ -62,6 +62,7 @@ public final class EventCodec {
         node.set("client_response", event.clientResponse() == null ? Json.nullNode() : event.clientResponse());
         put(node, "error_message", event.errorMessage());
         put(node, "yapi_instance", event.yapiInstance());
+        node.set("alarm", event.alarm() == null ? Json.nullNode() : event.alarm());
         return node;
     }
 
@@ -109,7 +110,8 @@ public final class EventCodec {
                 booleanValue(node, "body_truncated"),
                 nullToNull(node.get("client_response")),
                 string(node, "error_message"),
-                string(node, "yapi_instance"));
+                string(node, "yapi_instance"),
+                nullToNull(node.get("alarm")));
     }
 
     public static LogEvent fromBytes(byte[] bytes) {

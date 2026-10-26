@@ -20,6 +20,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
+import com.acme.yapi.core.json.Json;
+import com.acme.yapi.core.route.AlarmRoute;
 import com.acme.yapi.core.session.SessionRecord;
 import com.acme.yapi.core.session.SessionRecordCodec;
 import com.acme.yapi.core.testing.FakeHttpServer;
@@ -159,6 +161,26 @@ class CommonFormatTest {
                 .isEqualTo(404);
         assertThat(backend.requests()).isEmpty();
         assertThat(yapi("tok", body).status()).isEqualTo(200);
+    }
+
+    @Test
+    @Order(5)
+    void withoutLegacyResponsesAnAlarmIs403InTheCommonFormat() {
+        backend.reset();
+        backend.json("POST", "/check", 200, "[\"4111\"]");
+        RuntimeFixture.project("guvenlik", backend.baseUrl());
+        RuntimeFixture.route("guvenlik", "alarm_kontrol", "POST", "/check", List.of(), true, null, """
+                {"alarmService": {}, "request": {"body": {"mode": "TEMPLATE", "template": "${alarm.values}"}}}
+                """);
+        RuntimeFixture.project("odeme", backend.baseUrl(), new AlarmRoute("guvenlik", "alarm_kontrol"));
+        RuntimeFixture.route("odeme", "ode", "POST", "/pay", List.of("ORDER_READ"), false, null,
+                "{\"request\": {\"body\": {\"mode\": \"PASS_THROUGH\"}}}");
+        cache.reload();
+
+        assertError(yapi("tok", "{\"maintask\": \"odeme\", \"subtask\": \"ode\", \"kart\": \"4111\", \"uid\": \"u1\", "
+                + "\"application\": \"web\"}"), 403, "ALARM");
+        assertThat(Json.parse(backend.requests("/check").getFirst().bodyText())).isEqualTo(Json.parse("[\"4111\"]"));
+        assertThat(backend.requests("/pay")).isEmpty();
     }
 
     private static void assertError(JsonHttp.Response response, int status, String outcome) {

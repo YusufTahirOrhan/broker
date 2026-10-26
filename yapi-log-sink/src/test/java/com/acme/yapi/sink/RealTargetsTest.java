@@ -102,7 +102,7 @@ class RealTargetsTest {
     @Test
     void elasticBuildsTheLegacyDocumentInAnyOrder() throws Exception {
         ElasticBulkWriter writer = new ElasticBulkWriter(new SinkProperties.Elastic(true, elasticUrl(), null, null,
-                null, null, null, null, null));
+                null, null, null, null, null, null));
         String id = Events.newRequestId();
 
         assertThat(writer.write(List.of(Events.response(id)))).isEmpty();
@@ -125,9 +125,25 @@ class RealTargetsTest {
     }
 
     @Test
+    void elasticKeepsTheLegacyAlarmLog() throws Exception {
+        ElasticBulkWriter writer = new ElasticBulkWriter(new SinkProperties.Elastic(true, elasticUrl(), null, null,
+                null, null, null, null, null, null));
+        LogEvent alarmed = Events.alarmed(Events.newRequestId());
+
+        assertThat(writer.write(List.of(alarmed))).isEmpty();
+        send("POST", elasticUrl() + "/alarm/_refresh", "");
+
+        JsonNode document = Json.parse(send("GET", elasticUrl() + "/alarm/_doc/" + alarmed.queryId(), null))
+                .get("_source");
+        assertThat(document.get("uid").stringValue()).isEqualTo("u12345");
+        assertThat(document.get("yapi").get("alarms").get(0).stringValue()).isEqualTo("10000000146");
+        assertThat(document.get("yapi").get("request_id").stringValue()).isEqualTo(alarmed.requestId());
+    }
+
+    @Test
     void aDocumentElasticCannotMapIsRejected() throws Exception {
         ElasticBulkWriter writer = new ElasticBulkWriter(new SinkProperties.Elastic(true, elasticUrl(), null, null,
-                null, null, null, null, null));
+                null, null, null, null, null, null));
         LogEvent first = withBody(Events.request(Events.newRequestId(), "order-service"), "tutar", Json.number(10));
         LogEvent clashing = withBody(Events.request(Events.newRequestId(), "order-service"), "tutar",
                 Json.string("on lira"));
@@ -142,7 +158,7 @@ class RealTargetsTest {
     @Test
     void aLoggedResponseDataTextOf40KbIsAcceptedByTheDefaultMapping() throws Exception {
         ElasticBulkWriter writer = new ElasticBulkWriter(new SinkProperties.Elastic(true, elasticUrl(), null, null,
-                null, null, null, null, null));
+                null, null, null, null, null, null));
         String id = Events.newRequestId();
         ObjectNode data = Json.object();
         data.put("kayitlar", "müşteri kaydı; ".repeat(2_600));
@@ -160,7 +176,7 @@ class RealTargetsTest {
                 response.token(), response.sessionOperation(), response.clientIp(), response.userAgent(),
                 response.httpMethod(), response.targetPath(), response.statusCode(), response.outcome(),
                 response.durationMs(), response.body(), response.bodySize(), true, clientResponse,
-                response.errorMessage(), response.yapiInstance());
+                response.errorMessage(), response.yapiInstance(), response.alarm());
 
         assertThat(writer.write(List.of(Events.request(id, "order-service"), logged))).isEmpty();
         send("POST", elasticUrl() + "/requests_2026-10/_refresh", "");
@@ -180,7 +196,7 @@ class RealTargetsTest {
                 event.permList(), event.token(), event.sessionOperation(), event.clientIp(), event.userAgent(),
                 event.httpMethod(), event.targetPath(), event.statusCode(), event.outcome(), event.durationMs(), body,
                 event.bodySize(), event.bodyTruncated(), event.clientResponse(), event.errorMessage(),
-                event.yapiInstance());
+                event.yapiInstance(), event.alarm());
     }
 
     private static String clickhouseUrl() {

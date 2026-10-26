@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import com.acme.yapi.core.ids.Ids;
 import com.acme.yapi.core.json.Json;
+import com.acme.yapi.core.logging.LogEvent;
 import com.acme.yapi.sink.config.SinkProperties;
 import com.acme.yapi.sink.fake.Events;
 import com.acme.yapi.sink.kafka.Rejection;
@@ -21,7 +22,7 @@ import tools.jackson.databind.JsonNode;
 class ElasticBulkWriterTest {
 
     private final ElasticBulkWriter writer = new ElasticBulkWriter(
-            new SinkProperties.Elastic(true, "http://localhost:9200", null, null, null, null, null, null, null));
+            new SinkProperties.Elastic(true, "http://localhost:9200", null, null, null, null, null, null, null, null));
 
     @Test
     void mainDocumentsAreUpsertedAndParameterDocumentsIndexed() {
@@ -50,11 +51,26 @@ class ElasticBulkWriterTest {
 
         JsonNode turkish = Json.parse(writer.bulk(List.of(Events.response(id))).body().lines().findFirst().orElseThrow());
         ElasticBulkWriter utcWriter = new ElasticBulkWriter(new SinkProperties.Elastic(true, "http://localhost:9200",
-                null, ZoneId.of("UTC"), null, null, null, null, null));
+                null, ZoneId.of("UTC"), null, null, null, null, null, null));
         JsonNode utc = Json.parse(utcWriter.bulk(List.of(Events.response(id))).body().lines().findFirst().orElseThrow());
 
         assertThat(turkish.get("update").get("_index").stringValue()).isEqualTo("requests_2026-10");
         assertThat(utc.get("update").get("_index").stringValue()).isEqualTo("requests_2026-09");
+    }
+
+    @Test
+    void alarmsGoToTheConfiguredAlarmIndex() {
+        LogEvent alarmed = Events.alarmed(Events.newRequestId());
+        ElasticBulkWriter custom = new ElasticBulkWriter(new SinkProperties.Elastic(true, "http://localhost:9200",
+                null, null, null, null, null, null, null, "alarm_test"));
+
+        List<JsonNode> lines = custom.bulk(List.of(alarmed)).body().lines().map(Json::parse).toList();
+        JsonNode index = lines.get(2).get("index");
+        assertThat(index.get("_index").stringValue()).isEqualTo("alarm_test");
+        assertThat(index.get("_id").stringValue()).isEqualTo(alarmed.queryId());
+        assertThat(lines.get(3).get("yapi").get("alarms").get(0).stringValue()).isEqualTo("10000000146");
+        assertThat(writer.bulk(List.of(alarmed)).body().lines().skip(2).findFirst().map(Json::parse).orElseThrow()
+                .get("index").get("_index").stringValue()).isEqualTo("alarm");
     }
 
     @Test

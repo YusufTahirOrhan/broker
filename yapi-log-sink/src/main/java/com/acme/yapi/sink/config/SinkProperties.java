@@ -5,6 +5,8 @@ import java.time.ZoneId;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import com.acme.yapi.core.legacy.LegacyDocuments;
+
 /**
  * @param retryInterval wait between attempts while a target is down; the batch is retried until it succeeds, so
  *                      nothing is skipped as long as Kafka retention lasts
@@ -17,7 +19,7 @@ public record SinkProperties(String topic, String dlqTopic, Duration retryInterv
         topic = topic == null ? "yapi.logs.v1" : topic;
         dlqTopic = dlqTopic == null ? "yapi.logs.v1.dlq" : dlqTopic;
         retryInterval = retryInterval == null ? Duration.ofSeconds(5) : retryInterval;
-        elastic = elastic == null ? new Elastic(false, null, null, null, null, null, null, null, null) : elastic;
+        elastic = elastic == null ? new Elastic(false, null, null, null, null, null, null, null, null, null) : elastic;
         clickhouse = clickhouse == null ? new ClickHouse(false, null, null, null, null, null) : clickhouse;
     }
 
@@ -25,14 +27,17 @@ public record SinkProperties(String topic, String dlqTopic, Duration retryInterv
      * @param indexZone the time zone of the month in {@code requests_yyyy-MM}. The old broker formats it with
      *                  {@code new SimpleDateFormat("yyyy-MM")}, in the server's zone; its servers run in Turkish time
      * @param apiKey    sent as {@code Authorization: ApiKey ...}; else basic auth when a username is set
+     * @param alarmIndex the old broker's alarm log index, written for responses whose alarm check found alarms
      */
     public record Elastic(boolean enabled, String url, String indexPrefix, ZoneId indexZone, String apiKey,
-                          String username, String password, Duration timeout, Integer retryOnConflict) {
+                          String username, String password, Duration timeout, Integer retryOnConflict,
+                          String alarmIndex) {
         public Elastic {
             indexPrefix = indexPrefix == null ? "requests_" : indexPrefix;
             indexZone = indexZone == null ? ZoneId.of("Europe/Istanbul") : indexZone;
             timeout = timeout == null ? Duration.ofSeconds(30) : timeout;
             retryOnConflict = retryOnConflict == null ? 3 : retryOnConflict;
+            alarmIndex = alarmIndex == null || alarmIndex.isBlank() ? LegacyDocuments.ALARM_INDEX : alarmIndex;
         }
     }
 

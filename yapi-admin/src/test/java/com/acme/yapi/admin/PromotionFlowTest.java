@@ -254,4 +254,62 @@ class PromotionFlowTest extends AdminTestBase {
                 .isEqualTo("PROD Koordinatör'ünde yok: LOGPROJECT_TEMEL");
         assertThat(get("viewer", "/promotions?targetEnv=PROD").json().get("totalItems").longValue()).isZero();
     }
+
+    @Test
+    void subtasksWithAnAlarmCheckNeedTheirAlarmRouteActiveInTheTarget() {
+        project("crm", "CRM", "P-300");
+        long security = project("guvenlik", "GUVENLIK", "P-400");
+        long alarmId = route(security, """
+                {"subtask": "alarm_kontrol", "httpMethod": "POST", "pathTemplate": "/alarm/check", "permissions": [], "foreignPermissions": ["CRM_AGENT"],
+                 "definition": {"alarmService": {"resultPath": "alarms"},
+                                "request": {"body": {"mode": "TEMPLATE", "contentType": "application/json",
+                                                     "template": {"values": "${alarm.values}"}}}}}
+                """);
+        long projectId = project("kredi", "KREDI", "P-100");
+        long query = route(projectId, """
+                {"subtask": "sorgu", "httpMethod": "POST", "pathTemplate": "/sorgu", "permissions": [], "foreignPermissions": ["CRM_AGENT"], "definition": {}}
+                """);
+        long own = route(projectId, """
+                {"subtask": "ozel", "httpMethod": "POST", "pathTemplate": "/ozel", "permissions": [], "foreignPermissions": ["CRM_AGENT"],
+                 "definition": {"alarm": {"check": "ROUTE", "maintask": "guvenlik", "subtask": "alarm_kontrol"}}}
+                """);
+        long off = route(projectId, """
+                {"subtask": "kapali", "httpMethod": "POST", "pathTemplate": "/kapali", "permissions": [], "foreignPermissions": ["CRM_AGENT"],
+                 "definition": {"alarm": {"check": "OFF"}}}
+                """);
+        String settings = """
+                {"baseUrl": "http://kredi.dev.svc:8080", "enabled": true, "alarmRoute": %s}
+                """;
+
+        JsonHttp.Response notService = put("lead", "/projects/" + projectId + "/environments/DEV",
+                settings.formatted("{\"maintask\": \"kredi\", \"subtask\": \"sorgu\"}"));
+        assertStatus(notService, 400);
+        assertThat(notService.json().get("errors").get(0).get("message").stringValue())
+                .isEqualTo("Alarm servisi route'u değil: kredi/sorgu");
+        assertStatus(put("lead", "/projects/" + projectId + "/environments/DEV",
+                settings.formatted("{\"maintask\": \"guvenlik\", \"subtask\": \"yok\"}")), 400);
+        JsonHttp.Response set = put("lead", "/projects/" + projectId + "/environments/DEV",
+                settings.formatted("{\"maintask\": \"Guvenlik\", \"subtask\": \"alarm_kontrol\"}"));
+        assertStatus(set, 200);
+        assertThat(set.json().get("alarmRoute").get("subtask").stringValue()).isEqualTo("alarm_kontrol");
+        assertThat(ENVIRONMENTS.get("DEV").projects.get("kredi").get("alarmRoute").get("maintask").stringValue())
+                .isEqualTo("guvenlik");
+        assertThat(get("viewer", "/projects/" + projectId).json().toString()).contains("\"alarmRoute\"");
+
+        JsonHttp.Response inactive = promote("editor", "ROUTE", query, 1, "DEV", "DEPLOY", null);
+        assertThat(inactive.status()).as(inactive.text()).isEqualTo(422);
+        assertThat(check(inactive.json(), "ALARM_ROUTE_ACTIVE").get("message").stringValue())
+                .isEqualTo("Alarm route'u guvenlik/alarm_kontrol DEV ortamında aktif değil; önce o taşınmalı");
+        applied(promote("editor", "ROUTE", off, 1, "DEV", "DEPLOY", null));
+
+        applied(promote("editor", "ROUTE", alarmId, 1, "DEV", "DEPLOY", null));
+        applied(promote("editor", "ROUTE", query, 1, "DEV", "DEPLOY", null));
+        applied(promote("editor", "ROUTE", own, 1, "DEV", "DEPLOY", null));
+
+        // PREPROD has no alarm route for the project, so inherited checks are off there; the named route is not
+        applied(promote("editor", "ROUTE", query, 1, "PREPROD", "DEPLOY", null));
+        JsonHttp.Response named = promote("editor", "ROUTE", own, 1, "PREPROD", "DEPLOY", null);
+        assertThat(named.status()).isEqualTo(422);
+        assertThat(check(named.json(), "ALARM_ROUTE_ACTIVE").get("ok").booleanValue()).isFalse();
+    }
 }

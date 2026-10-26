@@ -12,6 +12,8 @@ public record Placeholder(String root, String path) {
     public static final String REQUEST_ID = "requestId";
     public static final String BACKEND = "backend";
     public static final String OUTCOME = "outcome";
+    /** {@code ${alarm.values}}: the request's values, only in an alarm service route. */
+    public static final String ALARM = "alarm";
 
     public static Placeholder parse(String expression) {
         String trimmed = expression.trim();

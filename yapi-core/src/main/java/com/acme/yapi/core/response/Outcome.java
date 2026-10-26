@@ -9,6 +9,8 @@ public enum Outcome {
     DENIED,
     UNKNOWN_TASK,
     INVALID_REQUEST,
+    /** The alarm service found an alarm in the request's values; the service was not called. */
+    ALARM,
     LOG_UNAVAILABLE;
 
     /** Outcome of a backend response, computed from the real status before any profile wraps it. */

@@ -37,6 +37,8 @@ final class Exchange {
     Session session;
     String targetPath;
     boolean requestLogged;
+    /** The alarm check's record for the RESPONSE event; null when no check ran. */
+    ObjectNode alarm;
 
     Exchange(TraceContext trace, String token, String clientIp, String userAgent) {
         this.trace = trace;

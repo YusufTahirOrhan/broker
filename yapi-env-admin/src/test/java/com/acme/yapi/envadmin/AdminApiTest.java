@@ -163,6 +163,36 @@ class AdminApiTest {
     }
 
     @Test
+    void theAlarmRouteOfAProjectIsPartOfItsSettings() {
+        project("order-service", "http://order-service.preprod.svc:8080");
+        long before = configVersion();
+        String withAlarm = """
+                {"baseUrl": "http://order-service.preprod.svc:8080", "actor": "devops.ali",
+                 "alarmRoute": {"maintask": "guvenlik", "subtask": "alarm_kontrol"}}
+                """;
+
+        JsonHttp.Response set = http.put("/admin/v1/projects/order-service", withAlarm);
+        assertThat(set.json().get("changed").booleanValue()).as(set.text()).isTrue();
+        assertThat(set.json().get("alarmRoute").get("subtask").stringValue()).isEqualTo("alarm_kontrol");
+        assertThat(jdbc.sql("SELECT alarm_maintask || '/' || alarm_subtask FROM runtime_project WHERE maintask = 'order-service'")
+                .query(String.class).single()).isEqualTo("guvenlik/alarm_kontrol");
+        assertThat(http.put("/admin/v1/projects/order-service", withAlarm).json().get("changed").booleanValue()).isFalse();
+        assertThat(configVersion()).isEqualTo(before + 1);
+
+        JsonHttp.Response cleared = http.put("/admin/v1/projects/order-service",
+                "{\"baseUrl\": \"http://order-service.preprod.svc:8080\", \"actor\": \"devops.ali\"}");
+        assertThat(cleared.json().get("changed").booleanValue()).isTrue();
+        assertThat(cleared.json().get("alarmRoute").isNull()).isTrue();
+
+        JsonHttp.Response invalid = http.put("/admin/v1/projects/order-service", """
+                {"baseUrl": "http://order-service.preprod.svc:8080", "actor": "devops.ali",
+                 "alarmRoute": {"maintask": "guvenlik"}}
+                """);
+        assertThat(invalid.status()).isEqualTo(400);
+        assertThat(invalid.json().get("errors").get(0).get("field").stringValue()).isEqualTo("alarmRoute.subtask");
+    }
+
+    @Test
     void baseUrlMustBeAPlainHttpAddress() {
         JsonHttp.Response response = http.put("/admin/v1/projects/order-service",
                 "{\"baseUrl\": \"file:///etc/passwd\", \"actor\": \"devops.ali\"}");

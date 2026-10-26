@@ -37,16 +37,25 @@ public final class LegacyDocuments {
     private static final DateTimeFormatter REQUEST_DATE =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss").withZone(ZoneOffset.UTC);
 
+    public static final String ALARM_INDEX = "alarm";
+
     private final String indexPrefix;
     private final ZoneId indexZone;
+    private final String alarmIndex;
 
     /**
      * @param indexPrefix {@code requests_}
      * @param indexZone   time zone the old code used to pick the monthly index
      */
     public LegacyDocuments(String indexPrefix, ZoneId indexZone) {
+        this(indexPrefix, indexZone, ALARM_INDEX);
+    }
+
+    /** @param alarmIndex the legacy {@code alarm_log}'s index, {@code alarm} */
+    public LegacyDocuments(String indexPrefix, ZoneId indexZone, String alarmIndex) {
         this.indexPrefix = indexPrefix;
         this.indexZone = indexZone;
+        this.alarmIndex = alarmIndex;
     }
 
     public List<ElasticOperation> operations(LogEvent event) {
@@ -59,7 +68,43 @@ public final class LegacyDocuments {
             }
             return operations;
         }
-        return List.of(new ElasticOperation(ElasticOperation.Kind.UPSERT, index, event.requestId(), mainResponse(event)));
+        List<ElasticOperation> operations = new ArrayList<>();
+        operations.add(new ElasticOperation(ElasticOperation.Kind.UPSERT, index, event.requestId(), mainResponse(event)));
+        ObjectNode alarm = alarmDocument(event);
+        if (alarm != null) {
+            operations.add(new ElasticOperation(ElasticOperation.Kind.INDEX, alarmIndex, event.queryId(), alarm));
+        }
+        return operations;
+    }
+
+    /**
+     * The legacy {@code alarm_log}: under {@code query_id}, the request's parameters as they came (masked as in
+     * the logs), and what is new in a {@code yapi} object. Only for a RESPONSE with alarms.
+     */
+    private static ObjectNode alarmDocument(LogEvent event) {
+        JsonNode alarm = event.alarm();
+        JsonNode alarms = alarm == null ? null : alarm.get("alarms");
+        if (alarms == null || !alarms.isArray() || alarms.isEmpty() || event.queryId() == null) {
+            return null;
+        }
+        ObjectNode document = Json.object();
+        JsonNode params = alarm.get("params");
+        if (params != null && params.isObject()) {
+            for (Map.Entry<String, JsonNode> entry : Json.fields(params)) {
+                document.set(entry.getKey(), entry.getValue());
+            }
+        }
+        ObjectNode yapi = document.putObject("yapi");
+        yapi.put("request_id", event.requestId());
+        putIfPresent(yapi, "uid", event.uid());
+        putIfPresent(yapi, "client_ip", event.clientIp());
+        yapi.set("alarms", alarms);
+        ObjectNode route = yapi.putObject("alarm_route");
+        putIfPresent(route, "maintask", Json.stringField(alarm, "maintask"));
+        putIfPresent(route, "subtask", Json.stringField(alarm, "subtask"));
+        yapi.put("time", EventCodec.formatTime(event.eventTime()));
+        putIfPresent(yapi, "environment", event.environment());
+        return document;
     }
 
     /** {@code requests_yyyy-MM} from the time inside the UUIDv7 request ID, so both events land in one index. */

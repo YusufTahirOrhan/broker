@@ -16,6 +16,9 @@ import tools.jackson.databind.JsonNode;
  *   <li>{@code body}: REQUEST carries the masked frontend body, untrimmed; RESPONSE carries the masked backend
  *       body only when the route logs it, trimmed to its limit.</li>
  *   <li>{@code clientResponse}: what the frontend received, with its top-level {@code data} emptied.</li>
+ *   <li>{@code alarm}: RESPONSE only, when an alarm check ran: {@code {"maintask", "subtask"}} of the alarm service
+ *       route and either {@code alarms} (the values that raised one) with {@code params} (the masked request body)
+ *       or {@code error} when the check could not be made.</li>
  * </ul>
  */
 public record LogEvent(
@@ -48,7 +51,8 @@ public record LogEvent(
         Boolean bodyTruncated,
         JsonNode clientResponse,
         String errorMessage,
-        String yapiInstance) {
+        String yapiInstance,
+        JsonNode alarm) {
 
     public enum EventType {
         REQUEST, RESPONSE
