@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,13 +30,16 @@ import tools.jackson.databind.node.ObjectNode;
  * protected too. The path is the container's decoded and normalized one, without path parameters: {@code /login;x=1}
  * and {@code /%6Cogin}, which Spring MVC maps to login, are checked as {@code /login}.
  *
- * <p>Without {@code login.user-context-secret} nothing is checked; only the {@code local} profile may run so, any
- * other profile does not start.
+ * <p>The signed {@code userId} is the user of the call ({@link #USER}). Without {@code login.user-context-secret}
+ * nothing is checked and the broker's {@code X-uid} stands for the user; only the {@code local} profile may run so,
+ * any other profile does not start.
  */
 @Component
 public class UserContextFilter extends OncePerRequestFilter {
 
     static final String HEADER = "X-User-Context";
+    /** Request attribute with the user the call is for: the signed {@code userId} (null for session operations). */
+    public static final String USER = "com.acme.yapi.login.user";
     private static final Logger log = LoggerFactory.getLogger(UserContextFilter.class);
     private static final List<String> UNSIGNED_PREFIXES = List.of("/actuator/", "/internal/");
 
@@ -59,9 +63,6 @@ public class UserContextFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        if (secret == null) {
-            return true;
-        }
         String path = path(request);
         return UNSIGNED_PREFIXES.stream().anyMatch(path::startsWith);
     }
@@ -75,8 +76,16 @@ public class UserContextFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        if (UserContextToken.verify(secret, request.getHeader(HEADER), Instant.now(), properties.userContextMaxAge())
-                .isPresent()) {
+        if (secret == null) {
+            // local profile: nothing is signed, the broker's X-uid stands for the user
+            request.setAttribute(USER, request.getHeader("X-uid"));
+            chain.doFilter(request, response);
+            return;
+        }
+        Optional<UserContextToken.Payload> payload = UserContextToken.verify(secret, request.getHeader(HEADER),
+                Instant.now(), properties.userContextMaxAge());
+        if (payload.isPresent()) {
+            request.setAttribute(USER, payload.get().userId());
             chain.doFilter(request, response);
             return;
         }

@@ -16,6 +16,8 @@ Broker `X-Token: login` ve `X-Token: logout` isteklerini gövdedeki maintask'a b
 | `POST /login` | `{"uid", "password"}`, `X-Clientip`, `X-User-Agent` | Başarılı: `{"response": true, "status": 200, "LDAP": true, "login": true, "X-Token": "<uuid>"}`. LDAP ya da yetki çağrısı başarısız: `{"response": false, "status": 401, "Ldap": <ldap>, "login": false}`. Kayıt Redis'e yazılamadı: `{"status": 401, "Ldap": false, "login": false, "X-Token": "404"}` |
 | `POST /logout` | `{"uid"}`, `X-Clientip`, `X-User-Agent` | Kayıt var ve istemci aynı: `{"response": true, "status": 200, "message": "logged out"}`; değilse `{"response": false, "status": 301, "message": "something went wrong with logging out."}` |
 | `POST /internal/v1/sessions/{uid}/logout` | `X-Koordinator-Secret` | Koordinatör'ün zorla çıkışı, broker'dan geçmez: 204 kapatıldı, 404 oturum yok, 403 gizli anahtar yanlış ya da ayarlı değil |
+| `GET /users/me/settings/{name}` | `X-User-Context` (imzalı kullanıcı) | Kayıt varsa saklanan JSON metni olduğu gibi, yoksa `null` (200) |
+| `PUT /users/me/settings/{name}` | JSON gövde, `X-User-Context` | Gövdedeki JSON süresiz ve sıkışık metin olarak yazılır (eski `RedisTemplate` + `JacksonJsonRedisSerializer`'ın yazdığıyla aynı); yanıt yazılan JSON (200) |
 
 - DEV'de (`dev` profili) giriş eski DEV sınıfı gibi magic key iledir: boş olmayan her `uid`, şifre `YAPI_LOGIN_MAGIC_KEY`'e (sabit zamanlı karşılaştırma) eşitse girer; herkes herkesin hesabına girebilir. Her deneme `info` loglanır (uid ve sonuç; şifre yok). Yetkiler yine Koordinatör'den gelir.
 - Boş ya da yalnızca boşluktan oluşan `uid` veya şifre LDAP'a gitmeden başarısızdır (anonim bind'e düşmez, Active
@@ -35,6 +37,32 @@ Broker `X-Token: login` ve `X-Token: logout` isteklerini gövdedeki maintask'a b
   projelerin `projeAdi`'leri broker'ın application listesine (`yapi:applications`, süresiz JSON dizisi) yazılır; liste
   boşsa ya da alınamazsa eski değer kalır (`login.applications.sync.failed` sayacı).
 
+## Kullanıcı ayarları
+
+Eski broker dashboard yerleşimini ve hızlı bağlantıları Redis'te tutuyordu; aynı anahtarlar giriş servisinde:
+`layout` → `user:layout:{uid}`, `quick_link` → `user:quick_link:{uid}` (`login.user-settings.keys`; listede olmayan ad
+404). Kullanıcı, broker'ın imzaladığı `X-User-Context`'teki uid'dir; gövdedeki `uid` ya da `X-uid` dikkate alınmaz.
+İmzada kullanıcı yoksa (anonim route) 403. Gövde JSON değilse 400, Redis'e ulaşılamazsa 503; hata gövdeleri
+`{"response": false, "status": <kod>, "message": "..."}`. `local` profilinde imza yoktur, kullanıcı broker'ın `X-uid`'i;
+anahtarlar `local:` önekli.
+
+Route'ları kullanıcı eski subtask adlarıyla, oturumlu (yetkili) tanımlar ve yanıt biçimini profille eskisine benzetir.
+Örnek, `giris/save_layout`, `PUT /users/me/settings/layout`:
+
+```json
+{
+  "request": {
+    "fields": [{ "name": "layout", "type": "object", "required": true }],
+    "body": { "mode": "TEMPLATE", "contentType": "application/json", "template": "${request.layout}" }
+  },
+  "response": { "type": "JSON" }
+}
+```
+
+Okuma (`giris/get_layout`) aynı yolun `GET`'i, gövdesiz. `harici_uygulamalar` Koordinatör'ün
+`GET /api/koordinator/projeler-external` ucuna giden sıradan bir route'tur; `refresh_permissions`'ın karşılığı
+`POST /internal/v1/sessions/{uid}/logout`'tur (Koordinatör ekibi doğrudan çağırır).
+
 ## Ayarlar
 
 | Ayar | Varsayılan | Not |
@@ -48,6 +76,7 @@ Broker `X-Token: login` ve `X-Token: logout` isteklerini gövdedeki maintask'a b
 | `login.applications.key`, `refresh-interval` | `yapi:applications`, 5 dk | `local` profilinde `yapi:applications:local` |
 | `login.user-context-secret` | — | `YAPI_USER_CONTEXT_SECRET`; `local` dışında zorunlu |
 | `login.koordinator-secret` | — | `YAPI_LOGIN_KOORDINATOR_SECRET` |
+| `login.user-settings.keys` | `layout`, `quick_link` | Ad → Redis anahtarı (`{uid}`); `local` profilinde `local:` önekli |
 | `koordinator.url`, `auth-header`, `auth-value` | — | Bu ortamın Koordinatör'ü; kimlik header'ı şimdilik gerekmiyor (`auth-value` boşken gönderilmez). Admin ortam başına `koordinator.urls.<ENV>` kullanır |
 | `koordinator.permissions-path`, `permission-field`, `suspended-field` | `/api/koordinator/personel-yetki/aktif-yetkiler/{uid}`, `yetkiIsim`, `askidaMi` | |
 | `koordinator.projects-path`, `application-field`, `yapi-field` | `/api/koordinator/projeler-ve-yetkileri`, `projeAdi`, `is_yapi` | |

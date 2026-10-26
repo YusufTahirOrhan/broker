@@ -100,6 +100,13 @@ Eski broker dashboard yerleşimini ve hızlı bağlantıları kendi içinde Redi
 - Kullanıcı, imzalı `X-User-Context`'teki uid'dir (gövdeden alınmaz); route'lar oturumlu tanımlanır.
 - `PUT` gövdedeki JSON'u olduğu gibi ve süresiz yazar; eski `RedisTemplate` + `JacksonJsonRedisSerializer` ile aynı metin olmalı. `GET` kayıt yoksa 200 ve `null` döner.
 - Route'ları kullanıcı eski subtask adlarıyla tanımlar, yanıt biçimini profille eskisine benzetir. `harici_uygulamalar` da kullanıcının tanımlayacağı sıradan bir route (Koordinatör'de `GET /api/koordinator/projeler-external`). `refresh_permissions`'ın karşılığı giriş servisindeki iç uç; Koordinatör ekibi doğrudan ona geçecek, kod gerekmez.
+- **Yapıldı (2026-10-26):** `settings/UserSettingsController`; `login.user-settings.keys` (ad → anahtar). Uygulanırken netleşenler ve varsayımlar:
+  - **Kullanıcı:** `UserContextFilter` imzadaki `userId`'yi istek özelliğine koyar; uçlar yalnızca onu kullanır (gövdedeki `uid` ve `X-uid` dikkate alınmaz). İmzada kullanıcı yoksa 403. `local` profilinde imza olmadığından broker'ın `X-uid`'i kullanılır.
+  - **Metin:** `PUT` gövdeyi ayrıştırıp sıkışık JSON yazar; Jackson'ın `readValue(..., Object.class)` + `writeValueAsString` çıktısıyla aynı (eski `JacksonJsonRedisSerializer`), testte karşılaştırılır. `GET` saklanan metni değiştirmeden döner (eski broker'ın yazdığı da). `PUT`'un yanıtı yazılan JSON (varsayım; eski yanıt biçimini route'un profili kurar).
+  - **Hatalar:** bilinmeyen ad 404, kullanıcı yok 403, gövde JSON değil 400, Redis 503; gövde `{"response": false, "status", "message"}`.
+  - **Yerel:** `local` profilinde anahtarlar `local:user:layout:{uid}`, `local:user:quick_link:{uid}` (DEV'in kayıtlarına yazmaz).
+  - **Route'lar** kullanıcıda: örnek `giris/save_layout` (`TEMPLATE` gövde `"${request.layout}"`) README'de; anonim olamazlar, yetkisini kullanıcı seçer.
+  - **Testler:** `UserSettingsApiTest` (eski metinle aynı, süresiz, imzalı kullanıcı, eski kaydı okuma, `null`, 404/403/400), `LocalProfileTest` (yerel anahtar).
 
 ### 7. Alarm
 
@@ -448,7 +455,8 @@ Paket `com.acme.yapi.login`; çalıştırılabilir jar `-exec` ekiyle. Ayrıntı
 
 | Paket | İçerik |
 | --- | --- |
-| `web` | `LoginController` (`/login`, `/logout`, `/internal/v1/sessions/{uid}/logout`), `LegacyBodies` (eski gövdeler birebir), `UserContextFilter` |
+| `web` | `LoginController` (`/login`, `/logout`, `/internal/v1/sessions/{uid}/logout`), `LegacyBodies` (eski gövdeler birebir), `UserContextFilter` (imza; imzadaki kullanıcı) |
+| `settings` | `UserSettingsController`: `GET`/`PUT /users/me/settings/{name}` (`user:layout:{uid}`, `user:quick_link:{uid}`) |
 | `session` | `LoginService` (LDAP → Koordinatör → kayıt), `SessionStore` (core'daki `SessionRecordCodec` ile), `ApplicationSync` (5 dk'da bir `yapi:applications`) |
 | `ldap` | `BindLdapAuthenticator` (Spring LDAP doğrudan bind; PREPROD, PROD), `MagicKeyAuthenticator` (yalnızca `dev`), `StaticLdapAuthenticator` (yalnızca `local`) |
 | `koordinator` | `KoordinatorClient`: kullanıcının aktif yetkileri (`aktif-yetkiler/{uid}`) ve application listesi (`projeler-ve-yetkileri`, `is_yapi`) |
@@ -494,6 +502,7 @@ Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya ya
 
 - 2026-10-16 turunun maddeleri canlı dokümana işlendi (rev 180).
 - **Koordinatör (3):** Admin'in proje kataloğu tek ortamın Koordinatör'ünden (`yapi.admin.catalog.environment`, varsayılan PROD); projenin yetkileri ve yetkinin varlığı her ortamın kendi Koordinatör'ünden, ortam başına 5 dk önbellek. Yetkinin ortamda "var" sayılması: o ortamdaki herhangi bir Yapi projesinin `yetkiList`'inde olması. `UNLINKED` projenin yetki listesi boş. Evet/hayır alanları `true`/`1`/`"true"`/`"1"`. Yetki listesinde `description` yok (`null`).
+- **Kullanıcı ayarları (6):** `PUT` yazdığı JSON'u döner; bilinmeyen ad 404, imzada kullanıcı yoksa 403, gövde JSON değilse 400; yerelde `local:` önekli anahtarlar.
 - **Admin girişi (5):** env-admin'de yeni uç `POST /admin/v1/sessions/verify`; admin geçerli ve geçersiz cevapları 30 sn tutar (başarısız çağrıyı tutmaz); `username` ve `displayName` uid; dört header'dan biri eksikse 401; oturum doğrulanamazsa 502 `ENV_UNREACHABLE`.
 - **Magic key (4):** Başarısız denemeler de loglanır; anahtar boşsa servis başlamaz; `dev` profilinin varsayılan modu `magic-key`.
 - **Ortamlar (2):** Ön kontrol mesajları ortam kodunu "X ortamında ..." diye yazar, koda ek yapıştırılmaz ("v4 PREPROD ortamında aktif").

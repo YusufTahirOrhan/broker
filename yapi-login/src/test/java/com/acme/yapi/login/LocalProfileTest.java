@@ -76,4 +76,17 @@ class LocalProfileTest {
         assertThat(redis.opsForValue().get("yapi:applications")).isEqualTo(DEV_APPLICATIONS);
         assertThat(redis.opsForValue().get("user:session:dev.ali")).isEqualTo(DEV_SESSION);
     }
+
+    @Test
+    void settingsGoToLocalKeysForTheBrokersUser() {
+        JsonHttp http = new JsonHttp("http://localhost:" + port);
+
+        JsonHttp.Response saved = http.send("PUT", "/users/me/settings/layout", "{\"widgets\": []}",
+                Map.of("X-uid", "dev.ali"));
+
+        assertThat(saved.status()).as(saved.text()).isEqualTo(200);
+        assertThat(redis.opsForValue().get("local:user:layout:dev.ali")).isEqualTo("{\"widgets\":[]}");
+        assertThat(redis.hasKey("user:layout:dev.ali")).isFalse();
+        redis.delete("local:user:layout:dev.ali");
+    }
 }

@@ -13,6 +13,10 @@ login:
     key-pattern: "local:user:session:{uid}"
   applications:
     key: "yapi:applications:local"
+  user-settings:
+    keys:
+      layout: "local:user:layout:{uid}"
+      "[quick_link]": "local:user:quick_link:{uid}"
   koordinator-secret: local-koordinator-secret
 
 koordinator:

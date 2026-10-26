@@ -18,7 +18,8 @@ import com.acme.yapi.core.session.SessionRecordCodec;
  */
 @ConfigurationProperties("login")
 public record LoginProperties(Ldap ldap, Session session, Logout logout, String koordinatorSecret,
-                              String userContextSecret, Duration userContextMaxAge, Applications applications) {
+                              String userContextSecret, Duration userContextMaxAge, Applications applications,
+                              UserSettings userSettings) {
 
     public LoginProperties {
         ldap = ldap == null ? new Ldap(null, null, null, null, null, null, null) : ldap;
@@ -26,6 +27,19 @@ public record LoginProperties(Ldap ldap, Session session, Logout logout, String 
         logout = logout == null ? new Logout(null) : logout;
         userContextMaxAge = userContextMaxAge == null ? Duration.ofSeconds(60) : userContextMaxAge;
         applications = applications == null ? new Applications(null, null) : applications;
+        userSettings = userSettings == null ? new UserSettings(null) : userSettings;
+    }
+
+    /**
+     * Users' screen settings the legacy broker kept in Redis ({@code GET} and {@code PUT /users/me/settings/{name}}).
+     *
+     * @param keys setting name → Redis key with {@code {uid}}; only these names exist
+     */
+    public record UserSettings(Map<String, String> keys) {
+        public UserSettings {
+            keys = keys == null || keys.isEmpty()
+                    ? Map.of("layout", "user:layout:{uid}", "quick_link", "user:quick_link:{uid}") : Map.copyOf(keys);
+        }
     }
 
     /**

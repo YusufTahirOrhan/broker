@@ -52,6 +52,11 @@ login:
   applications:
     key: yapi:applications
     refresh-interval: 5m
+  # Kullanıcı ayarları (GET ve PUT /users/me/settings/{name}): ad → eski broker'ın Redis anahtarı; süresiz JSON
+  user-settings:
+    keys:
+      layout: "user:layout:{uid}"
+      "[quick_link]": "user:quick_link:{uid}"
 
 # Yetki projesi; gerçek uçlar gelince yalnızca bu ayarlar değişir
 koordinator:

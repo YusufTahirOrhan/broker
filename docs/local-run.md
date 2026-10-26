@@ -43,7 +43,7 @@ scripts/local-run.sh admin --build    # kod değiştiyse yeniden derler (PowerSh
 | `admin` (merkezi admin API) | 8080 | DEV Oracle'daki yerel şema (`YAPI_ADMIN_DB_*`); projeler ve yetkiler bellekte; ortamların Admin API'si yerel env-admin (8081) | Hayır |
 | `env-admin` (ortam Admin API) | 8081, actuator 9091 | Yerel runtime şeması (`YAPI_RUNTIME_DB_*`); Redis sinyali ayrı kanalda (`yapi:routes-changed:local`) | Hayır |
 | `runtime` (broker) | 8083 | DEV runtime DB, salt okunur (`YAPI_DEV_RUNTIME_DB_*`); DEV Redis (oturumlar, route değişikliği sinyali); `yapi-local.json` | Hayır; durumunu `yapi:loaded-local:*`'a yazar, DEV'in cache durumu ekranında görünmez |
-| `login` (giriş servisi) | 8082 | Sabit kullanıcılar ve yetkiler; DEV Redis | Hayır; oturumları `local:user:session:{uid}`'e, application listesini `yapi:applications:local`'a yazar, DEV'in `user:session:*` ve `yapi:applications` anahtarlarına dokunmaz |
+| `login` (giriş servisi) | 8082 | Sabit kullanıcılar ve yetkiler; DEV Redis | Hayır; oturumları `local:user:session:{uid}`'e, application listesini `yapi:applications:local`'a, kullanıcı ayarlarını `local:user:layout:{uid}` ve `local:user:quick_link:{uid}`'e yazar; DEV'in `user:*` ve `yapi:applications` anahtarlarına dokunmaz |
 
 ## Frontend geliştiricisi: merkezi admin API
 
