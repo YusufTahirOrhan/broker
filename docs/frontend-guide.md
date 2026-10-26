@@ -1,6 +1,6 @@
 # Yapi Admin — Frontend Rehberi
 
-Oct 13, 2026 · @Yusuf
+Oct 26, 2026 · @Yusuf
 
 Bu rehber, broker yönetim ekranlarını geliştirecek frontend için ekranları, akışları ve backend API sözleşmesini anlatır. Backend değiştikçe güncellenir; değişiklikler en alttaki kayıtta listelenir.
 

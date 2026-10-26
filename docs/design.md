@@ -1,16 +1,16 @@
-# Broker Modernizasyonu — Tasarım Dokümanı
+# Yapi — Tasarım Dokümanı
 
-Oct 8, 2026 · @Yusuf
+Oct 26, 2026 · @Yusuf
 
 ## Özet
 
-Broker, subtask'leri koddan değil, DevOps'un merkezi bir ekrandan yönettiği versiyonlu tanımlardan okuyacak. Yeni bir endpoint için artık broker deploy'u ve kodda yetki tanımı gerekmeyecek.
+Yapi, kurum içi istek broker'ının yeni adı ve yeni backend'idir. Broker subtask'leri koddan değil, DevOps'un merkezi bir ekrandan (Yapi Admin) yönettiği versiyonlu tanımlardan okuyacak. Yeni bir endpoint için artık broker deploy'u ve kodda yetki tanımı gerekmeyecek. Bu dokümanda istek yolundaki bileşen "broker" diye anılır; kod, ayar ve altyapı adları `yapi` ile başlar (`POST /yapi`, `yapi.*` ayarları, `yapi-*` modüller).
 
 Bugün her yeni endpoint broker'a kodla ekleniyor ve deploy gerektiriyor. Loglar istek yolunda, senkron olarak Elasticsearch'e yazılıyor; Elastic yavaşlarsa bütün istekler yavaşlıyor.
 
 - **Dinamik tanım:** Subtask'ler servisin OpenAPI spec'inden içe aktarılır; her değişiklik versiyonlanır ve audit edilir.
 - **Proje yanıt formatları:** Projeye özel response sınıfları, aynı şekilde versiyonlanan yanıt profillerine dönüşür; yeni bir format da deploy gerektirmez.
-- **Kontrollü taşıma:** Tanımlar DEV → TEST → PROD sırasıyla promote edilir; PROD onay ve OPTIONS yoklaması ister.
+- **Kontrollü taşıma:** Tanımlar DEV → PREPROD → PROD sırasıyla promote edilir; PROD onay ve OPTIONS yoklaması ister.
 - **Düşük gecikme:** Broker route'ları bellekte tutar; değişiklik Redis sinyaliyle tüm instance'lara yayılır.
 - **Güvenilir loglama:** İstek ve yanıt Kafka'ya kalıcı olarak yazılmadan servis çağrılmaz ve frontend'e yanıt dönmez; Elastic'teki doküman yapısı korunur.
 - **İzlenebilirlik:** Her istek trace, metrik ve log olayıyla uçtan uca izlenir.
@@ -27,31 +27,31 @@ Oklar çağrıyı başlatanı gösterir. Runtime DB'ye yalnızca Admin API yazar
 
 | Bileşen | Nerede | Sorumluluk |
 | --- | --- | --- |
-| Merkezi Admin | Yönetim bölgesi | Ekranlar, tanım ve versiyonlar, onay ve promote; projeleri ve yetkileri yetki projesinden okur, projenin yetkilerini orada açar |
+| Merkezi Admin (Yapi Admin) | Yönetim bölgesi | Ekranlar, tanım ve versiyonlar, onay ve promote; projeleri ve yetkileri Koordinatör'den okur. Kullanıcılar şirketin giriş uygulamasının oturumuyla girer |
 | Merkezi DB | Yönetim bölgesi | Route ve profil tanımları, history, ortam durumu, taşıma talepleri |
-| Ortam Admin API | Her ortam | Runtime DB'ye yazar, Redis'e sinyal verir; spec çeker, yoklar, test eder |
+| Ortam Admin API | Her ortam | Runtime DB'ye yazar, Redis'e sinyal verir; spec çeker, yoklar, test eder; merkezi admin için oturum doğrular |
 | Runtime DB | Her ortam | O ortamda aktif route'lar, yanıt profilleri ve config versiyonu |
 | Redis | Her ortam | Kullanıcı oturumları, izinli application listesi, değişiklik sinyalleri |
 | Broker | Her ortam | Route'u bellekten çözer; application'ı, oturumu ve yetkiyi kontrol eder, logu Kafka'ya yazıp onayını bekler, isteği iletir, yanıtı profile göre zarflar |
-| Giriş servisi | Her ortam | LDAP'ta doğrular, token üretir, oturumu Redis'e yazar ve logout'ta siler; kullanıcı yetkilerini ve application listesini yetki projesinden alır |
+| Giriş servisi | Her ortam | LDAP'ta doğrular (DEV'de magic key), token üretir, oturumu Redis'e yazar ve logout'ta siler; kullanıcı yetkilerini ve application listesini Koordinatör'den alır; kullanıcı ayarlarını (dashboard yerleşimi, hızlı bağlantılar) tutar |
 | Log sink | Her ortam | Ortamın Kafka'sındaki log olaylarını okur; o ortamın Elastic'ine eski doküman yapısıyla, ClickHouse'a satır olarak yazar |
 | Kafka, Elastic, ClickHouse | Her ortam | Log olaylarını taşır; aranabilir ve analiz edilebilir şekilde saklar. ClickHouse ortamlar arasında ortak da olabilir, satırlar ortamı taşır |
-| Koordinatör (yetki projesi) | Mevcut | Projeler (application'lar), yetkiler ve kullanıcılara atanmaları |
+| Koordinatör (yetki projesi) | Mevcut, her ortamda ayrı | Projeler (application'lar), yetkiler ve kullanıcılara atanmaları; yetki yalnızca burada açılır |
 
 ## Broker'da istek işleme
 
 Broker, route'u bellekten bulur ve yetkiyi Redis'ten kontrol eder; istek yolunda veritabanına hiç gitmez.
 
-1. **Karşılama:** Frontend `POST /broker` ile düz bir JSON gönderir: `maintask`, `subtask`, `application` ve `uid` zarf alanlarıdır, geri kalan alanlar subtask'in verisidir. Oturum token'ı `X-Token`, istemci bilgileri `X-Clientip` ve `X-User-Agent` header'larındadır. Broker bir request ID (UUIDv7) üretir ve trace'i başlatır. `application` izinli listede değilse istek burada biter: bugünkü gibi HTTP 200 ve `{"response": false}`.
+1. **Karşılama:** Frontend `POST /yapi` ile düz bir JSON gönderir: `maintask`, `subtask`, `application` ve `uid` zarf alanlarıdır, geri kalan alanlar subtask'in verisidir. Oturum token'ı `X-Token`, istemci bilgileri `X-Clientip` ve `X-User-Agent` header'larındadır. Broker bir request ID (UUIDv7) üretir ve trace'i başlatır. `application` izinli listede değilse istek burada biter: bugünkü gibi HTTP 200 ve `{"response": false}`.
 2. **Route çözümleme:** `(maintask, subtask)` bellekteki snapshot'ta büyük/küçük harf fark etmeden aranır. `X-Token` değeri `login` ya da `logout` ise gövdedeki maintask'a bakılmaz, giriş servisinin route'u seçilir. Route yoksa ve oturum geçerliyse `404` döner, outcome `UNKNOWN_TASK` olur; oturum geçersizse 3. adımdaki yanıt döner.
 3. **Oturum ve yetki:** Oturum kaydı Redis'ten gövdedeki `uid` ile okunur; kayıttaki token, `X-Clientip` ve `X-User-Agent` istektekilerle aynı olmalıdır. Değilse bugünkü gibi HTTP 200 ve `{"response": false, "status": 301, "reason": "check X-Token"}` döner. Route anonim değilse ve kullanıcıda route'un yetkilerinden hiçbiri yoksa `403` döner. Log için `perm_list` de bu okumadan çıkar.
 4. **REQUEST olayı:** Body route'un log politikasına göre maskelenir, olay Kafka'ya yazılır ve broker onayı bekler. Onay gelmezse servis çağrılmaz; `500` ve `{"result": false}` döner, outcome `LOG_UNAVAILABLE` olur.
-5. **Doğrulama ve istek üretimi:** Gövde, route'un `fields` tanımına göre denetlenir; eksik zorunlu alan ya da yanlış tip `400` döner, outcome `INVALID_REQUEST` olur. Ardından path variable, query param, header ve body tanımdaki yer tutucularla üretilir. Host her zaman ortamın kayıtlı base URL'idir.
+5. **Doğrulama ve istek üretimi:** Gövde, route'un `fields` tanımına göre denetlenir; eksik zorunlu alan ya da yanlış tip `400` döner, outcome `INVALID_REQUEST` olur. Ardından path variable, query param, header ve body tanımdaki yer tutucularla üretilir. Host her zaman ortamın kayıtlı base URL'idir. Route'ta alarm kontrolü varsa servis çağrılmadan önce burada yapılır (aşağıda "Alarm kontrolü").
 6. **Forward:** İstek route'un timeout'uyla gönderilir; `traceparent`, imzalı kullanıcı bağlamı ve servislerin bugün beklediği `X-uid` header'ı oturumdaki kullanıcıyla eklenir. Dosya yanıtları belleğe alınmadan stream edilir: route'ta `BINARY` işaretli olanlar ve servisin `Content-Disposition` header'ı döndürdüğü her yanıt.
 7. **RESPONSE olayı:** Servisin status'u, outcome, süre, maskelenmiş body ve yanıt profili Kafka'ya yazılır; broker onayı bekler. Onay gelmezse servisin yanıtı dönmez, `500` ve `{"result": false}` döner, outcome `LOG_UNAVAILABLE` olur. Diğer durumlarda outcome, zarftan önce servisin gerçek status'una göre hesaplanır. Dosya yanıtında olay status ve header'lar gelince yazılır, gövde loglanmaz; dosya onaydan sonra stream edilir.
 8. **Yanıt:** Route'un yanıt profili varsa servisin yanıtı ya da hatası profilin şablonuyla zarflanır; profil yoksa ya da yanıt dosyaysa olduğu gibi döner. Broker'ın verdiği hatalar ortak formattadır; eski broker'da karşılığı olan iki durum (1. adımdaki application ve 3. adımdaki oturum) bugünkü gövdelerle döner. Hiçbiri log olayları onaylanmadan dönmez. Her yanıta `X-Request-Id` header'ı eklenir.
 
-`X-Token` değeri `login` ya da `logout` olan istekler oturum işlemleridir. Broker bunları giriş servisinin anonim route'larına iletir (aşağıda "Giriş ve oturum"); parametre logu ve `broker.gelen.istekler` sayacı dışında tutulur, şifre maskelenir. `X-Token` hiç yoksa istek `400` ile reddedilir; bugün bu durumda controller NullPointerException ile 500 dönüyor.
+`X-Token` değeri `login` ya da `logout` olan istekler oturum işlemleridir. Broker bunları giriş servisinin anonim route'larına iletir (aşağıda "Giriş ve oturum"); parametre logu ve `yapi.gelen.istekler` sayacı dışında tutulur, şifre maskelenir. `X-Token` hiç yoksa istek `400` ile reddedilir; bugün bu durumda controller NullPointerException ile 500 dönüyor.
 
 &#91;embedded content: Bir isteğin broker'dan geçişi · 8 adım\]
 
@@ -68,6 +68,7 @@ Outcome değeri her yerde aynıdır: metrik tag'i, log olayı ve ClickHouse kolo
 | DENIED | Broker oturum ya da yetki nedeniyle reddetti |
 | UNKNOWN\_TASK | maintask/subtask route tablosunda yok |
 | INVALID\_REQUEST | Gövde, route'un alan tanımına uymuyor (eksik zorunlu alan ya da yanlış tip) |
+| ALARM | Alarm kontrolü gövdedeki değerlerde alarm buldu; servis çağrılmadı |
 | LOG\_UNAVAILABLE | REQUEST ya da RESPONSE olayı Kafka'ya yazılamadı; frontend'e 500 döndü |
 
 &#91;embedded content: Broker'ın iç bileşenleri · UML sınıf diyagramı\]
@@ -78,12 +79,15 @@ Controller durum tutmaz, yalnızca sırayı yönetir. Route tablosu ve derlenmi�
 
 Login eskisi gibi broker üzerinden yapılır, ama işi ayrı bir giriş servisi yapar; broker yalnızca yönlendirir ve oturumu okur. Gövdeler ve Redis kaydı eski broker'la birebir aynıdır, böylece frontend'ler değişmez ve geçişte iki broker aynı oturumları kullanabilir.
 
-- **Login:** `X-Token: login` isteği giriş servisine gider. Servis kullanıcıyı eskisi gibi LDAP'a uid@alan-adı ile bind ederek doğrular, yetkilerini Koordinatör'den (yetki projesi) alır, düz bir UUID token üretir ve kaydı Redis'e yazar.
+- **Login:** `X-Token: login` isteği giriş servisine gider. Servis kullanıcıyı doğrular, yetkilerini Koordinatör'den (yetki projesi) alır, düz bir UUID token üretir ve kaydı Redis'e yazar. PREPROD ve PROD'da doğrulama eskisi gibi LDAP'a uid@alan-adı ile bind'dir (adres ve principal deseni ayarda).
+- **DEV'de magic key:** Eski DEV sınıfı gibi DEV'de LDAP'a gidilmez: `uid` boş değilse ve şifre ayardaki anahtara (`YAPI_LOGIN_MAGIC_KEY`) sabit zamanlı karşılaştırmayla eşitse giriş başarılıdır; herkes herkesin hesabına girebilir, yetkiler yine Koordinatör'den gelir. Mod yalnızca `dev` profilinde açılır ve orada varsayılandır; anahtar boşsa servis başlamaz. Başarılı ve başarısız her deneme uid ve sonuçla loglanır, şifre loglanmaz.
+- **Kullanıcının yetkileri:** Koordinatör'ün `GET /api/koordinator/personel-yetki/aktif-yetkiler/{sicil}` ucundan (`uid` = sicil). Uç bir map döner; bütün listelerdeki `yetkiIsim`'ler, sırası korunup tekrarları atılarak oturumdaki `permissions` olur. Uç yalnızca aktif yetkileri döner; yine de `askidaMi` true olan yetki listeye girmez. Beklenmeyen biçim ya da 200 dışı yanıt Koordinatör hatasıdır ve giriş reddedilir.
 - **Oturum kaydı:** Anahtar `user:session:{uid}`, değer `{"uid", "X-Token", "X-Clientip", "X-User-Agent", "permissions"}`, süre 1 gün; broker süreyi uzatmaz. Değer, eski broker'daki gibi tip bilgisi olmayan JSON'dur. Yeni login aynı kullanıcının eski oturumunu ezer.
 - **Kontrol:** Kayıt gövdedeki `uid` ile okunur; token ve iki header kayıttakiyle aynıysa oturum geçerlidir. Servislere giden `X-uid` ve `${user.id}` bu doğrulanmış `uid`'dir.
 - **Logout:** `X-Token: logout` isteği kaydı siler. Kayıttaki `X-Clientip` ve `X-User-Agent` istekteki header'larla aynı olmalıdır; eski broker yalnızca `uid`'e baktığı için herkes herkesin oturumunu kapatabiliyordu. Frontend bu header'ları zaten gönderdiği için frontend'de değişiklik gerekmez. Koordinatör bir oturumu giriş servisinden doğrudan kapatabilir.
-- **Application listesi:** Giriş servisi izinli application'ları Koordinatör'den 5 dakikada bir alıp Redis'e yazar; broker listeyi oradan okur ve liste bir kez yüklenmeden trafik almaz; sonra okunamazsa son listeyle devam eder.
-- **İmza:** Giriş servisi yalnızca broker'ın imzaladığı çağrıları kabul eder. `/actuator/` ve `/internal/` ile başlayanlar dışındaki her yolda `X-User-Context` istenir; yol container'ın çözüp normalize ettiği haliyle karşılaştırılır, `;` parametresi ya da yüzde kodlaması imzayı atlatamaz. İmzasız çağrı 403 ve `{"response": false, "status": 403, "message": ...}` alır. İmza anahtarı `local` dışındaki her ortamda zorunludur, yoksa servis başlamaz. Koordinatör'ün iç ucu (`POST /internal/v1/sessions/{uid}/logout`) imzaya tabi değildir, kendi gizli anahtarıyla çağrılır.
+- **Application listesi:** Giriş servisi izinli application'ları Koordinatör'den (`GET /api/koordinator/projeler-ve-yetkileri`, `is_yapi` true olan projelerin `projeAdi`'leri) 5 dakikada bir alıp Redis'e (`yapi:applications`) yazar; broker listeyi oradan okur ve liste bir kez yüklenmeden trafik almaz; sonra okunamazsa son listeyle devam eder.
+- **İmza:** Giriş servisi yalnızca broker'ın imzaladığı çağrıları kabul eder. `/actuator/` ve `/internal/` ile başlayanlar dışındaki her yolda `X-User-Context` istenir; yol container'ın çözüp normalize ettiği haliyle karşılaştırılır, `;` parametresi ya da yüzde kodlaması imzayı atlatamaz. İmzasız çağrı 403 ve `{"response": false, "status": 403, "message": ...}` alır. İmza anahtarı `local` dışındaki her ortamda zorunludur, yoksa servis başlamaz. Koordinatör'ün iç ucu (`POST /internal/v1/sessions/{uid}/logout`) imzaya tabi değildir, kendi gizli anahtarıyla çağrılır; eski `refresh_permissions` subtask'inin karşılığıdır.
+- **Kullanıcı ayarları:** Eski broker dashboard yerleşimini ve hızlı bağlantıları kendi içinde Redis'te tutuyordu; yeni yerleri giriş servisi: `GET` ve `PUT /users/me/settings/{name}`. `layout` `user:layout:{uid}`'e, `quick_link` `user:quick_link:{uid}`'e karşılık gelir (ad → anahtar ayarda). Kullanıcı imzalı `X-User-Context`'teki uid'dir, gövdedeki `uid` dikkate alınmaz. `PUT` gövdedeki JSON'u süresiz ve eski serializer'ın yazdığı metinle aynı biçimde yazar, yazdığını döner; `GET` saklanan metni değiştirmeden döner, kayıt yoksa `null`. Bilinmeyen ad 404, imzada kullanıcı yoksa 403, gövde JSON değilse 400. Route'ları eski subtask adlarıyla kullanıcı tanımlar; yanıt biçimini profil kurar.
 
 | Durum | HTTP | Gövde |
 | --- | --- | --- |
@@ -97,19 +101,33 @@ Login eskisi gibi broker üzerinden yapılır, ama işi ayrı bir giriş servisi
 
 Başarıda `LDAP`, hatada `Ldap` yazılır; eski kod böyle olduğu için korunur. Bilinmeyen subtask ve yetkisiz kullanıcı için eski projelerde ortak bir gövde yoktu (özel exception), bu yüzden bu ikisinde yeni ortak format kalır.
 
-`application` ve oturum hataları da frontend'ler güncellenince ortak formata geçer: `broker.compat.legacy-responses: false` iken izinli olmayan application 403, geçersiz oturum 401 alır; ikisinin outcome'u da `DENIED`'dır.
+`application` ve oturum hataları da frontend'ler güncellenince ortak formata geçer: `yapi.compat.legacy-responses: false` iken izinli olmayan application 403, geçersiz oturum 401 alır; ikisinin outcome'u da `DENIED`'dır.
+
+### Alarm kontrolü
+
+Eski broker `sorgu` isteklerinde gövdedeki değerleri bir alarm servisine gönderiyor, alarm dönerse isteği servise iletmeden reddediyordu; bugün kullanılmıyor. Yapi'de kontrol isteğe bağlıdır: hangi subtask'lerin kontrol edileceği kodda değil, proje ve subtask ayarında seçilir.
+
+- **Alarm servisi route'u:** Tanımında `alarmService: {"resultPath": "<JSON yolu>"}` olan sıradan bir route'tur; başka bir projeye istek atar. `resultPath` yanıttaki alarm listesinin noktalı yoludur (`data.alarms`), boşsa yanıtın kendisi dizidir. Gövde şablonunda `${alarm.values}` ve diğer yer tutucular kullanılır. Frontend'den çağrılamaz (bulunmamış sayılır, 404 `UNKNOWN_TASK`) ve kendisinde alarm kontrolü olmaz.
+- **Seçim:** Projenin ortam ayarında `alarmRoute` (`{"maintask", "subtask"}` ya da boş). Subtask tanımında `alarm.check`: `INHERIT` (varsayılan; projenin o ortamdaki alarm route'u, yoksa kontrol yok), `OFF` ya da `ROUTE` (tanımda seçilen alarm servisi route'u).
+- **Sıra:** Oturum, yetki, REQUEST olayı ve alan doğrulamasından sonra, servis çağrısından önce. Login, logout ve test çağrısı kontrolden geçmez.
+- **Değerler (`${alarm.values}`):** Gövdedeki bütün yaprak değerler, iç içe olanlar dahil, sırayla ve metin olarak bir JSON dizisinde (`true`, `10`; boş metin de alınır). Üst seviyedeki zarf alanları (`maintask`, `subtask`, `application`, `uid`), her derinlikte maskelenen alanlar (`password` ve route'un `maskFields`'ı, harf duyarsız) ve `null`'lar alınmaz.
+- **Çağrı:** Alarm route'u kendi `timeoutMs`'iyle, tek denemeyle (retry yok) çağrılır; `traceparent` ve varsa `X-User-Context` taşır, diğer yer tutucular gelen isteğin bağlamından dolar. Alarm route'unun yetkisi ve anonimliği aranmaz.
+- **Alarm varsa:** Servis çağrılmaz, outcome `ALARM`. Eski yanıtlar açıkken (`yapi.compat.legacy-responses`) bugünkü gibi HTTP 200 ve `{"response": false, "badprocess": true, "status": 500}`, kapalıyken 403 ortak format. RESPONSE olayının `alarm` nesnesine route, alarm listesi ve gönderilen değerler yazılır; Elastic'te eski `alarm` indeksine de doküman yazılır (Loglama hattı).
+- **Alarm yoksa:** İstek devam eder; olaya `alarm` yazılmaz. Eski kodun bu durumda servise giden gövdeye eklediği `alarm_list` eklenmez (açık karar).
+- **Alarm servisi hatası:** Bağlantı hatası, timeout, 2xx dışı yanıt, okunamayan yanıt ya da yoldaki değerin dizi olmaması; ayrıca seçilen route'un ortamda olmaması, `DISABLED` olması ya da alarm servisi olmayan bir versiyonda olması. İstek reddedilir: ortak formatta 503 `TECHNICAL_ERROR`, mesaj "Alarm kontrolü yapılamadı; istek gönderilmedi."; hata RESPONSE olayının `alarm` nesnesine yazılır.
+- **Taşıma:** Alarm route'unun hedef ortamda aktif olması taşıma ön kontrolüyle (`ALARM_ROUTE_ACTIVE`) aranır; projenin ortam ayarı kaydedilirken yalnızca route'un kayıtlı ve güncel versiyonunun alarm servisi olması aranır.
 
 ## Proje kaydı
 
-Projelerin listesi ve kimliği proje servisinden gelir; broker yalnızca yönlendirme için gereken ayarları tutar.
+Projelerin listesi ve kimliği Koordinatör'den gelir; Yapi yalnızca yönlendirme için gereken ayarları tutar.
 
-1. **Listeleme:** Admin ekranı projeleri ad ve ID'leriyle proje servisinden çeker. Broker'a kayıtlı olanlar işaretli görünür.
-2. **Kayıt:** Kayıtlı olmayan bir proje seçilince `project` satırı açılır: proje servisindeki ID, frontend'in göndereceği `maintask`, görünen ad ve yetki öneki (`LOGPROJECT` gibi). ID, `maintask` ve önek kayıttan sonra değiştirilemez.
-3. **Ayarlar:** Ortam başına base URL ve spec yolu, varsayılan yanıt profili ve projenin yetkileri aynı ekrandan yönetilir.
+1. **Listeleme:** Admin ekranı Koordinatör'ün Yapi projelerini (`projeler-ve-yetkileri` ucunda `is_yapi` true olanlar) `projeId` ve `projeAdi` ile listeler. Katalog tek bir ortamın Koordinatör'ünden okunur (`yapi.admin.catalog.environment`, varsayılan PROD). Yapi'ye kayıtlı olanlar işaretli görünür.
+2. **Kayıt:** Kayıtlı olmayan bir proje seçilince `project` satırı açılır: Koordinatör'deki `projeId`, frontend'in göndereceği `maintask`, görünen ad ve yetki öneki (`LOGPROJECT` gibi). ID, `maintask` ve önek kayıttan sonra değiştirilemez.
+3. **Ayarlar:** Ortam başına base URL, spec yolu, açık/kapalı ve alarm route'u, ayrıca varsayılan yanıt profili aynı ekrandan yönetilir.
 
-- **Yetkiler:** Proje ekranı projenin yetkilerini yetkilendirme servisinden listeler ve yenisini o servisin API'siyle açar; yeni yetkinin yalnızca son eki girilir. Kullanıcıya atama yetkilendirme servisinde kalır. Kurallar Yetkilendirme bölümündedir.
-- **Senkronizasyon:** Görünen ad proje servisinden periyodik olarak yenilenir; ad değişse de `maintask` değişmez. Proje serviste artık yoksa broker'daki kayıt silinmez, `MISSING` olarak işaretlenir.
-- **Geçiş:** Mevcut projeler yetki projesindeki ID'leriyle eşleştirilir. Eşleşmeyenler `UNLINKED` olarak kalır ve ekranda ayrıca gösterilir; sonradan bağlanabilir.
+- **Yetkiler:** Proje ekranı projenin yetkilerini seçilen ortamın Koordinatör'ünden salt okunur listeler. Yetki açmak ve kullanıcıya atamak yalnızca Koordinatör'de yapılır; Yapi'de "yetki ekle" yoktur. Kurallar Yetkilendirme bölümündedir.
+- **Senkronizasyon:** Görünen ad Koordinatör'den periyodik olarak yenilenir; ad değişse de `maintask` değişmez. Proje Koordinatör'de artık yoksa ya da Yapi projesi olmaktan çıktıysa kayıt silinmez, `MISSING` olarak işaretlenir.
+- **Geçiş:** Önce tek bir proje pilot olarak taşınır, sonra kalanlar. Projeler Koordinatör'deki ID'leriyle eşleştirilir; eşleşmeyenler `UNLINKED` olarak kalır ve ekranda ayrıca gösterilir, sonradan bağlanabilir.
 
 ## Route tanımı
 
@@ -177,7 +195,9 @@ Frontend gövdesindeki alanlar `fields` ile tanımlanır; zarf alanları (`maint
 | `${request.<yol>}` | Frontend'in gönderdiği gövdedeki alan; yol, yapıştırılan JSON'daki yoldur (`${request.adres.il}`) |
 | `${header.<ad>}` | Frontend isteğinin header'ı; yalnızca izin listesindekiler okunabilir |
 | `${user.id}` | Broker'ın oturumdan doğruladığı kullanıcı; gövdedeki `uid` değil |
+| `${user.permission}` | Kullanıcıda olan ilk route yetkisi: önce `permissions`, sonra `foreign_permissions`, tanımdaki sırayla; yoksa alan yazılmaz |
 | `${requestId}` | İsteğin ID'si |
+| `${alarm.values}` | Yalnızca alarm servisi route'unda: gelen isteğin değerleri, JSON dizisi ("Alarm kontrolü") |
 
 - **Doğrulama:** Broker gövdeyi `fields`'a göre denetler. Eksik zorunlu alan ya da yanlış tip `400` döner, outcome `INVALID_REQUEST` olur ve yanıt ortak formatta, alan bazında hatalarla gelir. Tanımda olmayan alanlar hata sayılmaz.
 - **Sınır:** Bu kontrol yalnızca sözleşmeyi yakalar; kullanıcıya gösterilecek iş doğrulamaları servisin işidir.
@@ -201,6 +221,8 @@ Kurallar kayıt anında doğrulanır; tanımsız bir alana ya da bilinmeyen bir 
 | logging.binaryInfo | Metin | Binary yanıtta Elastic'e yazılan `info` mesajı; bugün fotoğraf ve excel için sabit metinler |
 | logging.maskFields | Alan adları | Her derinlikte `xxxx` ile maskelenir; varsayılan liste bugünkü gibi yalnızca `password`, route bazında alan eklenir |
 | logging.maxBodyBytes | En fazla 262144 | Yanıt body'si için; aşan kısım kırpılır, `body_truncated = true` olur. İstek body'si eski Elastic yapısı için kırpılmadan taşınır |
+| alarm.check | INHERIT, OFF, ROUTE | Varsayılan INHERIT. ROUTE'ta `alarm.maintask` ve `alarm.subtask` zorunlu; alarm servisi route'unda `alarm` olmaz |
+| alarmService.resultPath | Noktalı JSON yolu ya da boş | Varsa route alarm servisidir; yanıttaki alarm listesinin yolu |
 
 ### Subtask adı
 
@@ -274,10 +296,10 @@ Mevcut response sınıflarının her biri bir profile çevrilir. Koşullu mantı
 
 Yetkiler projeye özeldir: her yetki projenin önekiyle başlar (`LOGPROJECT_TEMEL`, `LOGPROJECT_TUM_LOGLAR`). Bir subtask'e bir ya da birkaç yetki verilir; kullanıcıda bunlardan biri varsa istek geçer. Yeni bir subtask mevcut bir yetkiyi kullanıyorsa kimseye yeni yetki atanması gerekmez.
 
-- **Önek:** Projenin yetki öneki kayıtta belirlenir (`project.permission_prefix`) ve değiştirilemez. Proje ekranında yeni yetkinin yalnızca son eki girilir: `MODERATOR` yazılınca `LOGPROJECT_MODERATOR` açılır. Bir önek başka bir önekin başı olamaz (`HR` ile `HR_PORTAL` gibi); olursa iki projenin yetkileri karışır.
+- **Önek:** Projenin yetki öneki kayıtta belirlenir (`project.permission_prefix`) ve değiştirilemez; yetkinin projenin kendisine mi başka bir projeye mi ait olduğu bununla ayrılır (`LOGPROJECT_MODERATOR` gibi). Yetkiler Koordinatör'de açılır; Yapi yetki açmaz. Bir önek başka bir önekin başı olamaz (`HR` ile `HR_PORTAL` gibi); olursa iki projenin yetkileri karışır.
 - **Proje yetkileri:** Subtask formu varsayılan olarak yalnızca o projenin yetkilerini listeler (`permissions`). Bu listeye başka projenin yetkisi giremez; DB'de bir trigger da korur.
 - **Başka projeden yetki:** Bazı subtask'lere başka projelerin yetkileriyle de erişilir. Formdaki "Başka projeden yetki ekle" seçeneği önce projeyi, sonra o projenin yetkisini seçtirir; bu yetkiler ayrı bir alanda durur (`foreign_permissions`). Ekranda ve onay farkında ayrıca işaretlenir, böylece bir subtask'in başka projenin kullanıcılarına açıldığı gözden kaçmaz. Seçilen proje broker'a kayıtlı olmalıdır, çünkü öneki oradan bilinir.
-- **Katalog:** Yetkilerin ve projelerin sahibi yetki projesidir; yetki onun API'siyle açılır, kullanıcıya da orada atanır. Admin projeler ve yetkiler için Koordinatör'ün tek base URL'ine gider; bir ortamın ayrı adresi varsa ayarla verilir. Kayıtta ve promote öncesinde her yetkinin hedef ortamda tanımlı olduğu kontrol edilir.
+- **Katalog:** Yetkilerin ve projelerin sahibi Koordinatör'dür; yetki orada açılır ve kullanıcıya orada atanır. Koordinatör her ortamda ayrı çalışır (DEV, PREPROD, PROD); admin her ortamın adresine ayardan gider (`YAPI_KOORDINATOR_<ENV>_URL`), broker route'u üzerinden değil. Projeler ve yetkileri `GET /api/koordinator/projeler-ve-yetkileri` ucundan gelir: yalnızca `is_yapi` true olan projeler alınır, eşleşme `projeId` ile, yetki kodu `yetkiList[].yetki`. Liste ortam başına birkaç dakika (varsayılan 5) önbellekte tutulur; başarısız çağrı önbelleğe girmez. Projenin yetkileri Koordinatör'deki projesinin listesidir (`UNLINKED` projede boş). Bir yetki, o ortamdaki herhangi bir Yapi projesinin listesindeyse ortamda var sayılır; kayıtta DEV'de, promote öncesinde hedef ortamda bu kontrol edilir. Evet/hayır alanları (`is_yapi`, `askidaMi`) `true`, `1`, `"true"` ve `"1"` değerlerini evet sayar.
 - **Varsayılan olarak reddet:** Kimseye atanmamış bir yetki, kimsenin çağıramadığı bir subtask demektir. Yeni subtask'ler böylece kapalı doğar.
 - **Anonim erişim:** `anonymous = true` yalnızca onaylı bir değişiklikle açılır. Anonim olmayan her route için en az bir yetki zorunludur: merkezde kayıt bunu reddeder, runtime DB'de `ck_runtime_permission` kısıtı korur.
 - **perm\_list:** Bugün broker'daki projeye özel sınıflar subtask yetkisini bu listeyle kontrol ediyor. Yeni düzende kontrolü route'taki yetkilerle genel motor yapar; projeye ya da subtask'e özel kod kalmaz. Liste servise iletilmez, log dokümanına bugünkü gibi kullanıcının tüm yetkileriyle yazılır.
@@ -291,11 +313,11 @@ Merkezi DB; tanımı, geçmişini, ortam durumunu ve onay akışını tutar. Ort
 
 | Tablo | Ne tutar | Yazan |
 | --- | --- | --- |
-| environment | Ortamlar (DEV, TEST, PROD; TEST, PREPROD olarak da anılır), promote sırası, onay ve test izni | DBA (migration) |
+| environment | Ortamlar (DEV, PREPROD, PROD), promote sırası, onay ve test izni | DBA (migration) |
 | response\_profile | Yanıt profilinin güncel hali | Merkezi admin |
 | response\_profile\_history | Her profil versiyonunun tam snapshot'ı | Merkezi admin, yalnızca INSERT |
-| project | Proje servisindeki ID, maintask, görünen ad, yetki öneki ve varsayılan yanıt profili | Merkezi admin |
-| project\_environment | Ortam başına base URL ve spec yolu | Merkezi admin |
+| project | Koordinatör'deki proje ID'si, maintask, görünen ad, yetki öneki ve varsayılan yanıt profili | Merkezi admin |
+| project\_environment | Ortam başına base URL, spec yolu, açık/kapalı ve alarm route'u | Merkezi admin |
 | route\_definition | Subtask'in güncel hali, subtask başına tek satır | Merkezi admin |
 | route\_definition\_history | Her route versiyonunun tam snapshot'ı | Merkezi admin, yalnızca INSERT |
 | route\_deployment | Ortam başına aktif route versiyonu | Merkezi admin |
@@ -313,7 +335,7 @@ Kısıtlar, kuralları uygulama hatalarına karşı DB seviyesinde de korur:
 - **`uq_project_maintask`, `uq_route_definition`:** maintask ve proje içindeki subtask adı büyük/küçük harf fark etmeden tekildir.
 - **`ck_project_prefix`:** Yetki öneki büyük harf, rakam ve alt çizgiyle yazılır.
 - **`trg_route_history_append_only`, `trg_profile_history_append_only` + yalnızca INSERT yetkisi:** Geçmiş, tablo sahibi tarafından bile değiştirilemez.
-- **Ad değişmezliği (`forbid_column_change`):** maintask, subtask, profil adı, projenin yetki öneki ve proje servisindeki ID'si bir kez yazıldıktan sonra değiştirilemez; boş bir değeri doldurmak serbesttir. Bir route başka projeye de taşınamaz. Proje servisi ID'si olmayan bir proje yalnızca UNLINKED durumunda tutulabilir.
+- **Ad değişmezliği (`forbid_column_change`):** maintask, subtask, profil adı, projenin yetki öneki ve Koordinatör'deki ID'si bir kez yazıldıktan sonra değiştirilemez; boş bir değeri doldurmak serbesttir. Bir route başka projeye de taşınamaz. Koordinatör ID'si olmayan bir proje yalnızca UNLINKED durumunda tutulabilir.
 - **Deployment ve talep FK'leri:** History'de olmayan bir route ya da profil versiyonu hiçbir ortama çıkamaz.
 - **`ck_promotion_subject`:** Bir talep ya bir route ya da bir profil versiyonu taşır, ikisini birden taşıyamaz. Profil talepleri yalnızca DEPLOY ve ROLLBACK alır (`ck_profile_action`).
 - **`uq_promotion_open`, `uq_promotion_open_profile`:** Aynı route ya da profil ve hedef ortam için aynı anda tek açık talep olabilir.
@@ -325,22 +347,23 @@ Oracle şemasının modelden ayrıldığı yerler:
 
 - **Yetkiler:** Merkezde route'un yetkileri `route_permission (definition_id, kind, sort_order, code)` tablosunda durur: `kind` projenin kendi (`OWN`) ya da başka projenin (`FOREIGN`) yetkisidir, sıra tanımdaki sıradır, `code` indekslidir. Kayıtta liste silinip yeniden yazılır; uygulama kullanıcısının silme yetkisi yalnızca bu tablodadır.
 - **History:** Açıklama kolonu `change_note`'tur, çünkü `comment` Oracle'da ayrılmış kelimedir; API'deki alan adı `comment` kalır. Snapshot `to_jsonb` ile değil uygulamada kurulur, anahtarları aynıdır.
-- **Runtime:** `runtime_route.permissions` JSON dizisi metnidir; kısıtı `JSON_EXISTS(permissions, '$[0]')`. Snapshot'ın uygulanışı "Ortam runtime DB'si" bölümünde.
+- **Runtime:** `runtime_route.permissions` JSON dizisi metnidir; kısıtı `JSON_EXISTS(permissions, '$[0]')`.
+- **Adlar:** Şemalar `YAPI_ADMIN` ve `YAPI_RUNTIME`; uygulama kullanıcıları `yapi_admin_app`, `yapi_runtime_reader`, `yapi_runtime_writer`. Uygulamalar şemasız SQL yazar, şema `CURRENT_SCHEMA` ile verilir. Snapshot'ın uygulanışı "Ortam runtime DB'si" bölümünde.
 
 ```sql
 -- Merkezi yönetim veritabanı (control plane), PostgreSQL 14+
--- Rolleri DBA oluşturur: broker_admin_app (merkezi admin backend'i)
+-- Rolleri DBA oluşturur: yapi_admin_app (merkezi admin backend'i)
 
-CREATE SCHEMA IF NOT EXISTS broker_admin;
-SET search_path TO broker_admin;
+CREATE SCHEMA IF NOT EXISTS yapi_admin;
+SET search_path TO yapi_admin;
 
 CREATE TABLE environment (
-    code                VARCHAR(16)  PRIMARY KEY,                 -- DEV, TEST, PROD
+    code                VARCHAR(16)  PRIMARY KEY,                 -- DEV, PREPROD, PROD
     name                VARCHAR(64)  NOT NULL,
     sort_order          SMALLINT     NOT NULL UNIQUE,             -- promote sırası: 1 → 2 → 3
     admin_api_url       VARCHAR(512) NOT NULL,                    -- ortamdaki yönetim API'si
     requires_approval   BOOLEAN      NOT NULL DEFAULT FALSE,      -- PROD için true
-    test_calls_allowed  BOOLEAN      NOT NULL DEFAULT FALSE       -- "test et" yalnızca DEV/TEST
+    test_calls_allowed  BOOLEAN      NOT NULL DEFAULT FALSE       -- "test et" yalnızca DEV/PREPROD
 );
 
 -- History tabloları yalnızca ekleme kabul eder
@@ -402,9 +425,9 @@ CREATE TRIGGER trg_profile_history_append_only
 
 CREATE TABLE project (
     id                           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    external_project_id          VARCHAR(64)  UNIQUE,              -- proje servisindeki ID; geçişte boş kalabilir
+    external_project_id          VARCHAR(64)  UNIQUE,              -- Koordinatör'deki projeId; geçişte boş kalabilir
     maintask                     VARCHAR(100) NOT NULL,            -- frontend'in gönderdiği ad; tekilliği harf duyarsız
-    name                         VARCHAR(200) NOT NULL,            -- proje servisinden gelen görünen ad
+    name                         VARCHAR(200) NOT NULL,            -- Koordinatör'deki projeAdi
     permission_prefix            VARCHAR(50)  NOT NULL UNIQUE,     -- yetki adlarının öneki, ör. LOGPROJECT
     catalog_status               VARCHAR(16)  NOT NULL DEFAULT 'LINKED'
                                  CHECK (catalog_status IN ('LINKED', 'MISSING', 'UNLINKED')),
@@ -431,7 +454,10 @@ CREATE TABLE project_environment (
     base_url     VARCHAR(512) NOT NULL,                           -- forward hedefi, ortama özgü
     spec_path    VARCHAR(256) NOT NULL DEFAULT '/v3/api-docs',
     enabled      BOOLEAN      NOT NULL DEFAULT TRUE,
-    PRIMARY KEY (project_id, environment)
+    alarm_maintask  VARCHAR(100),                                 -- INHERIT eden subtask'lerin alarm servisi route'u
+    alarm_subtask   VARCHAR(150),
+    PRIMARY KEY (project_id, environment),
+    CONSTRAINT ck_project_environment_alarm CHECK ((alarm_maintask IS NULL) = (alarm_subtask IS NULL))
 );
 
 -- Güncel hal: subtask başına tek satır
@@ -595,12 +621,12 @@ CREATE UNIQUE INDEX uq_promotion_open_profile
 CREATE INDEX ix_promotion_status ON promotion_request (status, requested_at);
 
 -- Uygulama kullanıcısı: history'lerde yalnızca okuma ve ekleme, hiçbir tabloda silme yok
-GRANT USAGE ON SCHEMA broker_admin TO broker_admin_app;
-GRANT SELECT ON environment TO broker_admin_app;
+GRANT USAGE ON SCHEMA yapi_admin TO yapi_admin_app;
+GRANT SELECT ON environment TO yapi_admin_app;
 GRANT SELECT, INSERT, UPDATE ON response_profile, project, project_environment, route_definition,
                                 route_deployment, response_profile_deployment, promotion_request
-      TO broker_admin_app;
-GRANT SELECT, INSERT ON route_definition_history, response_profile_history TO broker_admin_app;
+      TO yapi_admin_app;
+GRANT SELECT, INSERT ON route_definition_history, response_profile_history TO yapi_admin_app;
 ```
 
 Bir route tanımını ya da profili değiştirmek, güncel satırı ve history kaydını tek transaction'da yazar. Snapshot, satırın kendisinden üretilir:
@@ -630,16 +656,19 @@ Buradaki DDL de PostgreSQL sözdizimiyle yazıldı; Oracle 19c karşılıkları 
 
 ```sql
 -- Ortam runtime veritabanı: her ortamda ayrı, PostgreSQL 14+
--- Broker'lar okur (broker_runtime_reader), ortam Admin API yazar (broker_runtime_writer)
+-- Broker'lar okur (yapi_runtime_reader), ortam Admin API yazar (yapi_runtime_writer)
 
-CREATE SCHEMA IF NOT EXISTS broker_runtime;
-SET search_path TO broker_runtime;
+CREATE SCHEMA IF NOT EXISTS yapi_runtime;
+SET search_path TO yapi_runtime;
 
 CREATE TABLE runtime_project (
     maintask    VARCHAR(100) PRIMARY KEY,
     base_url    VARCHAR(512) NOT NULL,
     enabled     BOOLEAN      NOT NULL DEFAULT TRUE,
-    updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
+    alarm_maintask  VARCHAR(100),                             -- projenin bu ortamdaki alarm servisi route'u
+    alarm_subtask   VARCHAR(150),
+    updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT ck_runtime_project_alarm CHECK ((alarm_maintask IS NULL) = (alarm_subtask IS NULL))
 );
 
 CREATE TABLE runtime_response_profile (
@@ -680,9 +709,9 @@ CREATE TABLE runtime_config_version (
 
 INSERT INTO runtime_config_version (id, version) VALUES (1, 0);
 
-GRANT USAGE ON SCHEMA broker_runtime TO broker_runtime_reader, broker_runtime_writer;
-GRANT SELECT ON ALL TABLES IN SCHEMA broker_runtime TO broker_runtime_reader;
-GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA broker_runtime TO broker_runtime_writer;
+GRANT USAGE ON SCHEMA yapi_runtime TO yapi_runtime_reader, yapi_runtime_writer;
+GRANT SELECT ON ALL TABLES IN SCHEMA yapi_runtime TO yapi_runtime_reader;
+GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA yapi_runtime TO yapi_runtime_writer;
 ```
 
 Admin API bir snapshot'ı tek transaction'da uygular: satırı `MERGE` ile yazar, bir satır değiştiyse config versiyonunu artırır. Daha eski ya da tekrar gelen bir talep yazamaz, çünkü `promotion_id` sırayla artar ve eşleşen satır yalnızca daha yeni bir taleple güncellenir. Hiçbir şey değişmezse versiyon da artmaz. Aynı route'un ilk eklemesi iki talepte eşzamanlı gelirse ikinci `MERGE` ORA-00001 alır; bir kez tekrarlanınca güncelleme koluna düşer.
@@ -704,7 +733,7 @@ USING dual ON (r.maintask = :maintask AND r.subtask = :subtask)
 
 -- MERGE bir satır yazdıysa aynı transaction'da:
 UPDATE runtime_config_version SET version = version + 1, updated_at = SYSTIMESTAMP WHERE id = 1;
--- Commit sonrası: PUBLISH broker:routes-changed <version>
+-- Commit sonrası: PUBLISH yapi:routes-changed <version>
 ```
 
 Profiller de aynı desenle uygulanır. `runtime_route`'taki FK ortamda olmayan bir profile referans verilmesini engeller; bu yüzden profil, onu kullanan route'lardan önce uygulanır.
@@ -727,6 +756,7 @@ Kill switch aynı deseni kullanır: `status = 'DISABLED'` yazar ve versiyonu art
 SET TRANSACTION READ ONLY;   -- Oracle'da REPEATABLE READ yok; sorgular işlemin başındaki veriyi görür
 SELECT version FROM runtime_config_version WHERE id = 1;
 SELECT name, version, definition FROM runtime_response_profile;
+SELECT maintask, alarm_maintask, alarm_subtask FROM runtime_project WHERE enabled = 1;
 SELECT r.maintask, r.subtask, r.version, r.http_method, r.path_template, r.permissions,
        r.anonymous, r.response_profile, r.definition, p.base_url
   FROM runtime_route r
@@ -764,7 +794,7 @@ private synchronized void reload() {
 - **Profiller:** Şablonlar yüklemede bir kez derlenir; istek yolunda yalnızca yer tutucular doldurulur.
 - **Bozuk kayıt:** Ayrıştırılamayan bir route ya da profil atlanır ve alarm üretir; bozuk bir profili kullanan route'lar da onunla birlikte atlanır. Diğer kayıtların yüklenmesi engellenmez.
 - **Tutarlılık penceresi:** Pub/sub mesajı kaçan bir instance en geç 15 saniye içinde yetişir.
-- **Yayılım kontrolü:** Her instance yüklediği versiyonu `broker:loaded:{instanceId}` anahtarına 60 saniye TTL ile yazar. Merkezi admin böylece "3/3 instance v43'te" bilgisini gösterebilir.
+- **Yayılım kontrolü:** Her instance yüklediği versiyonu `yapi:loaded:{instanceId}` anahtarına 60 saniye TTL ile yazar. Merkezi admin böylece "3/3 instance v43'te" bilgisini gösterebilir.
 
 ## Spec karşılaştırma, yoklama ve test
 
@@ -822,7 +852,7 @@ Yoklama üç yerde çalışır: kayıt anında, her promote'tan önce hedef orta
 
 ### Test isteği
 
-"Test et" yalnızca `test_calls_allowed = true` olan ortamlarda (DEV, TEST) açıktır; prod'da POST, PUT ve DELETE gerçek kayıt oluşturur. İstek, broker'ın yalnızca dev/test profillerinde açık olan bir iç endpoint'inden ve gerçek isteklerle aynı `RequestBuilder`'dan geçer. Ayrı bir kodla test etmek broker'ı değil o kodu test eder. Örnek gövde, route'un `fields` tanımından üretilen bir formla ya da yapıştırılan bir istekle girilir; doğrulama hataları da gerçek istekteki gibi gösterilir.
+"Test et" yalnızca `test_calls_allowed = true` olan ortamlarda (DEV, PREPROD) açıktır; prod'da POST, PUT ve DELETE gerçek kayıt oluşturur. İstek, broker'ın yalnızca test çağrısına açık ortamlarda oluşan bir iç endpoint'inden (`POST /internal/v1/test`, `X-Yapi-Test-Secret`) ve gerçek isteklerle aynı `RequestBuilder`'dan geçer. Ayrı bir kodla test etmek broker'ı değil o kodu test eder. Örnek gövde, route'un `fields` tanımından üretilen bir formla ya da yapıştırılan bir istekle girilir; doğrulama hataları da gerçek istekteki gibi gösterilir. Test çağrısı application, oturum ve alarm kontrolünden geçmez ve Kafka'ya log yazmaz; merkezi admin onu kendisi audit eder.
 
 Ekran önce üretilen isteği (method, tam URL, header'lar, body), sonra servisin yanıtını (status, header'lar, body, süre), profil varsa frontend'in alacağı zarflı yanıtı ve yorumu gösterir:
 
@@ -846,9 +876,11 @@ Bir versiyon yalnızca bir önceki ortamda aktifken bir sonrakine taşınır. PR
 2. **Ön kontroller (merkez):**
    - Versiyon kaynak ortamda ACTIVE mi, hedef ortam kaynak ortamın hemen sonrası mı (`sort_order + 1`)?
    - Aynı tanım ve hedef ortam için açık talep var mı (`uq_promotion_open`)?
-   - Route'un yetkileri hedef ortamın yetkilendirme servisinde tanımlı mı?
+   - Route'un yetkileri hedef ortamın Koordinatör'ünde, bir Yapi projesinin yetkileri arasında var mı?
    - Route'un yanıt profili hedef ortamda aktif mi (`response_profile_deployment`)?
    - Proje hedef ortamda tanımlı ve açık mı (`project_environment.enabled`)?
+   - Route'un alarm route'u (`ROUTE`'ta tanımdaki, `INHERIT`'te projenin hedef ortamdaki `alarmRoute`'u) hedef ortamda aktif ve oradaki versiyonu alarm servisi mi (`ALARM_ROUTE_ACTIVE`)? `INHERIT`'te projenin hedefte alarm route'u yoksa kontrol geçer; alarm servislerinde ve `OFF`'ta çalışmaz.
+   - Ön kontrol mesajları ortam kodunu ek yapıştırmadan yazar: "v4 PREPROD ortamında aktif".
 3. **Onay:** Hedef ortamda `requires_approval = true` ise talep `PENDING_APPROVAL` olur. Onaylayan, hedef ortamdaki mevcut versiyonla taşınan versiyonun farkını görür (başka projeden eklenen yetkiler ayrıca işaretlenir) ve talep edenden farklı biri olmak zorundadır (`ck_four_eyes`). Onay gerekmeyen ortamlarda talep doğrudan `APPLYING` olur.
 4. **Yoklama:** Merkez, hedef ortamın Admin API'sinden OPTIONS yoklaması ister. Sonuç OK değilse talep `FAILED` olur, örneğin backend henüz o ortama deploy edilmemiştir. Hedef ortamda hiçbir şey değişmez.
 5. **Uygulama:** Merkez snapshot'ı `promotion_id` ile Admin API'ye gönderir. Admin API runtime tablosunu ve config versiyonunu tek transaction'da yazar, commit sonrası Redis'e sinyal verir.
@@ -857,7 +889,7 @@ Bir versiyon yalnızca bir önceki ortamda aktifken bir sonrakine taşınır. PR
 
 Yanıt profilleri de aynı akıştan geçer; yalnızca 4. adım (yoklama) yoktur. Onaylayan, farkın yanında profili hedef ortamda kullanan route'ları da görür.
 
-&#91;embedded content: TEST'ten PROD'a promote · 7 adım, 2 kapı\]
+&#91;embedded content: PREPROD'dan PROD'a promote · 7 adım, 2 kapı\]
 
 Numaralar yukarıdaki adımlarla eşleşir. Yoklama başarısız olursa akış 4. adımda durur ve PROD'da hiçbir şey değişmez.
 
@@ -875,6 +907,7 @@ Durumlar `promotion_request.status` kolonundaki değerlerdir; açık durumların
 | Redis sinyali gönderilemedi | APPLIED | Broker'lar en geç 15 saniyede versiyon kontrolüyle yetişir |
 | Eski bir talep gecikmeli ulaştı | Yazılmaz | `promotion_id` karşılaştırması daha yeni versiyonu korur |
 | Route'un profili hedef ortamda yok | Ön kontrolde durur, hedef ortam değişmez | Önce profil, sonra route taşınır |
+| Route'un alarm route'u hedef ortamda aktif değil | Ön kontrolde durur, hedef ortam değişmez | Önce alarm servisi route'u taşınır |
 
 ### Geri alma
 
@@ -889,17 +922,19 @@ Merkez ortamlara yalnızca bu API üzerinden erişir. DB şifreleri, Redis ve se
 | --- | --- | --- | --- |
 | GET | /admin/v1/projects/{maintask}/spec | Servisin OpenAPI spec'ini çeker | Spec'in açık olduğu ortamlar |
 | POST | /admin/v1/probe | OPTIONS yoklaması yapar | Hepsi |
-| POST | /admin/v1/test | Kaydedilmemiş tanımla gerçek istek atar | Yalnızca DEV, TEST |
+| POST | /admin/v1/test | Kaydedilmemiş tanımla gerçek istek atar | Yalnızca DEV, PREPROD |
 | PUT | /admin/v1/routes/{maintask}/{subtask} | Snapshot'ı uygular | Hepsi |
 | PUT | /admin/v1/response-profiles/{name} | Profil snapshot'ını uygular | Hepsi |
 | POST | /admin/v1/routes/{maintask}/{subtask}/disable | Kill switch | Hepsi |
 | GET | /admin/v1/routes | Ortamdaki route'ları, profilleri ve config versiyonunu döner (drift kontrolü) | Hepsi |
-| PUT | /admin/v1/projects/{maintask} | Base URL'i ya da proje durumunu yazar | Hepsi |
+| PUT | /admin/v1/projects/{maintask} | Base URL'i, proje durumunu ve alarm route'unu yazar | Hepsi |
 | GET | /admin/v1/cache-status | Instance'ların yüklediği versiyonları döner | Hepsi |
+| POST | /admin/v1/sessions/verify | Merkezi admin'e giren kullanıcının oturumunu doğrular, yetkilerini döner | Oturum ortamı (varsayılan PROD) |
 
 - **Kimlik:** mTLS kullanılır, yalnızca merkezin sertifikası kabul edilir. Her çağrı işlemi yapan kullanıcıyı ve `promotion_id`'yi taşır; Admin API bunları kendi loguna da yazar.
 - **İdempotency:** `PUT /routes` aynı `promotion_id` ile tekrar çağrılabilir; ikinci çağrı değişiklik yapmadan mevcut versiyonu döner.
 - **Yanıtlar:** Apply `{"applied": true, "configVersion": 43}`, probe `{"result": "OK", "status": 200, "allow": ["GET", "POST"]}` döner. Probe sonucu `OK`, `WRONG_METHOD`, `PATH_NOT_FOUND` ya da `INCONCLUSIVE` olabilir.
+- **Oturum doğrulama:** `POST /admin/v1/sessions/verify` gövdesi `{"uid", "token", "clientIp", "userAgent"}`, yanıtı `{"valid", "permissions"}`. Kayıt `user:session:{uid}`'den broker'ın kodu ve kuralıyla okunur ve eşleştirilir; geçersizse `{"valid": false, "permissions": []}`, Redis okunamazsa 503 `SESSION_UNAVAILABLE`.
 
 `PUT /admin/v1/routes/order-service/get_order` gövdesi:
 
@@ -977,7 +1012,8 @@ Bugünkü "yanıt logu yazılamazsa yanıt dönmez" kuralı böylece korunur ve 
   "body_truncated": false,
   "client_response": { "BACKEND_STATUS": 201, "status": 200, "data": "" },
   "error_message": null,
-  "broker_instance": "broker-7f9c-2"
+  "alarm": null,
+  "yapi_instance": "yapi-7f9c-2"
 }
 ```
 
@@ -988,12 +1024,13 @@ Bugünkü "yanıt logu yazılamazsa yanıt dönmez" kuralı böylece korunur ve 
 - **query\_id, perm\_list, token:** Eski dokümanlara bugünkü gibi yazılır. `query_id` broker'ın her istekte ürettiği rastgele UUID'dir ve yalnızca parametre dokümanlarına gider; `perm_list` kullanıcının tüm yetkileridir; `token`, `X-Token`'ın kendisidir.
 - **body:** REQUEST olayında frontend'in gövdesi, maskelenmiş ve kırpılmamış olarak; eski Elastic dokümanları bundan üretilir. RESPONSE olayında yalnızca `logResponseBody` açıksa servisin yanıtı. Oturum işlemlerinde de böyledir: giriş route'larında seçenek kapalı tutulduğu için login'in döndürdüğü token ClickHouse'a girmez.
 - **client\_response:** Frontend'e dönen gövde; `data` alanı bugünkü gibi boş string'e çevrilir. Route'ta `logResponseBody` açıksa zarfın tamamı maskelenir ve `data` boşaltılmaz: JSON metni olarak yazılır, zaten string ise olduğu gibi. Profil yoksa maskeli gövde yazılır; gövde JSON nesnesi değilse `{"status": <kod>, "data": "<metin>"}`. Metin `maxBodyBytes`'ı aşarsa UTF-8 karakteri bölünmeden kırpılır ve `body_truncated` işaretlenir. Alan string kaldığı için Elastic'teki eşleme değişmez. Eski broker'ın gövdeleriyle dönen yanıtlara (login, logout, `{"response": false}`) eskisi gibi `"data": ""` eklenir. Elastic'teki `data_response` bundan yazılır; log yazılamadıysa `data_response` bugünkü gibi yazılmaz.
+- **alarm:** Yalnızca RESPONSE olayında ve alarm kontrolü alarm bulduğunda ya da yapılamadığında dolu: `{"maintask", "subtask", "alarms", "params"}` ya da `{"maintask", "subtask", "error"}`. Alarm bulunmazsa yazılmaz.
 - **Maskeleme:** Broker'da, Kafka'dan önce yapılır. Şifre ve route'ta tanımlanan alanlar `xxxx` olur; dosya yanıtlarında gövde yerine yalnızca boyut yazılır. `X-Token` eski loglarla aynı kalsın diye maskelenmez.
 
 ### Kafka
 
 ```properties
-# Topic: broker.logs.v1
+# Topic: yapi.logs.v1
 partitions=12
 replication.factor=3
 min.insync.replicas=2
@@ -1014,33 +1051,33 @@ delivery.timeout.ms=2000               # bir olayın onay bütçesi; aşılırsa
 
 - **Key:** Mesaj key'i `request_id`'dir; REQUEST ve RESPONSE aynı partition'a doğru sırayla düşer.
 - **Onay bütçesi:** Bir istek iki olayın onayını bekler, her biri en fazla `delivery.timeout.ms` sürer. Lider değişimi gibi kısa kesintilerde bu sürede onay alamayan istekler 500 alır; değerler DEV'de ölçülen onay süresine göre ayarlanır.
-- **Açılış:** Broker açılışta `partitionsFor("broker.logs.v1")` ile metadata'yı ısıtır ve bu bitmeden trafiğe hazır sayılmaz; aksi halde ilk istekler 50 ms sınırına takılıp 500 alabilir.
+- **Açılış:** Broker açılışta `partitionsFor("yapi.logs.v1")` ile metadata'yı ısıtır ve bu bitmeden trafiğe hazır sayılmaz; aksi halde ilk istekler 50 ms sınırına takılıp 500 alabilir.
 - **Partition sayısı:** Consumer paralelliğinin üst sınırıdır. 12, trafik ölçülene kadar başlangıç değeridir.
 
 | Consumer group | Hedef | Yazma şekli | Tekrar gelen olay |
 | --- | --- | --- | --- |
-| broker-logs-elastic | Elastic `requests_yyyy-MM` (eski yapı) | Bulk API, `update` + `doc_as_upsert` | Aynı `_id`'ye aynı içerik yazılır, sonuç değişmez |
-| broker-logs-clickhouse | ClickHouse `broker_log` | Toplu insert (1 sn ya da 10.000 satır) | ReplacingMergeTree birleştirmede tekilleştirir |
+| yapi-logs-elastic | Elastic `requests_yyyy-MM` (eski yapı) ve `alarm` | Bulk API, `update` + `doc_as_upsert`; alarm dokümanı `index` | Aynı `_id`'ye aynı içerik yazılır, sonuç değişmez |
+| yapi-logs-clickhouse | ClickHouse `yapi_log` | Toplu insert (1 sn ya da 10.000 satır) | ReplacingMergeTree birleştirmede tekilleştirir |
 
-Offset yalnızca yazma başarılı olunca commit edilir. Sink düzelince kaldığı yerden devam eder; retention süresince veri kaybolmaz. İşlenemeyen mesaj `broker.logs.v1.dlq`'ya yazılır ve partition'ı durdurmaz. ClickHouse için özel consumer yerine ClickHouse'un Kafka table engine'i ya da resmi Kafka Connect sink'i de kullanılabilir.
+Offset yalnızca yazma başarılı olunca commit edilir. Sink düzelince kaldığı yerden devam eder; retention süresince veri kaybolmaz. İşlenemeyen mesaj `yapi.logs.v1.dlq`'ya (`yapi.dlq.sink`, `yapi.dlq.reason`, `yapi.dlq.origin` header'larıyla) yazılır ve partition'ı durdurmaz. ClickHouse için özel consumer yerine ClickHouse'un Kafka table engine'i ya da resmi Kafka Connect sink'i de kullanılabilir.
 
 ### Spool
 
 Spool artık bir yanıtın dönmesi için yeterli sayılmaz. Yalnızca log yazılamadığı için 500 dönen isteklerin kaydını sonradan tamamlar.
 
-- Böyle bir istekte broker olayları `outcome = LOG_UNAVAILABLE` ve frontend'e dönen `{"result": false}` ile yerel diske JSON satırları olarak yazar (`/var/lib/broker/log-spool/`).
-- Kafka düzelince bir arka plan görevi bunları sırayla gönderir. Böylece "servis işlemi yaptı ama kullanıcı 500 aldı" durumu Elastic'te `broker` alanlarında görünür; `data_response` bugünkü gibi yazılmaz.
+- Böyle bir istekte broker olayları `outcome = LOG_UNAVAILABLE` ve frontend'e dönen `{"result": false}` ile yerel diske JSON satırları olarak yazar (`/var/lib/yapi/log-spool/`).
+- Kafka düzelince bir arka plan görevi bunları sırayla gönderir. Böylece "servis işlemi yaptı ama kullanıcı 500 aldı" durumu Elastic'te `yapi` alanlarında görünür; `data_response` bugünkü gibi yazılmaz.
 - Süresi dolan bir gönderim Kafka'ya yine de yazılmış olabilir; sink'ler tekrar gelen olayı zaten tekilleştirir.
 - Spool kaybolursa garanti bozulmaz, yalnızca bu tamamlama eksik kalır. Kalıcı bir volume önerilir ama zorunlu değildir; spool'da veri olması alarm üretir.
 
 ### ClickHouse
 
-TTL'deki 180 gün ve 400 gün örnek değerlerdir; saklama süreleri açık bir karardır. Bu DDL ClickHouse 24.8'de çalıştırıldı; sink'in yazdığı satırlar, dakikalık metrik view'ı ve `FINAL` ile tekilleştirme `broker-log-sink`'in testinde gerçek sunucuyla denenir. JSON yazılırken ISO 8601 zaman damgaları için `date_time_input_format = 'best_effort'` ayarı gerekir.
+TTL'deki 180 gün ve 400 gün örnek değerlerdir; saklama süreleri açık bir karardır. Bu DDL ClickHouse 24.8'de çalıştırıldı; sink'in yazdığı satırlar, dakikalık metrik view'ı ve `FINAL` ile tekilleştirme `yapi-log-sink`'in testinde gerçek sunucuyla denenir. JSON yazılırken ISO 8601 zaman damgaları için `date_time_input_format = 'best_effort'` ayarı gerekir.
 
 ```sql
-CREATE DATABASE IF NOT EXISTS broker_logs;
+CREATE DATABASE IF NOT EXISTS yapi_logs;
 
-CREATE TABLE broker_logs.broker_log
+CREATE TABLE yapi_logs.yapi_log
 (
     event_time       DateTime64(3, 'UTC'),
     request_id       UUID,
@@ -1066,7 +1103,7 @@ CREATE TABLE broker_logs.broker_log
     body_size        UInt32,
     body_truncated   Bool,
     error_message    String,
-    broker_instance  LowCardinality(String),
+    yapi_instance    LowCardinality(String),
     INDEX idx_request_id request_id TYPE bloom_filter GRANULARITY 4,
     INDEX idx_trace_id   trace_id   TYPE bloom_filter GRANULARITY 4,
     INDEX idx_user_id    user_id    TYPE bloom_filter GRANULARITY 4
@@ -1077,7 +1114,7 @@ ORDER BY (maintask, subtask, event_time, request_id, event_type)
 TTL toDateTime(event_time) + INTERVAL 180 DAY;
 
 -- Dakikalık metrikler: dashboard'lar ana tabloyu taramaz
-CREATE TABLE broker_logs.broker_metrics_1m
+CREATE TABLE yapi_logs.yapi_metrics_1m
 (
     minute       DateTime('UTC'),
     environment  LowCardinality(String),
@@ -1092,8 +1129,8 @@ PARTITION BY toYYYYMM(minute)
 ORDER BY (environment, maintask, subtask, outcome, minute)
 TTL minute + INTERVAL 400 DAY;
 
-CREATE MATERIALIZED VIEW broker_logs.broker_metrics_1m_mv
-TO broker_logs.broker_metrics_1m
+CREATE MATERIALIZED VIEW yapi_logs.yapi_metrics_1m_mv
+TO yapi_logs.yapi_metrics_1m
 AS
 SELECT
     toStartOfMinute(toDateTime(event_time, 'UTC'))   AS minute,
@@ -1103,7 +1140,7 @@ SELECT
     outcome,
     countState()                                     AS requests,
     quantilesState(0.5, 0.95, 0.99)(duration_ms)     AS duration_q
-FROM broker_logs.broker_log
+FROM yapi_logs.yapi_log
 WHERE event_type = 'RESPONSE'
 GROUP BY minute, environment, maintask, subtask, outcome;
 ```
@@ -1117,7 +1154,7 @@ SELECT
     subtask,
     countMerge(requests)                          AS requests,
     quantilesMerge(0.5, 0.95, 0.99)(duration_q)   AS p50_p95_p99_ms
-FROM broker_logs.broker_metrics_1m
+FROM yapi_logs.yapi_metrics_1m
 WHERE environment = 'PROD' AND minute >= now() - INTERVAL 1 HOUR
 GROUP BY maintask, subtask
 ORDER BY requests DESC;
@@ -1128,7 +1165,7 @@ SELECT
     any(maintask)                                 AS maintask,
     any(subtask)                                  AS subtask,
     minIf(event_time, event_type = 'REQUEST')     AS received_at
-FROM broker_logs.broker_log
+FROM yapi_logs.yapi_log
 WHERE event_time >= now() - INTERVAL 1 HOUR
 GROUP BY request_id
 HAVING countIf(event_type = 'REQUEST') > 0
@@ -1138,13 +1175,14 @@ HAVING countIf(event_type = 'REQUEST') > 0
 
 ### Elastic: eski yapıyla uyumluluk
 
-Elastic'teki dokümanlar alanları ve değerleriyle bugünkü gibi kalır, çünkü eski loglar da bu yapıda ve bu loglardan beslenen projeler var. Değişen yalnızca dokümanı kuran yer: bugün broker istek yolunda kuruyor, yeni düzende Elastic sink Kafka olaylarından kuruyor. Yeni bilgi yalnızca `broker` nesnesinin altına eklenir; böylece eski alanlarla ve frontend'in gönderdiği alan adlarıyla çakışmaz.
+Elastic'teki dokümanlar alanları ve değerleriyle bugünkü gibi kalır, çünkü eski loglar da bu yapıda ve bu loglardan beslenen projeler var. Değişen yalnızca dokümanı kuran yer: bugün broker istek yolunda kuruyor, yeni düzende Elastic sink Kafka olaylarından kuruyor. Yeni bilgi yalnızca `yapi` nesnesinin altına eklenir; böylece eski alanlarla ve frontend'in gönderdiği alan adlarıyla çakışmaz.
 
 | Doküman | Ne zaman | İçerik |
 | --- | --- | --- |
 | Ana doküman | Her istek | `_id` = `request_id`. Frontend gövdesi olduğu gibi (`password` değeri `xxxx`), `log_request` alanları, `perm_list` ve yanıt gelince `data_response` |
 | Parametre dokümanı | Login ve logout dışında, Map ya da Map listesi olan her üst seviye alan için | Zarf alanları, `log_request` alanları, `query_id` ve `<alan>: {parameter_name, parameter_value}`; parametre başına bir doküman |
 | `data_response` | RESPONSE olayıyla | Frontend'e dönen gövde, `data` alanı boş string: `{"BACKEND_STATUS": 200, "status": 200, "data": ""}`. Route'ta "Yanıt verisi loglansın" açıksa `data` yanıt verisinin JSON metnidir. Binary yanıtta `info` mesajı; log yazılamadıysa bugünkü gibi yazılmaz |
+| Alarm dokümanı | Alarm kontrolü alarm bulduğunda, RESPONSE olayıyla | İndeks `alarm` (eski `alarm_log`; aylık değil, ad `yapi.sink.elastic.alarm-index` ile değişir), `_id` = `query_id`. Gövde isteğin parametreleri: frontend gövdesi zarf alanları dahil, maskelenmiş haliyle. Yeni bilgi `yapi` nesnesinde: `request_id`, `uid`, `client_ip`, `alarms`, `alarm_route`, `time`, `environment` |
 
 `log_request`'in eklediği alanlar ve örnek dokümanlarda görülenler:
 
@@ -1163,12 +1201,12 @@ Elastic'teki dokümanlar alanları ve değerleriyle bugünkü gibi kalır, çün
 - **Eşleme:** Elastic, eşleşen index şablonlarından yalnızca en yüksek öncelikliyi uygular. Bu yüzden yeni bir şablon açılmaz; aşağıdaki bileşen mevcut `requests_*` şablonunun `composed_of` listesine eklenir.
 
 ```json
-PUT _component_template/broker-fields
+PUT _component_template/yapi-fields
 {
   "template": {
     "mappings": {
       "properties": {
-        "broker": {
+        "yapi": {
           "properties": {
             "received_at":              { "type": "date" },
             "responded_at":             { "type": "date" },
@@ -1182,7 +1220,7 @@ PUT _component_template/broker-fields
             "outcome":                  { "type": "keyword" },
             "duration_ms":              { "type": "integer" },
             "body_truncated":           { "type": "boolean" },
-            "broker_instance":          { "type": "keyword" }
+            "yapi_instance":            { "type": "keyword" }
           }
         }
       }
@@ -1198,20 +1236,24 @@ Log yazılamadığında servisin yanıtı yerine `500` ve `{"result": false}` d�
 - Liste dalında değeri null olan bir parametre `toString()`'de hata veriyor ve istek düşüyor; sink bu parametrede `parameter_value` yazmaz.
 - `uid` gövdeden okunup `X-uid` header'ı olarak servise gidiyor; yeni düzende `X-uid` oturumdaki kullanıcıyla doldurulur.
 
-Alan listesi `log_request` koduna ve iki örnek dokümana göre çıkarıldı: bir ana doküman ve bir parametre dokümanı. Eski broker `sorgu` isteklerindeki alarm kayıtlarını `alarm` indeksine yazıyor; bu iş diğerleri bittikten sonra eski kod ve bir örnek dokümanla taşınacak.
+Alan listesi `log_request` koduna ve iki örnek dokümana göre çıkarıldı: bir ana doküman ve bir parametre dokümanı. Alarm dokümanı eski `alarm_log` koduna göre yazılır (indeks `alarm`, `_id` = `query_id`, doküman parametre map'i). Eski indeksin eşlemesi istek olduğu gibi basıldığı için çok geniş; `yapi` nesnesinin tipleri gerekirse o indeksin şablonuna da eklenir.
 
 ## Güvenlik ve yönetişim
 
 Merkezi admin her ortama erişim verebildiği için sistemin en hassas yüzeyidir. Bu yüzden yetkiler ortam bazında ve dört göz ilkesiyle verilir.
 
-| Rol | DEV | TEST | PROD |
+| Rol | DEV | PREPROD | PROD |
 | --- | --- | --- | --- |
 | VIEWER | Okur | Okur | Okur |
 | ROUTE\_EDITOR | Tanımlar, test eder, uygular | Taşıma talebi açar | Taşıma talebi açar |
 | APPROVER | Okur | Okur | Talepleri onaylar ya da reddeder |
 
-Roller şirketin SSO'su ya da yetkilendirme servisindeki gruplardan gelir.
+Merkezi admin'e SSO ile değil, şirketin giriş uygulamasının oturumuyla girilir. Kullanıcı Koordinatör'de Yapi yetkisi aldığında giriş ekranında Yapi Admin'i görür.
 
+- **Oturum:** Ekran her istekte giriş uygulamasının oturumunu gönderir: `X-Token`, `X-Uid` (sicil), `X-Clientip`, `X-User-Agent`. `X-Clientip`'i ekranın önündeki proxy broker'dakiyle aynı biçimde koyar.
+- **Doğrulama:** Admin API oturumu oturum ortamının (`yapi.admin.session.environment`, varsayılan PROD) env-admin'ine `POST /admin/v1/sessions/verify` ile sorar; eşleşme broker'ın kuralıdır (token, IP ve tarayıcı login'deki gibi). Geçerli ve geçersiz cevaplar dört header'ın tamamıyla anahtarlanıp 30 saniye tutulur; başarısız çağrı tutulmaz.
+- **Roller:** Oturumdaki Yapi yetkilerinden, ayarla: `YAPI_DEVELOPER` İzleyici ve Düzenleyen, `YAPI_ADMIN` üç rolü de verir (yetki adları değişebilir). Kullanıcı adı uid'dir; dört göz kuralı uid ile uygulanır.
+- **Hatalar:** Header eksik ya da oturum geçersiz 401; Yapi yetkisi yok ya da rol yetmiyor 403; oturum doğrulanamadı (env-admin'e ulaşılamadı) 502 `ENV_UNREACHABLE`. Yerel geliştirmede (`local` profili) HTTP Basic ve sabit kullanıcılar.
 - **Dört göz:** PROD'a her taşıma ve anonim erişimin açılması, talep edenden farklı bir onaylayıcı ister. Kural DB'de `ck_four_eyes` ile de korunur.
 - **Audit:** Tanım değişiklikleri `route_definition_history`'de, taşımalar `promotion_request`'te durur. Uygulama kullanıcısı yalnızca route'ların yetki satırlarını silebilir (kayıtta liste yeniden yazılır); başka hiçbir tabloda silme yetkisi yoktur; history'yi bir trigger tablo sahibine karşı da korur.
 - **SSRF:** Test ve yoklama istekleri yalnızca kayıtlı projelerin base URL'lerine gider. URL `UriComponentsBuilder` ile kurulur ve redirect izlenmez.
@@ -1225,8 +1267,8 @@ Roller şirketin SSO'su ya da yetkilendirme servisindeki gruplardan gelir.
 Tek POST endpoint'i yüzünden kaybolan maintask/subtask bilgisi her trace'e, metriğe ve log olayına geri eklenir.
 
 - **Tracing:** Broker, ortam Admin API'leri ve tüm servislerde OpenTelemetry Java agent'ı çalışır; trace'ler OTLP ile Elastic APM'e gider. Broker'daki istek span'ının adı `maintask/subtask`'tir, ikisi attribute olarak da eklenir.
-- **Metrik:** Broker'da `broker.requests` adlı bir Micrometer timer'ı `maintask`, `subtask` ve `outcome` tag'lerini taşır. Route tablosunda olmayan subtask `UNKNOWN` olarak sayılır; kullanıcı ID'si metriğe değil, trace ve loga yazılır.
-- **Mevcut sayaç:** Bugünkü `broker.gelen.istekler` sayacı aynı ad ve tag'lerle üretilmeye devam eder, mevcut dashboard'lar bozulmaz. Login ve logout bugünkü gibi sayılmaz; route tablosunda olmayan değerler "Bilinmeyen Proje" ve "Bilinmeyen Endpoint" olarak sayılır.
+- **Metrik:** Broker'da `yapi.requests` adlı bir Micrometer timer'ı `maintask`, `subtask` ve `outcome` tag'lerini taşır. Route tablosunda olmayan subtask `UNKNOWN` olarak sayılır; kullanıcı ID'si metriğe değil, trace ve loga yazılır.
+- **Mevcut sayaç:** Bugünkü `broker.gelen.istekler` sayacı Yapi'de `yapi.gelen.istekler` adıyla, aynı tag'lerle üretilir; mevcut dashboard'lar yeni ada geçirilir (2026-10-26 kararı). Login ve logout bugünkü gibi sayılmaz; route tablosunda olmayan değerler "Bilinmeyen Proje" ve "Bilinmeyen Endpoint" olarak sayılır.
 - **Korelasyon:** Uygulama loglarında trace\_id bulunur (agent MDC'ye koyar), log olaylarında trace\_id ve request\_id bulunur. Kibana'da logdan trace'e geçilebilir.
 
 Eşikler öneridir; ilk haftaların verisiyle ayarlanır.
@@ -1245,6 +1287,7 @@ Eşikler öneridir; ilk haftaların verisiyle ayarlanır.
 | Yayılım | Bir instance 1 dakikadan uzun süre eski versiyonda | Pub/sub ya da DB erişim sorunu |
 | UNKNOWN\_TASK | Ani artış | Eksik promote ya da frontend hatası |
 | Sözleşme ihlali | Bir subtask'te INVALID\_REQUEST oranı ani artar | Frontend ile route tanımı uyuşmuyor; çoğu zaman yeni bir deploy sonrası |
+| Alarm servisi | Alarm kontrolü yapılamadığı için 503 dönen istekler | Alarm servisi ya da seçilen alarm route'u ortamda çalışmıyor |
 
 ## Yerel geliştirme
 
@@ -1254,9 +1297,9 @@ Broker'a yalnızca `local` Spring profilinde açılan bir override katmanı ekle
 
 ```yaml
 # application-local.yml
-broker:
+yapi:
   route-source: db                         # DEV runtime DB, salt okunur kullanıcı
-  local-overrides: file:./broker-local.json
+  local-overrides: file:./yapi-local.json
   log-sink: console                        # Kafka'ya yazmaz, DEV loglarını kirletmez
 ```
 
@@ -1288,9 +1331,9 @@ broker:
 
 - **`baseUrls`:** Eski "dev IP'sini localhost yap" adımının karşılığı. Listelenen projeye giden istekler geliştiricinin makinesine, diğerleri DEV'e gider. Dosya izlendiği için değişiklik restart gerektirmez.
 - **`routes`:** DEV'de henüz olmayan bir subtask'i yerelde tanımlar ya da mevcut birini geçersiz kılar. Format merkezi tanımla aynıdır; çalışan JSON, merkezi admindeki "JSON'dan içe aktar" ile ekrana yüklenir ve kimse tanımı yeniden yazmaz.
-- **Oturum ve yetki:** Login ve yetkiler DEV'in Redis'i ve yetkilendirme servisi üzerinden çalışır. Henüz kimseye atanmamış yeni bir yetki için, local profilde yalnızca override route'larında yetki kontrolü atlanabilir.
-- **DEV'e yazmaz:** Yerel uygulamalar DEV'e bağlanır ve DEV'den okur, ama DEV'in ortak verisine yazmaz: broker durumunu `broker:loaded-local:`'a yazar, env-admin ayrı bir runtime şemasına ve sinyal kanalına yazar, giriş servisi oturumları `local:user:session:{uid}`'e ve application listesini `broker:applications:local`'a yazar. Giriş servisini yerelde geliştiren, broker'ı `BROKER_SESSION_KEY_PREFIX=local:` ile açar. Ayrıntılar repodaki `docs/local-run.md`'de.
-- **Güvenlik:** Override katmanı `@Profile("local")` ile tanımlandığı için DEV, TEST ve PROD'da hiç oluşmaz. Runtime DB'ye salt okunur bağlanıldığından yerel broker DEV'deki tanımları değiştiremez.
+- **Oturum ve yetki:** Login ve yetkiler DEV'in Redis'i ve Koordinatör'ü üzerinden çalışır. Henüz kimseye atanmamış yeni bir yetki için, local profilde yalnızca override route'larında yetki kontrolü atlanabilir.
+- **DEV'e yazmaz:** Yerel uygulamalar DEV'e bağlanır ve DEV'den okur, ama DEV'in ortak verisine yazmaz: broker durumunu `yapi:loaded-local:`'a yazar, env-admin ayrı bir runtime şemasına ve sinyal kanalına yazar, giriş servisi oturumları `local:user:session:{uid}`'e, application listesini `yapi:applications:local`'a ve kullanıcı ayarlarını `local:user:layout:{uid}` ile `local:user:quick_link:{uid}`'e yazar. Giriş servisini yerelde geliştiren, broker'ı `YAPI_SESSION_KEY_PREFIX=local:` ile açar. Ayrıntılar repodaki `docs/local-run.md`'de.
+- **Güvenlik:** Override katmanı `@Profile("local")` ile tanımlandığı için DEV, PREPROD ve PROD'da hiç oluşmaz. Runtime DB'ye salt okunur bağlanıldığından yerel broker DEV'deki tanımları değiştiremez.
 
 Broker'ı yerelde çalıştırmak istemeyenler için iki seçenek daha var:
 
@@ -1301,13 +1344,13 @@ Override dosyası bugünkü alışkanlığın birebir karşılığı ve riski en
 
 ## Geçiş planı
 
-Geçiş altı adımda yapılır. Her adım tek başına değer üretir ve frontend'i etkilemez.
+Geçiş altı adımda yapılır. Her adım tek başına değer üretir; frontend'den beklenen tek değişiklik, proje taşınınca broker'ın adresi ve yoludur (`POST /yapi`).
 
 1. **Log hattı:** Kafka topic'i, broker producer'ı, maskeleme ve Elastic sink kurulur. Broker olayların onayını ilk günden bekler; "log yazılamazsa yanıt dönmez" kuralı geçişin hiçbir adımında gevşemez. Elastic sink eski doküman yapısını üretir; DEV'de aynı istekler için eski broker'ın ve sink'in yazdığı dokümanlar alan alan karşılaştırılır. Fark kalmayınca senkron Elastic yazımı kaldırılır; Kibana'daki mevcut kullanım ve loglardan beslenen projeler aynı alanlarla sürer. ClickHouse sink paralel eklenir ve Kafka'daki geçmişle doldurulur.
-2. **Runtime DB ve broker cache:** Broker'daki statik subtask'ler tek seferlik bir script'le `runtime_route`'a aktarılır; projeye özel sınıflardaki yetki kontrolleri de route'ların yetki listelerine taşınır. Önce Elastic'teki son ayların maintask ve subtask değerleri gruplanır; artık çağrılmayan subtask'ler ve yalnızca harf farkıyla ayrışan adlar böylece görülür. Broker route'ları koddan değil tablodan okur; yeni bir subtask artık bir tablo kaydıdır. Projeye özel response sınıfları yanıt profillerine çevrilir; DEV'de aynı istekleri eski ve yeni broker'a gönderip yanıtları karşılaştıran bir test seti farkları yakalar. Giriş servisi de bu adımda devreye girer; oturum kaydı eski broker'ınkiyle aynı anahtar ve biçimde olduğundan iki broker bir süre aynı Redis'i paylaşabilir.
-3. **Merkezi admin, salt okunur:** DEV'de Admin API ve merkezi admin kurulur; projeler yetki projesindeki ID'leriyle eşleştirilir ve yetki önekleri girilir. Mevcut route'lar ilk versiyon olarak history'ye ve `route_deployment`'a alınır. Yetkiler öneklerine göre ayrılır: projenin kendi yetkileri `permissions`'a, başka projelerinkiler `foreign_permissions`'a gider; hiçbir kayıtlı projeye uymayanlar raporlanır. Spec karşılaştırması görüntülenir.
-4. **Tanımlama ve DEV:** Yeni subtask'ler ekrandan tanımlanır, test edilir ve DEV'e uygulanır. Mevcut subtask'lerin alan tanımları yapıştırılan ya da Elastic'ten çekilen örnek isteklerle tamamlanır.
-5. **TEST ve PROD:** TEST ve PROD Admin API'leri kurulur; promote, onay ve yoklama akışı açılır.
+2. **Runtime DB, broker ve giriş servisi:** Yapi'nin broker'ı route'ları koddan değil runtime DB'den okur; yeni bir subtask artık bir tablo kaydıdır. Giriş servisi de bu adımda devreye girer; oturum kaydı eski broker'ınkiyle aynı anahtar ve biçimde olduğundan iki broker bir süre aynı Redis'i paylaşabilir. Pilot projede eski ve yeni broker'ın birbirinin oturumunu okuduğu teyit edilir.
+3. **Merkezi admin:** DEV'de Admin API ve merkezi admin kurulur. Önce tek bir proje pilot olarak taşınır, sonra kalanlar: proje Koordinatör'deki ID'siyle kaydedilir, yetki öneki girilir. Eski broker'daki sabit subtask'leri (`harici_uygulamalar` gibi Koordinatör'e gidenler ve kullanıcı ayarlarınınkiler dahil) ve projeye özel response sınıflarını DevOps ekrandan tanımlar; aktarım script'i yazılmaz. Elastic'teki son ayların maintask ve subtask değerleri gruplanarak artık çağrılmayan subtask'ler ve yalnızca harf farkıyla ayrışan adlar görülür.
+4. **Tanımlama ve DEV:** Subtask'ler ekrandan tanımlanır, yapıştırılan ya da Elastic'ten çekilen örnek isteklerle test edilir ve DEV'e uygulanır. DEV'de aynı istekleri eski ve yeni broker'a gönderip yanıtları karşılaştıran bir test seti farkları yakalar. Taşınan projenin frontend'i adresle birlikte yolu da değiştirir (`POST /broker` → `POST /yapi`).
+5. **PREPROD ve PROD:** PREPROD ve PROD Admin API'leri kurulur; promote, onay ve yoklama akışı açılır.
 6. **Sıkılaştırma:** Gece drift kontrolü ve alarmlar açılır; log onay süresi ve spool alarmlarının eşikleri canlı trafikle ayarlanır.
 
 Path tabanlı bir sözleşme (`POST /api/{maintask}/{subtask}`) ileride hazır gateway'lerin önünü açar; bu dokümanın kapsamında değildir.
@@ -1321,17 +1364,25 @@ Path tabanlı bir sözleşme (`POST /api/{maintask}/{subtask}`) ileride hazır g
 - [ ] **Elastic ve ClickHouse'un rolü:** Uzun vadede Elastic yalnızca arama için mi kalacak, yoksa tek depo ClickHouse mu olacak?
 - [ ] **Acil durum politikası:** PROD'da DISABLE ve ROLLBACK önceden onay mı istesin, yoksa sonradan gözden geçirme mi yeterli?
 - [x] **Çalışma ortamı:** Dağıtımı DevOps yapar; Kubernetes ya da VM kararı onlarda (2026-10-16). Broker'ın spool'u için instance başına kalıcı disk gerekir.
-- [x] **ClickHouse DDL'i:** ClickHouse 24.8'de çalıştırıldı ve sink'in satırlarıyla doğrulandı (`broker-log-sink`, `RealTargetsTest`).
+- [x] **ClickHouse DDL'i:** ClickHouse 24.8'de çalıştırıldı ve sink'in satırlarıyla doğrulandı (`yapi-log-sink`, `RealTargetsTest`).
 - [x] **Spring Boot sürümü:** Java 25 ve Spring Boot 4.1.1. ECS formatında loglama Spring Boot'un yapılandırılmış loglamasıyla (`logging.structured.format.console=ecs`) gelir; OTel Java agent'ı bundan bağımsız eklenir.
 - [x] **`perm_list`:** Bugünkü gibi kullanıcının tüm yetkileri yazılır. Yalnızca erişimi sağlayan yetkilerle süzmek şimdilik yapılmayacak; ileride eklenebilir.
-- [ ] **Sorgu alarmı ve `alarm` indeksi:** Eski broker `sorgu` isteklerinde alarm kontrolü yapıp sonucu `alarm` indeksine yazıyor. Diğer işler bittikten sonra eski kod ve bir örnek dokümanla taşınacak.
-- [ ] **Yetki projesi (Koordinatör):** Projeler ve yetkiler Koordinatör'de yönetiliyor; admin, giriş servisi ve application listesi onu kullanır, kullanıcı oturumunu da kapatabilir. Gerçek API'ler sonra gelecek; şimdilik varsayılan uçlarla yazılıyor ve her ortamda ayrı çalıştığı varsayıldı.
+- [x] **Alarm:** İsteğe bağlı; proje ortamında ve subtask'te seçilen bir alarm servisi route'uyla, kodda sabit subtask yok (2026-10-26). Gövdedeki bütün değerler gönderilir; alarm servisi yanıt vermezse istek reddedilir ve loglanır. Ayrıntılar "Alarm kontrolü"nde.
+- [ ] **`alarm_list`:** Eski kod alarm bulunmazsa servise giden gövdeye `alarm_list` ekliyordu. Alarm bugün kullanılmadığı için eklenmiyor; ileride eklenebilir.
+- [ ] **Alarm route'unun kapatılması:** Bir alarm servisi route'u `DISABLE` edilirse ya da alarm servisi olmayan bir versiyona geri alınırsa onu kullanan subtask'ler 503 döner; `DISABLE` ön kontrolü bu bağımlılığa bakmıyor. Gerekirse "bu route'u kullanan aktif subtask yok" kontrolü eklenir.
+- [x] **Yetki projesi (Koordinatör):** Gerçek uçlara bağlandı (2026-10-26): `projeler-ve-yetkileri` (yalnızca `is_yapi` projeler; application = `projeAdi`) ve `personel-yetki/aktif-yetkiler/{sicil}` (`askidaMi` olmayan `yetkiIsim`'ler). Her ortamda ayrı çalışır; yetki yalnızca Koordinatör'de açılır.
+- [ ] **Koordinatör'e kimlik:** Yapi'nin çağrılarında kimlik bilgisi gerekmediği varsayıldı; gerekirse ayardaki header ile eklenir.
+- [ ] **Oturumdaki `permissions`:** Eski login'in Koordinatör cevabını nasıl çevirdiği görülmedi; `yetkiIsim` listesi varsayıldı. Pilot projede eski ve yeni broker'ın birbirinin oturumunu okuduğu teyit edilecek.
+- [x] **Ad:** Projenin adı Yapi (2026-10-26). Kod, ayar ve altyapı adları `yapi`; `POST /broker` → `POST /yapi`, `broker.gelen.istekler` → `yapi.gelen.istekler`. Eski Elastic indeksleri ve alanları, `user:*` Redis anahtarları ve eski gövdeler aynı kalır.
+- [x] **Ortamlar:** DEV, PREPROD, PROD (2026-10-26).
+- [x] **Merkezi admin'e giriş:** SSO yok; şirketin giriş uygulamasının oturumu ve Koordinatör'deki Yapi yetkileri (`YAPI_DEVELOPER`, `YAPI_ADMIN`), oturum PROD'un env-admin'inde doğrulanır (2026-10-26).
 - [x] **Giriş:** Ayrı bir giriş servisi LDAP'ta doğrular, UUID token üretir ve oturumu Redis'e 1 günlüğüne yazar; broker `login` ve `logout` isteklerini ona yönlendirir. Yanıtlar eski broker'la aynı.
 - [x] **Yanıt verisinin loglanması:** Subtask başına "Yanıt verisi loglansın" seçeneği (`logResponseBody`), varsayılan kapalı.
 - [x] **Oturum kaydının biçimi:** Anahtar düz string, değer tip bilgisi olmayan JSON (eski broker'ın `StringRedisSerializer` ve `JacksonJsonRedisSerializer`'ı); iki broker aynı kaydı okuyup yazabilir.
-- [ ] **Eski broker'ın Redis'teki kullanıcı verileri:** Dashboard yerleşimi ve hızlı bağlantılar (`user:layout:*`, `user:quick_link:*`) eski broker'ın içinde; yeni düzende bir servise taşınmalı, hangi subtask'lerle çağrıldıkları bekleniyor. `giris_public` ve `refresh_permissions` sıradan maintask'ler; subtask'leri diğerleri gibi taşınır.
+- [x] **Eski broker'ın Redis'teki kullanıcı verileri:** Dashboard yerleşimi ve hızlı bağlantılar (`user:layout:*`, `user:quick_link:*`) giriş servisinin `GET`/`PUT /users/me/settings/{name}` uçlarına taşındı; route'larını eski subtask adlarıyla DevOps tanımlar (2026-10-26). `harici_uygulamalar` Koordinatör'e giden sıradan bir route; `refresh_permissions`'ın karşılığı giriş servisinin iç logout ucu.
+- [x] **DEV'de giriş:** Eski DEV sınıfı gibi magic key; giriş servisinde yalnızca `dev` profilinde açılan mod, anahtar ayarda (2026-10-26).
 - [x] **Logout:** Kayıttaki `X-Clientip` ve `X-User-Agent` eşleşmesi isteniyor; eski broker yalnızca `uid`'e bakıyordu. Frontend'de değişiklik gerekmez.
 - [x] **Logdaki oturum bilgisi:** `token`, `client_ip` ve `user_agent` eskisi gibi oldukları gibi loglanır. İstek olduğu gibi loglanmalı; broker'ın Elasticsearch'ü ayrı, erişim çok sınırlı ve oturumlar kayıt altında.
 - [ ] **`X-Clientip`:** Frontend'in değil, önündeki proxy'nin koyduğu varsayılıyor; teyit edilmedi. İstemci koyuyorsa IP bağlaması güvenlik sağlamaz ve IP bağlantıdan alınmalı.
-- [ ] **Hatalarda HTTP 200:** Mevcut frontend'ler için eski gövdeler HTTP 200 ile dönüyor. Frontend'ler güncellenince tek bir ayarla (`broker.compat.legacy-responses: false`) ortak formata ve gerçek HTTP status'lara geçilir: izinli olmayan application 403, geçersiz oturum 401 alır.
+- [ ] **Hatalarda HTTP 200:** Mevcut frontend'ler için eski gövdeler HTTP 200 ile dönüyor. Frontend'ler güncellenince tek bir ayarla (`yapi.compat.legacy-responses: false`) ortak formata ve gerçek HTTP status'lara geçilir: izinli olmayan application 403, geçersiz oturum 401 alır.
 - [x] **Yerel çalıştırma:** İntranette Docker yok; `local` profilleri DEV'e (Oracle, Redis, servisler) bağlanır ve DEV'in ortak verisine yazmaz (2026-10-16). Ayrıntılar "Yerel geliştirme"de.
