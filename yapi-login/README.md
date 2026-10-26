@@ -17,6 +17,7 @@ Broker `X-Token: login` ve `X-Token: logout` isteklerini gövdedeki maintask'a b
 | `POST /logout` | `{"uid"}`, `X-Clientip`, `X-User-Agent` | Kayıt var ve istemci aynı: `{"response": true, "status": 200, "message": "logged out"}`; değilse `{"response": false, "status": 301, "message": "something went wrong with logging out."}` |
 | `POST /internal/v1/sessions/{uid}/logout` | `X-Koordinator-Secret` | Koordinatör'ün zorla çıkışı, broker'dan geçmez: 204 kapatıldı, 404 oturum yok, 403 gizli anahtar yanlış ya da ayarlı değil |
 
+- DEV'de (`dev` profili) giriş eski DEV sınıfı gibi magic key iledir: boş olmayan her `uid`, şifre `YAPI_LOGIN_MAGIC_KEY`'e (sabit zamanlı karşılaştırma) eşitse girer; herkes herkesin hesabına girebilir. Her deneme `info` loglanır (uid ve sonuç; şifre yok). Yetkiler yine Koordinatör'den gelir.
 - Boş ya da yalnızca boşluktan oluşan `uid` veya şifre LDAP'a gitmeden başarısızdır (anonim bind'e düşmez, Active
   Directory'de hatalı deneme sayılmaz). LDAP başarısızsa Koordinatör'e sorulmaz.
 - Yetkiler Koordinatör'ün `GET /api/koordinator/personel-yetki/aktif-yetkiler/{uid}` (`uid` = sicil) cevabından:
@@ -38,7 +39,8 @@ Broker `X-Token: login` ve `X-Token: logout` isteklerini gövdedeki maintask'a b
 
 | Ayar | Varsayılan | Not |
 | --- | --- | --- |
-| `login.ldap.mode` | `bind` | `static` yalnızca `local` profilinde (`login.ldap.users`); başka profilde servis başlamaz |
+| `login.ldap.mode` | `bind` (`dev` profilinde `magic-key`) | `YAPI_LOGIN_LDAP_MODE`. `bind`: PREPROD ve PROD. `magic-key` yalnızca `dev` profilinde, `static` yalnızca `local` profilinde (`login.ldap.users`); başka profilde servis başlamaz |
+| `login.ldap.magic-key` | — | `YAPI_LOGIN_MAGIC_KEY`; `magic-key` modunda zorunlu, boşsa servis başlamaz |
 | `login.ldap.urls` | — | `YAPI_LOGIN_LDAP_URLS`, virgülle birden çok adres |
 | `login.ldap.principal-pattern` | `{uid}@test.com.tr` | Active Directory UPN ya da DN, ör. `uid={uid},ou=people,dc=test` |
 | `login.ldap.connect-timeout`, `read-timeout` | 3 sn, 5 sn | |

@@ -1,0 +1,5 @@
+# DEV: eski DEV sınıfı gibi magic key ile giriş; herkes herkesin hesabına girebilir. Anahtar YAPI_LOGIN_MAGIC_KEY,
+# yetkiler yine Koordinatör'den. PREPROD ve PROD bind modunda (application.yml).
+login:
+  ldap:
+    mode: ${YAPI_LOGIN_LDAP_MODE:magic-key}

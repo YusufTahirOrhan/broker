@@ -21,7 +21,7 @@ public record LoginProperties(Ldap ldap, Session session, Logout logout, String 
                               String userContextSecret, Duration userContextMaxAge, Applications applications) {
 
     public LoginProperties {
-        ldap = ldap == null ? new Ldap(null, null, null, null, null, null) : ldap;
+        ldap = ldap == null ? new Ldap(null, null, null, null, null, null, null) : ldap;
         session = session == null ? new Session(null, null, null, null, null, null, null) : session;
         logout = logout == null ? new Logout(null) : logout;
         userContextMaxAge = userContextMaxAge == null ? Duration.ofSeconds(60) : userContextMaxAge;
@@ -30,12 +30,14 @@ public record LoginProperties(Ldap ldap, Session session, Logout logout, String 
 
     /**
      * @param mode             {@code bind}: a direct bind with the user's password, as the legacy {@code Ldap}
-     *                         classes do; {@code static}: the {@code users} map, only in the {@code local} profile
+     *                         classes do (PREPROD, PROD); {@code magic-key}: any user with {@code magicKey} as the
+     *                         password, only in the {@code dev} profile, as the legacy DEV did; {@code static}: the
+     *                         {@code users} map, only in the {@code local} profile
      * @param principalPattern the bind principal with {@code {uid}}, e.g. {@code {uid}@test.com.tr} (Active Directory
      *                         UPN) or a DN such as {@code uid={uid},ou=people,dc=test}
      */
     public record Ldap(String mode, List<String> urls, String principalPattern, Duration connectTimeout,
-                       Duration readTimeout, Map<String, String> users) {
+                       Duration readTimeout, Map<String, String> users, String magicKey) {
         public Ldap {
             mode = mode == null ? "bind" : mode.toLowerCase(Locale.ROOT);
             urls = urls == null ? List.of() : List.copyOf(urls);

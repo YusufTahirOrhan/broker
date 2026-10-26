@@ -15,7 +15,8 @@ class LoginConfigurationTest {
 
     @Test
     void staticUsersStartOnlyInTheLocalProfile() {
-        LoginProperties.Ldap fixed = new LoginProperties.Ldap("static", null, null, null, null, Map.of("dev", "dev"));
+        LoginProperties.Ldap fixed = new LoginProperties.Ldap("static", null, null, null, null, Map.of("dev", "dev"),
+                null);
 
         assertThatThrownBy(() -> LoginConfiguration.ldapAuthenticator(fixed, "dev"))
                 .hasMessageContaining("yalnızca local");
@@ -43,9 +44,24 @@ class LoginConfigurationTest {
     @Test
     void aBindNeedsTheDirectorysAddress() {
         assertThatThrownBy(() -> LoginConfiguration.ldapAuthenticator(
-                new LoginProperties.Ldap("bind", null, null, null, null, null))).hasMessageContaining("login.ldap.urls");
+                new LoginProperties.Ldap("bind", null, null, null, null, null, null)))
+                .hasMessageContaining("login.ldap.urls");
         assertThatThrownBy(() -> LoginConfiguration.ldapAuthenticator(
-                new LoginProperties.Ldap("kerberos", null, null, null, null, null)))
-                .hasMessageContaining("bind ya da static");
+                new LoginProperties.Ldap("kerberos", null, null, null, null, null, null)))
+                .hasMessageContaining("bind, magic-key ya da static");
+    }
+
+    @Test
+    void theMagicKeyStartsOnlyInTheDevProfileAndOnlyWithAKey() {
+        LoginProperties.Ldap magic = new LoginProperties.Ldap("magic-key", null, null, null, null, null, "dev-anahtar");
+
+        for (String[] profiles : new String[][]{{}, {"local"}, {"preprod"}, {"prod"}}) {
+            assertThatThrownBy(() -> LoginConfiguration.ldapAuthenticator(magic, profiles))
+                    .hasMessageContaining("yalnızca dev");
+        }
+        assertThat(LoginConfiguration.ldapAuthenticator(magic, "dev").authenticate("12345", "dev-anahtar")).isTrue();
+        assertThatThrownBy(() -> LoginConfiguration.ldapAuthenticator(
+                new LoginProperties.Ldap("magic-key", null, null, null, null, null, " "), "dev"))
+                .hasMessageContaining("YAPI_LOGIN_MAGIC_KEY");
     }
 }

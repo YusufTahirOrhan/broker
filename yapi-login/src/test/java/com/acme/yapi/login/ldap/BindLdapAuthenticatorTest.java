@@ -21,7 +21,7 @@ class BindLdapAuthenticatorTest {
 
     private static BindLdapAuthenticator authenticator() {
         return new BindLdapAuthenticator(new LoginProperties.Ldap("bind", List.of(LDAP.url()),
-                EmbeddedLdap.principalPattern(), null, null, null));
+                EmbeddedLdap.principalPattern(), null, null, null, null));
     }
 
     @Test

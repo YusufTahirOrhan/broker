@@ -68,6 +68,12 @@ Biçimler "Eski broker'dan teyit edilenler"de. Yollar, alan adları (`is_yapi` d
 
 Yeni LDAP modu `magic-key`, yalnızca `dev` profilinde (başka profilde servis başlamaz): `uid` boş değilse ve şifre ayardaki anahtara (`YAPI_LOGIN_MAGIC_KEY`) sabit zamanlı karşılaştırmayla eşitse başarılı. Her giriş `info` loglanır (uid; şifre yok). Yetkiler yine Koordinatör'den gelir. PREPROD ve PROD `bind` modunda; adres ve principal deseni ayardan.
 
+- **Yapıldı (2026-10-26):** `MagicKeyAuthenticator` (`MessageDigest.isEqual`); `login.ldap.magic-key` (`YAPI_LOGIN_MAGIC_KEY`). Uygulanırken netleşenler:
+  - **DEV'in varsayılanı:** `application-dev.yml` modu `magic-key` yapar (`YAPI_LOGIN_LDAP_MODE` ile değişir); PREPROD ve PROD `application.yml`'daki `bind` ile, adres `YAPI_LOGIN_LDAP_URLS`, principal deseni `YAPI_LOGIN_LDAP_PRINCIPAL_PATTERN` (varsayılan `{uid}@test.com.tr`).
+  - **Anahtar boşsa** servis başlamaz (yalnızca boşluk da boş sayılır). `local` profili de `dev` değildir: orada magic key açılmaz.
+  - **Log:** başarılı ve başarısız her deneme `info`, `uid` ve sonuçla ("Magic key ile giriş denemesi: uid=…, başarılı=…").
+  - **Testler:** `MagicKeyAuthenticatorTest` (eşleşme, büyük/küçük harf, boşluk, log), `LoginConfigurationTest` (yalnızca `dev`, anahtarsız başlamaz), `UserContextSecretTest` (`dev` profili anahtarla açılır, anahtarsız açılmaz).
+
 ### 5. Admin'e giriş: giriş uygulamasının oturumu
 
 SSO ve JWT kalkar. Kullanıcılar şirketin giriş uygulamasından girer; Yapi yetkisi olan (`YAPI_DEVELOPER`, `YAPI_ADMIN`) admin ekranını görür.
@@ -435,7 +441,7 @@ Paket `com.acme.yapi.login`; çalıştırılabilir jar `-exec` ekiyle. Ayrıntı
 | --- | --- |
 | `web` | `LoginController` (`/login`, `/logout`, `/internal/v1/sessions/{uid}/logout`), `LegacyBodies` (eski gövdeler birebir), `UserContextFilter` |
 | `session` | `LoginService` (LDAP → Koordinatör → kayıt), `SessionStore` (core'daki `SessionRecordCodec` ile), `ApplicationSync` (5 dk'da bir `yapi:applications`) |
-| `ldap` | `BindLdapAuthenticator` (Spring LDAP doğrudan bind), `StaticLdapAuthenticator` (yalnızca `local`) |
+| `ldap` | `BindLdapAuthenticator` (Spring LDAP doğrudan bind; PREPROD, PROD), `MagicKeyAuthenticator` (yalnızca `dev`), `StaticLdapAuthenticator` (yalnızca `local`) |
 | `koordinator` | `KoordinatorClient`: kullanıcının aktif yetkileri (`aktif-yetkiler/{uid}`) ve application listesi (`projeler-ve-yetkileri`, `is_yapi`) |
 
 - **Testler:** `LoginApiTest` (UnboundID gömülü LDAP, Testcontainers Redis, sahte Koordinatör; gövdelerin anahtar sırası ve tipleri, kayıt biçimi ve süresi, şifrenin loglarda olmaması, logout matrisi, Koordinatör çıkışı, imza, application senkronu), `LoginUnitTest` (yazılamayan kayıt), `LoginConfigurationTest` (static mod yalnızca local), `LocalProfileTest` (`local` profili DEV'in ortak anahtarlarına yazmaz), `UserContextSecretTest` (imza anahtarı `local` dışında zorunlu), `BindLdapAuthenticatorTest` (boşluklu şifre dizine gitmez), `HttpKoordinatorClientTest` (yetki cevabının biçimi). Redis container'ı modülde tek (`support/TestRedis`); her test sınıfı ayrı Redis veritabanı kullanır. Uçtan uca senaryo yapi-runtime'da.
@@ -479,6 +485,7 @@ Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya ya
 
 - 2026-10-16 turunun maddeleri canlı dokümana işlendi (rev 180).
 - **Koordinatör (3):** Admin'in proje kataloğu tek ortamın Koordinatör'ünden (`yapi.admin.catalog.environment`, varsayılan PROD); projenin yetkileri ve yetkinin varlığı her ortamın kendi Koordinatör'ünden, ortam başına 5 dk önbellek. Yetkinin ortamda "var" sayılması: o ortamdaki herhangi bir Yapi projesinin `yetkiList`'inde olması. `UNLINKED` projenin yetki listesi boş. Evet/hayır alanları `true`/`1`/`"true"`/`"1"`. Yetki listesinde `description` yok (`null`).
+- **Magic key (4):** Başarısız denemeler de loglanır; anahtar boşsa servis başlamaz; `dev` profilinin varsayılan modu `magic-key`.
 - **Ortamlar (2):** Ön kontrol mesajları ortam kodunu "X ortamında ..." diye yazar, koda ek yapıştırılmaz ("v4 PREPROD ortamında aktif").
 - **Ad (1):** Listede olmayan, kuralla değişen adlar: olay alanı ve ClickHouse kolonu `broker_instance` → `yapi_instance`; ClickHouse `yapi_logs.yapi_metrics_1m` ve view'ı; consumer group'lar `yapi-logs-elastic`, `yapi-logs-clickhouse`; DLQ header'ları `yapi.dlq.*`; Elastic bileşen şablonu `yapi-fields`; test çağrısı header'ı `X-Yapi-Test-Secret`; audit logger'ı `yapi.audit`; yerel override dosyası `yapi-local.json`. 2026-10-26 turunun kararlarını (ad, ortamlar, Koordinatör, magic key, admin girişi, kullanıcı ayarları, alarm) Claude tur bitince tasarım dokümanına işler; buraya yalnızca uygulanırken netleşenler yazılır.
 

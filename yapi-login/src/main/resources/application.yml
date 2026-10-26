@@ -26,11 +26,14 @@ management:
 
 login:
   ldap:
-    # bind: kullanıcının şifresiyle doğrudan bind (eski Ldap sınıfları gibi); static yalnızca local profilinde
+    # bind: kullanıcının şifresiyle doğrudan bind (eski Ldap sınıfları gibi; PREPROD, PROD); magic-key yalnızca dev
+    # profilinde (application-dev.yml); static yalnızca local profilinde
     mode: ${YAPI_LOGIN_LDAP_MODE:bind}
     urls: ${YAPI_LOGIN_LDAP_URLS:}
     # Active Directory UPN; preprod'da {uid}@test.com.tr
     principal-pattern: "${YAPI_LOGIN_LDAP_PRINCIPAL_PATTERN:{uid}@test.com.tr}"
+    # magic-key modunun anahtarı (DEV): boş olmayan her uid bu şifreyle girer
+    magic-key: ${YAPI_LOGIN_MAGIC_KEY:}
     connect-timeout: 3s
     read-timeout: 5s
   session:
