@@ -153,28 +153,20 @@ class SessionAndProjectsTest extends AdminTestBase {
     }
 
     @Test
-    void permissionsComeFromTheAuthorizationService() {
+    void permissionsComeFromTheKoordinatorAndAreNotOpenedHere() {
         long id = post("editor", "/projects", """
                 {"externalProjectId": "P-200", "maintask": "logProject", "permissionPrefix": "LOGPROJECT"}
                 """).json().get("id").longValue();
 
-        JsonHttp.Response created = post("editor", "/projects/" + id + "/permissions", """
-                {"suffix": "moderator", "description": "Moderatör"}
-                """);
-        assertStatus(created, 201);
-        assertThat(created.json().get("code").stringValue()).isEqualTo("LOGPROJECT_MODERATOR");
-        assertThat(created.json().get("environments").size()).isEqualTo(3);
-        assertThat(post("editor", "/projects/" + id + "/permissions", "{\"suffix\": \"MODERATOR\"}").status())
-                .isEqualTo(409);
-        assertThat(post("editor", "/projects/" + id + "/permissions", "{\"suffix\": \"BAD-SUFFIX\"}").status())
-                .isEqualTo(400);
-
         JsonNode dev = get("viewer", "/projects/" + id + "/permissions?env=DEV").json();
         assertThat(dev.valueStream().map(permission -> permission.get("code").stringValue()))
-                .containsExactly("LOGPROJECT_MODERATOR", "LOGPROJECT_TEMEL");
-        assertThat(dev.get(0).get("suffix").stringValue()).isEqualTo("MODERATOR");
+                .containsExactly("LOGPROJECT_TEMEL");
+        assertThat(dev.get(0).get("suffix").stringValue()).isEqualTo("TEMEL");
         assertThat(dev.get(0).get("routeCount").longValue()).isZero();
-        assertThat(get("viewer", "/projects/" + id + "/permissions?env=PROD").json().size()).isEqualTo(1);
+        assertThat(get("viewer", "/projects/" + id + "/permissions?env=PROD").json().size()).isZero();
+
+        JsonHttp.Response opening = post("editor", "/projects/" + id + "/permissions", "{\"suffix\": \"MODERATOR\"}");
+        assertThat(opening.status()).isEqualTo(405);
     }
 
     @Test

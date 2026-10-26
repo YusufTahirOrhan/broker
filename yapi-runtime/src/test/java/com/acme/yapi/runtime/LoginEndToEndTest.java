@@ -117,7 +117,8 @@ class LoginEndToEndTest {
                              "pathVariables": {"id": "${request.orderId}"}}}
                 """);
         cache.reload();
-        koordinator.json("GET", "/users/ali/permissions", 200, "{\"yetkiler\": [\"ORDER_READ\"]}");
+        koordinator.json("GET", "/api/koordinator/personel-yetki/aktif-yetkiler/ali", 200,
+                "{\"additionalProp1\": [{\"yetkiIsim\": \"ORDER_READ\", \"askidaMi\": false}]}");
         orders.json("GET", "/orders/7", 200, "{\"id\": 7}");
         String order = "{\"maintask\": \"order-service\", \"subtask\": \"get_order\", \"orderId\": 7, \"uid\": \"ali\", "
                 + "\"application\": \"web\"}";

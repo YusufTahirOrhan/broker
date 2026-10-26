@@ -251,7 +251,7 @@ class PromotionFlowTest extends AdminTestBase {
         JsonHttp.Response prod = promote("lead", "ROUTE", routeId, 1, "PROD", "DEPLOY", "CHG-9");
         assertThat(prod.status()).isEqualTo(422);
         assertThat(check(prod.json(), "PERMISSIONS_EXIST").get("message").stringValue())
-                .isEqualTo("PROD yetkilendirme servisinde yok: LOGPROJECT_TEMEL");
+                .isEqualTo("PROD Koordinatör'ünde yok: LOGPROJECT_TEMEL");
         assertThat(get("viewer", "/promotions?targetEnv=PROD").json().get("totalItems").longValue()).isZero();
     }
 }

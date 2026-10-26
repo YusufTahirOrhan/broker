@@ -20,7 +20,7 @@ public record AdminProperties(List<String> readableHeaders, Cors cors, Security 
         security = security == null ? new Security(null, null, null, null) : security;
         environments = environments == null ? new Environments(null, null, null, null) : environments;
         catalog = catalog == null ? new Catalog(null, null, null, null) : catalog;
-        authorization = authorization == null ? new Authorization(null, null, null) : authorization;
+        authorization = authorization == null ? new Authorization(null, null) : authorization;
         drift = drift == null ? new Drift(null) : drift;
     }
 
@@ -57,25 +57,25 @@ public record AdminProperties(List<String> readableHeaders, Cors cors, Security 
     }
 
     /**
-     * The project service. {@code mode} is {@code http} or {@code memory}; memory serves {@code projects} and is for
-     * local development and tests.
+     * The project catalog. {@code mode} is {@code http} (the Yapi projects of {@code environment}'s Koordinatör) or
+     * {@code memory}; memory serves {@code projects} and is for local development and tests.
      */
-    public record Catalog(String mode, String url, String syncCron, Map<String, String> projects) {
+    public record Catalog(String mode, String environment, String syncCron, Map<String, String> projects) {
         public Catalog {
             mode = mode == null ? "http" : mode;
+            environment = environment == null ? "PROD" : environment;
             syncCron = syncCron == null ? "0 7 * * * *" : syncCron;
             projects = projects == null ? Map.of() : Map.copyOf(projects);
         }
     }
 
     /**
-     * The authorization service of each environment. {@code mode} is {@code http} (one URL per environment) or
+     * The permissions of each environment. {@code mode} is {@code http} (each environment's Koordinatör) or
      * {@code memory}.
      */
-    public record Authorization(String mode, Map<String, String> urls, Map<String, List<String>> permissions) {
+    public record Authorization(String mode, Map<String, List<String>> permissions) {
         public Authorization {
             mode = mode == null ? "http" : mode;
-            urls = urls == null ? Map.of() : Map.copyOf(urls);
             permissions = permissions == null ? Map.of() : Map.copyOf(permissions);
         }
     }

@@ -105,7 +105,7 @@ class RoutesAndProfilesTest extends AdminTestBase {
                 """);
         assertThat(unknownPermission.status()).isEqualTo(400);
         assertThat(unknownPermission.json().get("errors").get(0).get("message").stringValue())
-                .startsWith("DEV yetkilendirme servisinde yok");
+                .startsWith("DEV Koordinatör'ünde yok");
     }
 
     @Test

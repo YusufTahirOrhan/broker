@@ -28,15 +28,15 @@ class LoginConfigurationTest {
     @Test
     void staticPermissionsStartOnlyInTheLocalProfile() throws Exception {
         KoordinatorProperties fixed = new KoordinatorProperties("static", null, null, null, null, null, null, null,
-                null, List.of("ORDER_READ"), List.of("web"));
+                null, null, null, List.of("ORDER_READ"), List.of("web"));
 
         assertThatThrownBy(() -> LoginConfiguration.koordinatorClient(fixed, "dev"))
                 .hasMessageContaining("yalnızca local");
         assertThat(LoginConfiguration.koordinatorClient(fixed, "local").permissions("anyone"))
                 .contains(List.of("ORDER_READ"));
-        assertThat(LoginConfiguration.koordinatorClient(fixed, "local").projectCodes()).containsExactly("web");
+        assertThat(LoginConfiguration.koordinatorClient(fixed, "local").applications()).containsExactly("web");
         KoordinatorProperties http = new KoordinatorProperties(null, null, null, null, null, null, null, null, null,
-                null, null);
+                null, null, null, null);
         assertThat(LoginConfiguration.koordinatorClient(http)).isInstanceOf(HttpKoordinatorClient.class);
     }
 

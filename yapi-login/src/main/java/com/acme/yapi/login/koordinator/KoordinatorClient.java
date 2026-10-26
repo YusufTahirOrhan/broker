@@ -7,9 +7,12 @@ import java.util.Optional;
 /** The Koordinatör (the permission project): users' permissions and the projects that are the broker's applications. */
 public interface KoordinatorClient {
 
-    /** The user's permissions in the Koordinatör's order; empty when it did not answer (HTTP 200). */
+    /**
+     * The user's active permissions in the Koordinatör's order, without repeats; empty when it did not answer with
+     * HTTP 200 and the expected shape.
+     */
     Optional<List<String>> permissions(String uid);
 
-    /** The {@code code} of every project. */
-    List<String> projectCodes() throws IOException;
+    /** The application names of the projects that use Yapi. */
+    List<String> applications() throws IOException;
 }

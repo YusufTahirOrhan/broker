@@ -71,9 +71,9 @@ END;
 
 CREATE TABLE project (
     id                           NUMBER(19) GENERATED ALWAYS AS IDENTITY NOT NULL,
-    external_project_id          VARCHAR2(64 CHAR),            -- proje servisindeki ID; geçişte boş kalabilir
+    external_project_id          VARCHAR2(64 CHAR),            -- Koordinatör'deki projeId; geçişte boş kalabilir
     maintask                     VARCHAR2(100 CHAR) NOT NULL,  -- frontend'in gönderdiği ad; tekilliği harf duyarsız
-    name                         VARCHAR2(200 CHAR) NOT NULL,  -- proje servisinden gelen görünen ad
+    name                         VARCHAR2(200 CHAR) NOT NULL,  -- Koordinatör'den gelen görünen ad (projeAdi)
     permission_prefix            VARCHAR2(50 CHAR)  NOT NULL,  -- yetki adlarının öneki, ör. LOGPROJECT
     catalog_status               VARCHAR2(16 CHAR)  DEFAULT 'LINKED' NOT NULL,
     catalog_synced_at            TIMESTAMP(6) WITH TIME ZONE,

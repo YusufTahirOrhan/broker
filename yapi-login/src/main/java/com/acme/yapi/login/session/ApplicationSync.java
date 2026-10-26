@@ -16,9 +16,10 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 
 /**
- * Copies the Koordinatör's project codes into the broker's application list ({@code yapi:applications}, a JSON
- * array without expiry) at startup and every {@code login.applications.refresh-interval}. An empty or failed answer
- * leaves the old list in place; brokers keep their last list too.
+ * Copies the application names of the Koordinatör's Yapi projects into the broker's application list
+ * ({@code yapi:applications}, a JSON array without expiry) at startup and every
+ * {@code login.applications.refresh-interval}. An empty or failed answer leaves the old list in place; brokers keep
+ * their last list too.
  */
 @Component
 public class ApplicationSync {
@@ -43,7 +44,7 @@ public class ApplicationSync {
     @Scheduled(initialDelay = 0, fixedDelayString = "${login.applications.refresh-interval:5m}")
     public void sync() {
         try {
-            List<String> codes = koordinator.projectCodes();
+            List<String> codes = koordinator.applications();
             if (codes.isEmpty()) {
                 failures.increment();
                 log.warn("Koordinatör boş proje listesi döndü; {} değişmedi", key);

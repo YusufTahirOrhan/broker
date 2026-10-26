@@ -284,8 +284,8 @@ public class PromotionService {
             Set<String> existing = authorization.existing(target.code(), codes);
             List<String> missing = codes.stream().filter(code -> !existing.contains(code)).toList();
             return new Check("PERMISSIONS_EXIST", missing.isEmpty(), missing.isEmpty()
-                    ? "Yetkiler " + target.code() + " yetkilendirme servisinde tanımlı"
-                    : target.code() + " yetkilendirme servisinde yok: " + String.join(", ", missing));
+                    ? "Yetkiler " + target.code() + " Koordinatör'ünde tanımlı"
+                    : target.code() + " Koordinatör'ünde yok: " + String.join(", ", missing));
         } catch (ApiException e) {
             return new Check("PERMISSIONS_EXIST", false, e.getMessage());
         }

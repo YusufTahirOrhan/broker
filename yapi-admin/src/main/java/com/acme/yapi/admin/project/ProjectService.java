@@ -106,7 +106,7 @@ public class ProjectService {
         if (body.externalProjectId() != null) {
             Optional<ProjectCatalog.CatalogProject> found = catalog.find(body.externalProjectId());
             if (found.isEmpty()) {
-                errors.add(new FieldError("externalProjectId", "Proje servisinde yok"));
+                errors.add(new FieldError("externalProjectId", "Koordinatör'de yok"));
             } else if (name == null || name.isBlank()) {
                 name = found.get().name();
             }
@@ -135,7 +135,7 @@ public class ProjectService {
             return get(id);
         } catch (DuplicateKeyException e) {
             throw ApiException.conflict("DUPLICATE",
-                    "maintask ya da proje servisi ID'si zaten kayıtlı (büyük/küçük harf fark etmez).");
+                    "maintask ya da Koordinatör proje ID'si zaten kayıtlı (büyük/küçük harf fark etmez).");
         }
     }
 
@@ -171,11 +171,11 @@ public class ProjectService {
         ProjectCatalog.CatalogProject linked = null;
         if (externalId != null && !externalId.equals(project.externalProjectId())) {
             if (!"UNLINKED".equals(project.catalogStatus())) {
-                errors.add(new FieldError("externalProjectId", "Proje servisi ID'si kayıttan sonra değiştirilemez"));
+                errors.add(new FieldError("externalProjectId", "Koordinatör proje ID'si kayıttan sonra değiştirilemez"));
             } else {
                 linked = catalog.find(externalId).orElse(null);
                 if (linked == null) {
-                    errors.add(new FieldError("externalProjectId", "Proje servisinde yok"));
+                    errors.add(new FieldError("externalProjectId", "Koordinatör'de yok"));
                 }
             }
         }
@@ -187,7 +187,7 @@ public class ProjectService {
             try {
                 projects.catalog(id, linked.id(), body.has("name") ? name.strip() : linked.name(), "LINKED");
             } catch (DuplicateKeyException e) {
-                throw ApiException.conflict("DUPLICATE", "Bu proje servisi ID'si başka bir projeye bağlı.");
+                throw ApiException.conflict("DUPLICATE", "Bu Koordinatör proje ID'si başka bir projeye bağlı.");
             }
         }
         return get(id);
@@ -222,59 +222,29 @@ public class ProjectService {
                 version == null || version.isNull() ? null : version.longValue());
     }
 
+    /** @param suffix the code after the project's prefix; null when the Koordinatör's code does not start with it */
     public record PermissionView(String code, String suffix, String description, long routeCount) {
     }
 
+    /**
+     * The project's permissions in the environment's Koordinatör (its project's {@code yetkiList}) and how many
+     * active subtasks use each. Permissions are opened in the Koordinatör, not here.
+     */
     public List<PermissionView> permissions(long id, String environment) {
         ProjectRepository.Row project = require(id);
         String code = environment == null || environment.isBlank() ? environments.first().code() : environment;
         environments.require(code);
-        Map<String, Long> usage = projects.permissionUsage(project.permissionPrefix());
-        return authorization.list(code, project.permissionPrefix()).stream()
+        List<AuthorizationService.Permission> permissions =
+                authorization.list(code, project.externalProjectId(), project.permissionPrefix());
+        Map<String, Long> usage = projects.permissionUsage(permissions.stream()
+                .map(AuthorizationService.Permission::code).toList());
+        String prefix = project.permissionPrefix();
+        return permissions.stream()
                 .map(permission -> new PermissionView(permission.code(),
-                        permission.code().substring(project.permissionPrefix().length() + 1), permission.description(),
-                        usage.getOrDefault(permission.code(), 0L)))
+                        Names.belongsTo(permission.code(), prefix)
+                                ? permission.code().substring(prefix.length() + 1) : null,
+                        permission.description(), usage.getOrDefault(permission.code(), 0L)))
                 .toList();
-    }
-
-    public record NewPermission(String suffix, String description, List<String> environments) {
-    }
-
-    public record PermissionResult(String environment, boolean created) {
-    }
-
-    public record CreatedPermission(String code, List<PermissionResult> environments) {
-    }
-
-    /** Opens {@code PREFIX_SUFFIX} in the authorization service of the given environments (all by default). */
-    public CreatedPermission createPermission(long id, NewPermission body) {
-        ProjectRepository.Row project = require(id);
-        String suffix = body.suffix() == null ? null : body.suffix().toUpperCase(Locale.ROOT);
-        List<FieldError> errors = new ArrayList<>();
-        if (!Names.isValidSuffix(suffix)) {
-            errors.add(new FieldError("suffix", "Büyük harf, rakam ve _ ile yazılır, ör. MODERATOR"));
-        } else if (Names.permission(project.permissionPrefix(), suffix).length() > Names.PERMISSION_MAX_LENGTH) {
-            errors.add(new FieldError("suffix", "Yetki adı en fazla " + Names.PERMISSION_MAX_LENGTH + " karakter olabilir"));
-        }
-        List<String> targets = body.environments() == null || body.environments().isEmpty()
-                ? environments.all().stream().map(Environment::code).toList() : body.environments();
-        for (int i = 0; i < targets.size(); i++) {
-            if (environments.find(targets.get(i)).isEmpty()) {
-                errors.add(new FieldError("environments[" + i + "]", "Ortam yok"));
-            }
-        }
-        if (!errors.isEmpty()) {
-            throw ApiException.validation("Yetki", errors);
-        }
-        String code = Names.permission(project.permissionPrefix(), suffix);
-        List<PermissionResult> results = new ArrayList<>();
-        for (String environment : targets) {
-            results.add(new PermissionResult(environment, authorization.create(environment, code, body.description())));
-        }
-        if (results.stream().noneMatch(PermissionResult::created)) {
-            throw ApiException.conflict("DUPLICATE", "Yetki seçilen ortamlarda zaten var: " + code);
-        }
-        return new CreatedPermission(code, results);
     }
 
     public ProjectRepository.Row require(long id) {

@@ -405,13 +405,13 @@ public class RouteService {
         List<FieldError> errors = new ArrayList<>();
         for (int i = 0; i < own.size(); i++) {
             if (!existing.contains(own.get(i))) {
-                errors.add(new FieldError("permissions[" + i + "]", environment + " yetkilendirme servisinde yok: " + own.get(i)));
+                errors.add(new FieldError("permissions[" + i + "]", environment + " Koordinatör'ünde yok: " + own.get(i)));
             }
         }
         for (int i = 0; i < foreign.size(); i++) {
             if (!existing.contains(foreign.get(i))) {
                 errors.add(new FieldError("foreignPermissions[" + i + "]",
-                        environment + " yetkilendirme servisinde yok: " + foreign.get(i)));
+                        environment + " Koordinatör'ünde yok: " + foreign.get(i)));
             }
         }
         return errors;

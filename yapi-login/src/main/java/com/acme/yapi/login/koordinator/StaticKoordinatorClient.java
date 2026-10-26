@@ -23,7 +23,7 @@ public class StaticKoordinatorClient implements KoordinatorClient {
     }
 
     @Override
-    public List<String> projectCodes() {
+    public List<String> applications() {
         return projects;
     }
 }

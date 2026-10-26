@@ -66,24 +66,28 @@ yapi:
       lag-warning: 1m
     catalog:
       mode: http
-      # boşsa koordinator.url
-      url: ${YAPI_PROJECT_SERVICE_URL:}
+      # Proje kataloğu bu ortamın Koordinatör'ünden (yalnızca is_yapi projeler)
+      environment: ${YAPI_ADMIN_CATALOG_ENVIRONMENT:PROD}
       sync-cron: "0 7 * * * *"
     authorization:
+      # http: her ortamın Koordinatör'ü (projenin yetkileri ve yetkinin ortamda varlığı); yetkiler orada açılır
       mode: http
-      # ortam başına ayrı adres gerekirse; boşsa koordinator.url
-      urls:
-        DEV: ${YAPI_DEV_AUTHORIZATION_URL:}
-        PREPROD: ${YAPI_PREPROD_AUTHORIZATION_URL:}
-        PROD: ${YAPI_PROD_AUTHORIZATION_URL:}
     drift:
       cron: "0 23 2 * * *"
 
 # Yetki projesi: projeler ve yetkiler buradan; giriş servisiyle aynı ayarlar
+# Yetki projesi; her ortamda ayrı çalışır. Proje kataloğu, projelerin yetkileri ve yetkinin ortamda varlığı aynı uçtan.
 koordinator:
-  url: ${KOORDINATOR_URL:}
+  urls:
+    DEV: ${KOORDINATOR_DEV_URL:}
+    PREPROD: ${KOORDINATOR_PREPROD_URL:}
+    PROD: ${KOORDINATOR_PROD_URL:}
+  # kimlik header'ı şimdilik gerekmiyor; auth-value boşken gönderilmez
   auth-header: ${KOORDINATOR_AUTH_HEADER:Authorization}
   auth-value: ${KOORDINATOR_AUTH_VALUE:}
+  # [{"projeId", "projeAdi", "is_yapi", "yetkiList": [{"yetki", ...}], ...}]
+  projects-path: /api/koordinator/projeler-ve-yetkileri
+  cache-ttl: 5m
 
 logging:
   structured:

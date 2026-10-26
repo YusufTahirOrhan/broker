@@ -57,10 +57,14 @@ koordinator:
   url: ${KOORDINATOR_URL:}
   auth-header: ${KOORDINATOR_AUTH_HEADER:Authorization}
   auth-value: ${KOORDINATOR_AUTH_VALUE:}
-  permissions-path: "/users/{uid}/permissions"
-  permissions-field: yetkiler
-  projects-path: /projects
-  project-code-field: code
+  # kullanıcının aktif yetkileri (uid = sicil): {"<anahtar>": [{"yetkiIsim", "askidaMi", ...}], ...}
+  permissions-path: "/api/koordinator/personel-yetki/aktif-yetkiler/{uid}"
+  permission-field: yetkiIsim
+  suspended-field: askidaMi
+  # projeler ve yetkileri: [{"projeId", "projeAdi", "is_yapi", "yetkiList", ...}]; application = is_yapi olanların projeAdi'si
+  projects-path: /api/koordinator/projeler-ve-yetkileri
+  application-field: projeAdi
+  yapi-field: is_yapi
   timeout: 5s
 
 logging:

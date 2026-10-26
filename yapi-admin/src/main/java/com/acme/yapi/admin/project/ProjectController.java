@@ -73,12 +73,4 @@ public class ProjectController {
         currentUser.get();
         return projects.permissions(id, environment);
     }
-
-    @PostMapping("/projects/{id}/permissions")
-    @ResponseStatus(HttpStatus.CREATED)
-    public ProjectService.CreatedPermission createPermission(@PathVariable long id,
-                                                             @RequestBody ProjectService.NewPermission body) {
-        currentUser.get().require(Role.ROUTE_EDITOR);
-        return projects.createPermission(id, body);
-    }
 }

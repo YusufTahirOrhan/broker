@@ -86,6 +86,27 @@ public final class Json {
         return node != null && node.isString();
     }
 
+    /**
+     * A yes/no field as other systems send it: {@code true}, {@code 1}, {@code "true"} or {@code "1"} is yes, anything
+     * else (absent, null, false, 0) is no.
+     */
+    public static boolean isTrue(JsonNode node) {
+        if (node == null) {
+            return false;
+        }
+        if (node.isBoolean()) {
+            return node.booleanValue();
+        }
+        if (node.isNumber()) {
+            return node.intValue() == 1;
+        }
+        if (node.isString()) {
+            String text = node.stringValue().trim().toLowerCase(java.util.Locale.ROOT);
+            return "true".equals(text) || "1".equals(text);
+        }
+        return false;
+    }
+
     /** The string value of a string node; JSON text for anything else. */
     public static String text(JsonNode node) {
         if (node == null || node.isMissingNode() || node.isNull()) {

@@ -50,6 +50,8 @@ class LoginApiTest {
     static final FakeHttpServer koordinator = FakeHttpServer.start();
     static final String IP = "10.20.30.40";
     static final String AGENT = "Mozilla/5.0 (Windows NT 10.0)";
+    static final String PERMISSIONS = "/api/koordinator/personel-yetki/aktif-yetkiler/";
+    static final String PROJECTS = "/api/koordinator/projeler-ve-yetkileri";
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -81,8 +83,12 @@ class LoginApiTest {
     void reset() {
         koordinator.reset();
         redis.delete(List.of("user:session:ali", "user:session:ayse", "yapi:applications"));
-        koordinator.json("GET", "/users/ali/permissions", 200,
-                "{\"yetkiler\": [\"LOGPROJECT_TEMEL\", \"SORGU_TEMEL\"], \"ad\": \"Ali\"}");
+        koordinator.json("GET", PERMISSIONS + "ali", 200, """
+                {"additionalProp1": [{"yetkiIsim": "LOGPROJECT_TEMEL", "askidaMi": false},
+                                     {"yetkiIsim": "SORGU_TEMEL", "askidaMi": false}],
+                 "additionalProp2": [{"yetkiIsim": "SORGU_TEMEL", "askidaMi": false},
+                                     {"yetkiIsim": "SORGU_ILERI", "askidaMi": true}]}
+                """);
     }
 
     /** A call as the broker makes it: signed, with the frontend's client headers unless {@code headers} say else. */
@@ -123,7 +129,7 @@ class LoginApiTest {
         assertThat(stored("ali")).isEqualTo(new SessionRecord("ali", token, IP, AGENT,
                 List.of("LOGPROJECT_TEMEL", "SORGU_TEMEL")));
         assertThat(redis.getExpire("user:session:ali")).isBetween(86_000L, 86_400L);
-        assertThat(koordinator.requests("/users/ali/permissions").getFirst().header("Authorization"))
+        assertThat(koordinator.requests(PERMISSIONS + "ali").getFirst().header("Authorization"))
                 .isEqualTo("Bearer koordinator-token");
         assertThat(output.getAll()).doesNotContain("s3cret-Parola");
     }
@@ -164,8 +170,9 @@ class LoginApiTest {
 
     @Test
     void withoutPermissionsTheLoginFailsAfterAGoodPassword() {
-        for (String body : List.of("{}", "{\"ad\": \"Ayşe\"}", "{\"yetkiler\": \"SORGU_TEMEL\"}")) {
-            koordinator.json("GET", "/users/ayse/permissions", body.equals("{}") ? 500 : 200, body);
+        for (String body : List.of("{}", "[]", "{\"additionalProp1\": \"SORGU_TEMEL\"}",
+                "{\"additionalProp1\": [{\"askidaMi\": false}]}")) {
+            koordinator.json("GET", PERMISSIONS + "ayse", body.equals("{}") ? 500 : 200, body);
 
             JsonHttp.Response response = login("ayse", "diger");
 
@@ -177,7 +184,7 @@ class LoginApiTest {
 
     @Test
     void anEmptyPermissionListIsALoginWithoutPermissions() {
-        koordinator.json("GET", "/users/ayse/permissions", 200, "{\"yetkiler\": []}");
+        koordinator.json("GET", PERMISSIONS + "ayse", 200, "{}");
 
         assertThat(login("ayse", "diger").json().get("login").booleanValue()).isTrue();
         assertThat(stored("ayse").permissions()).isEmpty();
@@ -248,8 +255,10 @@ class LoginApiTest {
     @Test
     void theApplicationListFollowsTheKoordinatorsProjects() {
         double failures = meters.counter("login.applications.sync.failed").count();
-        koordinator.json("GET", "/projects", 200, """
-                [{"id": 1, "code": "web", "name": "Web"}, {"id": 2, "code": "Mobil", "name": "Mobil"}, {"id": 3}]
+        koordinator.json("GET", PROJECTS, 200, """
+                [{"projeId": 1, "projeAdi": "web", "is_yapi": true, "yetkiList": []},
+                 {"projeId": 2, "projeAdi": "Mobil", "is_yapi": true, "yetkiList": []},
+                 {"projeId": 3, "projeAdi": "muhasebe", "is_yapi": false, "yetkiList": []}]
                 """);
 
         applications.sync();
@@ -257,9 +266,9 @@ class LoginApiTest {
                 .isEqualTo(Json.parse("[\"web\", \"Mobil\"]"));
         assertThat(redis.getExpire("yapi:applications")).isEqualTo(-1L);
 
-        koordinator.json("GET", "/projects", 500, "{}");
+        koordinator.json("GET", PROJECTS, 500, "{}");
         applications.sync();
-        koordinator.json("GET", "/projects", 200, "[]");
+        koordinator.json("GET", PROJECTS, 200, "[]");
         applications.sync();
 
         assertThat(Json.parse(redis.opsForValue().get("yapi:applications")))

@@ -36,7 +36,7 @@ public class CatalogSync {
                         found -> projects.catalog(project.id(), project.externalProjectId(), found.name(), "LINKED"),
                         () -> {
                             if (!"MISSING".equals(project.catalogStatus())) {
-                                log.warn("Proje servisinde artık yok: {} ({})", project.maintask(),
+                                log.warn("Koordinatör'de artık yok: {} ({})", project.maintask(),
                                         project.externalProjectId());
                             }
                             projects.catalog(project.id(), project.externalProjectId(), project.name(), "MISSING");

@@ -164,14 +164,18 @@ public class ProjectRepository {
     }
 
     /** How many subtasks (not archived, any project) use each permission with this prefix. */
-    public Map<String, Long> permissionUsage(String prefix) {
+    /** How many active subtasks use each of the codes, own or foreign; codes nobody uses are left out. */
+    public Map<String, Long> permissionUsage(java.util.Collection<String> codes) {
+        if (codes.isEmpty()) {
+            return Map.of();
+        }
         return jdbc.sql("""
                         SELECT rp.code, COUNT(DISTINCT rp.definition_id) AS uses
                           FROM route_permission rp JOIN route_definition r ON r.id = rp.definition_id
-                         WHERE r.status = 'ACTIVE' AND SUBSTR(rp.code, 1, LENGTH(:prefix) + 1) = :prefix || '_'
+                         WHERE r.status = 'ACTIVE' AND rp.code IN (:codes)
                          GROUP BY rp.code
                         """)
-                .param("prefix", prefix)
+                .param("codes", List.copyOf(codes))
                 .query((rs, index) -> Map.entry(rs.getString("code"), rs.getLong("uses")))
                 .list().stream().collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }

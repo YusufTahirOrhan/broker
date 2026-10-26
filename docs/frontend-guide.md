@@ -8,8 +8,8 @@ Bu rehber, broker yönetim ekranlarını geliştirecek frontend için ekranları
 
 Yapi Admin, DevOps'un subtask'leri, yetkileri ve yanıt profillerini kod yazmadan tanımladığı ve DEV → PREPROD → PROD sırasıyla taşıdığı yönetim ekranıdır. Ekran yalnızca merkezi admin backend'iyle (`yapi-admin`) konuşur; ortamlara, broker'lara ve proje servisine backend bağlanır.
 
-- **Ekrandan yapılanlar:** Proje kaydı ve ortam adresleri, proje yetkileri, subtask tanımı (servisin spec'inden, yapıştırılan bir istekten ya da elle), yanıt profilleri, test çağrısı, versiyon geçmişi ve geri alma, taşıma talebi ve onay.
-- **Ekranın dışında kalanlar:** Kullanıcılara yetki atamak yetkilendirme servisinde kalır. Uygulamaların broker trafiği ve logları bu ekrandan geçmez.
+- **Ekrandan yapılanlar:** Proje kaydı ve ortam adresleri, projenin yetkilerini görmek, subtask tanımı (servisin spec'inden, yapıştırılan bir istekten ya da elle), yanıt profilleri, test çağrısı, versiyon geçmişi ve geri alma, taşıma talebi ve onay.
+- **Ekranın dışında kalanlar:** Yetki açmak ve kullanıcılara atamak Koordinatör'de (yetki projesi) kalır. Uygulamaların broker trafiği ve logları bu ekrandan geçmez.
 - **Temel kural:** Bir subtask'i değiştirmek yalnızca yeni bir versiyon üretir. Değişiklik bir ortamda, ancak o versiyon taşınınca çalışır.
 
 | Rol | Ne yapabilir |
@@ -46,9 +46,9 @@ Uygulama dört ana bölümden oluşur: Projeler, Yanıt profilleri, Talepler ve 
 
 ### Projeler
 
-- **Liste:** Broker'a kayıtlı projeler (`GET /projects`). `UNLINKED` proje servisine bağlanmamış, `MISSING` proje serviste artık olmayan projedir; ikisi de rozetle gösterilir.
-- **Kayıt:** "Proje ekle" proje servisinde arama açar (`GET /catalog/projects?query=`); kayıtlı olanlar işaretli gelir. Seçilen projenin adı forma dolar, DevOps `maintask`'i ve yetki önekini girer (`POST /projects`).
-- **Değişmezlik:** Proje servisi ID'si, `maintask` ve önek kayıttan sonra değiştirilemez. Form bunu kaydetmeden önce açıkça söylemelidir.
+- **Liste:** Yapi'ye kayıtlı projeler (`GET /projects`). `UNLINKED` Koordinatör'deki bir projeye bağlanmamış, `MISSING` Koordinatör'de artık olmayan (ya da Yapi projesi olmaktan çıkmış) projedir; ikisi de rozetle gösterilir.
+- **Kayıt:** "Proje ekle" Koordinatör'ün Yapi projelerinde (`is_yapi`) arama açar (`GET /catalog/projects?query=`); kayıtlı olanlar işaretli gelir. Seçilen projenin adı forma dolar, DevOps `maintask`'i ve yetki önekini girer (`POST /projects`).
+- **Değişmezlik:** Koordinatör proje ID'si, `maintask` ve önek kayıttan sonra değiştirilemez. Form bunu kaydetmeden önce açıkça söylemelidir.
 - **Önek:** Büyük harfe çevrilerek girilir. Başka bir önekin başı ya da devamı olan önek (`HR` varken `HR_PORTAL`) 409 `PREFIX_OVERLAP` ile reddedilir.
 
 ### Proje detayı
@@ -57,7 +57,7 @@ Sekmeler: Genel, Ortamlar, Yetkiler, Subtask'ler ve Spec.
 
 - **Genel:** Görünen ad, takım, açıklama ve varsayılan yanıt profili (`PATCH /projects/{id}`). Varsayılan profil yeni subtask formunda ön seçim olur.
 - **Ortamlar:** Ortam başına base URL, spec yolu ve açık/kapalı (`PUT /projects/{id}/environments/{env}`). Kayıt o ortama hemen uygulanır; ortama ulaşılamazsa 502 `ENV_UNREACHABLE` döner ve hiçbir şey değişmez. Onay isteyen ortamda (PROD) bu ayarı yalnızca `APPROVER` değiştirebilir.
-- **Yetkiler:** Projenin yetkileri seçilen ortamın yetkilendirme servisinden listelenir (`GET /projects/{id}/permissions?env=DEV`). "Yetki ekle" yalnızca son eki sorar, önek sabit gösterilir: `LOGPROJECT_` + `MODERATOR` (`POST /projects/{id}/permissions`). Her yetkinin yanında onu kullanan subtask sayısı durur; tıklanınca liste açılır (`GET /permissions/{code}/routes`).
+- **Yetkiler:** Projenin yetkileri seçilen ortamın Koordinatör'ünden listelenir (`GET /projects/{id}/permissions?env=DEV`): Koordinatör'deki projesinin yetki listesi (`projeId` eşleşmesi); Koordinatör'e bağlı olmayan (`UNLINKED`) projede liste boştur. Yetkiler Koordinatör'de açılır; ekranda "yetki ekle" yoktur. Her yetkinin yanında onu kullanan subtask sayısı durur; tıklanınca liste açılır (`GET /permissions/{code}/routes`).
 - **Subtask'ler:** Liste (`GET /projects/{id}/routes`) ve her satırda ortam rozetleri: `DEV v4 · PREPROD v4 · PROD v3`. Rozet, güncel versiyonun aktif olduğunu, eski bir versiyonun aktif olduğunu, `DISABLED` olduğunu ya da hiç taşınmadığını ayırt etmelidir.
 
 ### Subtask editörü
@@ -172,14 +172,14 @@ Hatalar RFC 9457 problem detail olarak (`application/problem+json`) döner. `cod
 | `TEST_NOT_ALLOWED` | 403 | Ortam test çağrısına kapalı |
 | `NOT_FOUND` | 404 | Kayıt yok |
 | `VERSION_CONFLICT` | 409 | Kayıt arada değişti; `currentVersion` döner |
-| `DUPLICATE` | 409 | maintask, subtask, profil adı ya da proje servisi ID'si zaten kayıtlı |
+| `DUPLICATE` | 409 | maintask, subtask, profil adı ya da Koordinatör proje ID'si zaten kayıtlı |
 | `PREFIX_OVERLAP` | 409 | Yetki öneki başka bir önekle çakışıyor |
 | `INVALID_STATE` | 409 | İşlem kaydın durumuna uymuyor, örneğin uygulanmış talebi iptal etmek |
 | `ROUTE_DEPLOYED` | 409 | Bir ortamda aktif olan subtask arşivlenmek istendi |
 | `PRECHECK_FAILED` | 422 | Taşıma ön kontrolü geçmedi; `checks` listesi döner |
 | `INTERNAL_ERROR` | 500 | Beklenmeyen sunucu hatası; ayrıntı backend logundadır |
 | `ENV_UNREACHABLE` | 502 | Ortamın Admin API'sine ulaşılamadı |
-| `UPSTREAM_ERROR` | 502 | Proje servisi, yetkilendirme servisi ya da servisin spec'i hata verdi |
+| `UPSTREAM_ERROR` | 502 | Ortamın Koordinatör'ü ya da servisin spec'i hata verdi |
 
 ## Uç noktalar
 
@@ -198,14 +198,13 @@ Tüm yollar `/api/v1` altındadır. Rol sütunu en az gereken roldür; şemalar�
 
 | Method | Yol | Rol | Ne yapar |
 | --- | --- | --- | --- |
-| GET | `/catalog/projects?query=` | VIEWER | Proje servisinde arama; kayıtlı olanlarda `registeredProjectId` dolu |
+| GET | `/catalog/projects?query=` | VIEWER | Koordinatör'ün Yapi projelerinde ad ya da ID ile arama; kayıtlı olanlarda `registeredProjectId` dolu |
 | GET | `/projects?query=&catalogStatus=` | VIEWER | Kayıtlı projeler |
 | POST | `/projects` | ROUTE\_EDITOR | Projeyi kaydeder |
 | GET | `/projects/{id}` | VIEWER | Proje ve ortam ayarları |
-| PATCH | `/projects/{id}` | ROUTE\_EDITOR | Ad, takım, açıklama, varsayılan profil; `UNLINKED` projeyi proje servisine bağlama |
+| PATCH | `/projects/{id}` | ROUTE\_EDITOR | Ad, takım, açıklama, varsayılan profil; `UNLINKED` projeyi Koordinatör'deki projesine bağlama |
 | PUT | `/projects/{id}/environments/{env}` | ROUTE\_EDITOR (onaylı ortamda APPROVER) | Base URL, spec yolu, açık/kapalı; ortama hemen uygulanır |
-| GET | `/projects/{id}/permissions?env=` | VIEWER | Projenin yetkileri ve kullanan subtask sayısı |
-| POST | `/projects/{id}/permissions` | ROUTE\_EDITOR | Son ekle yeni yetki açar |
+| GET | `/projects/{id}/permissions?env=` | VIEWER | Projenin ortamdaki Koordinatör yetkileri ve kullanan subtask sayısı |
 | GET | `/permissions/{code}/routes` | VIEWER | Yetkiyi kullanan subtask'ler, `OWN` ya da `FOREIGN` |
 
 ### Subtask'ler
@@ -371,7 +370,7 @@ Gövde `fields` tanımına uymazsa istek gönderilmez: `outcome` `INVALID_REQUES
   "detail": "Talep açılamadı: 1 kontrol geçmedi.",
   "checks": [
     { "check": "SOURCE_ACTIVE", "ok": true, "message": "v4 PREPROD ortamında aktif" },
-    { "check": "PERMISSIONS_EXIST", "ok": false, "message": "PROD yetkilendirme servisinde yok: ORDER_WRITE" }
+    { "check": "PERMISSIONS_EXIST", "ok": false, "message": "PROD Koordinatör'ünde yok: ORDER_WRITE" }
   ]
 }
 ```
@@ -384,12 +383,11 @@ Yukarıdaki örneklerde görünmeyen gövde ve yanıt alanları. Alan adları ca
 | --- | --- | --- |
 | `GET /me` | — | `{"username", "displayName", "roles": [...]}`; `ROUTE_EDITOR` ya da `APPROVER` olan kullanıcıda `VIEWER` da listelenir. Hiç rolü olmayan kullanıcı her uçta 403 alır |
 | `GET /environments/{env}/status` | — | `{"environment", "configVersion", "configUpdatedAt", "instanceCount", "upToDateCount", "instances": [{"instanceId", "loadedVersion", "loadedAt", "upToDate", "lagging"}]}`. `lagging`: bir dakikadan uzun süredir geride. Ortama ulaşılamazsa 502 `ENV_UNREACHABLE` |
-| `POST /projects` | `{"externalProjectId", "maintask", "permissionPrefix", "name", "ownerTeam", "description", "defaultResponseProfileId"}` | `name` boşsa proje servisinden gelir. `externalProjectId` olmadan kayıt `UNLINKED` olur (geçiş için). 201 ve proje |
+| `POST /projects` | `{"externalProjectId", "maintask", "permissionPrefix", "name", "ownerTeam", "description", "defaultResponseProfileId"}` | `externalProjectId` Koordinatör'deki `projeId`; `name` boşsa Koordinatör'deki `projeAdi`. `externalProjectId` olmadan kayıt `UNLINKED` olur (geçiş için). 201 ve proje |
 | `PATCH /projects/{id}` | Değişecek alanlar: `name`, `ownerTeam`, `description`, `defaultResponseProfileId` (`null` temizler), `externalProjectId` | `externalProjectId` yalnızca `UNLINKED` projeyi bağlar, proje `LINKED` olur. `maintask` ya da `permissionPrefix` farklı gönderilirse 400 |
 | `GET /projects`, `GET /projects/{id}` | — | Proje alanları, `defaultResponseProfile: {id, name}` ve `environments: [{environment, baseUrl, specPath, enabled}]` |
 | `PUT /projects/{id}/environments/{env}` | `{"baseUrl", "specPath", "enabled"}` | `specPath` varsayılan `/v3/api-docs`, `enabled` varsayılan `true`. Yanıt `{"environment", "baseUrl", "specPath", "enabled", "configVersion"}` |
-| `GET /projects/{id}/permissions?env=` | — | `env` verilmezse ilk ortam. Öğe `{"code", "suffix", "description", "routeCount"}`; `routeCount` tüm projelerde yetkiyi kullanan, arşivde olmayan subtask sayısı |
-| `POST /projects/{id}/permissions` | `{"suffix", "description", "environments": ["DEV"]}` | `environments` boşsa tüm ortamlar; son ek büyük harfe çevrilir. 201 `{"code", "environments": [{"environment", "created"}]}`; hiçbir ortamda yeni açılmadıysa 409 `DUPLICATE` |
+| `GET /projects/{id}/permissions?env=` | — | `env` verilmezse ilk ortam. Öğe `{"code", "suffix", "description", "routeCount"}`; `suffix` kodun önekten sonraki kısmı (kod önekle başlamıyorsa `null`), `description` Koordinatör vermediği için `null`; `routeCount` tüm projelerde yetkiyi kullanan, arşivde olmayan subtask sayısı. Ortamın listesi birkaç dakika önbellekte tutulur |
 | `POST /projects/{id}/routes`, `PUT /routes/{id}` | Örnekteki gövde ve isteğe bağlı `specOperation` | `specOperation`, spec karşılaştırmasındaki öğenin aynı adlı alanıdır; kaydedilince `specFingerprint` hesaplanır ve `CHANGED` bundan bulunur. Kayıtta her yetki ilk ortamın (DEV) yetkilendirme servisinde aranır; yoksa alan hatası döner |
 | `POST /routes/{id}/archive`, `/restore` | İsteğe bağlı `{"version", "comment"}` | Güncel subtask |
 | `POST /routes/{id}/rollback`, `POST /response-profiles/{id}/rollback` | `{"restoreVersion": 3, "version": 5, "comment"}` | `restoreVersion` dönülecek versiyon; `version` okunan versiyondur (iyimser kilit), verilmezse güncel versiyon kabul edilir |
@@ -479,7 +477,7 @@ Değeri yalnızca bir yer tutucudan oluşan alan değerin tipini korur: `"${requ
 | `NEXT_ENVIRONMENT` | Hedef ortam, kaynak ortamın hemen sonrası |
 | `SOURCE_ACTIVE` | Versiyon kaynak ortamda aktif; DEV'e taşımada aranmaz |
 | `NO_OPEN_REQUEST` | Aynı subtask ya da profil ve hedef ortam için açık talep yok |
-| `PERMISSIONS_EXIST` | Yetkiler hedef ortamın yetkilendirme servisinde tanımlı |
+| `PERMISSIONS_EXIST` | Yetkiler hedef ortamın Koordinatör'ünde, bir Yapi projesinin yetkileri arasında |
 | `PROFILE_ACTIVE` | Subtask'in yanıt profili hedef ortamda aktif |
 | `PROJECT_ENABLED` | Proje hedef ortamda tanımlı ve açık |
 | `DEPLOYED_IN_TARGET` | `DISABLE` ve `ENABLE`'da subtask hedef ortamda var |
@@ -525,6 +523,7 @@ Backend geliştirildikçe bu tablo güncellenir; en yeni kayıt en üsttedir. Bi
 
 | Tarih | Değişiklik |
 | --- | --- |
+| 2026-10-26 | Koordinatör'ün gerçek uçları: proje kataloğu (`/catalog/projects`) Koordinatör'ün Yapi projeleri (`is_yapi`), ID `projeId`, ad `projeAdi`; projenin yetkileri ortamın Koordinatör'ündeki projesinin listesi (`UNLINKED` projede boş), `description` `null`, `suffix` önekle başlamayan kodda `null`. Yetki açma kalktı: `POST /projects/{id}/permissions` yok (405), ekranda "yetki ekle" yok; yetkiler Koordinatör'de açılır. Hata ve ön kontrol mesajlarında "yetkilendirme servisi" yerine "Koordinatör". |
 | 2026-10-26 | Ortamlar DEV, PREPROD, PROD: TEST'in kodu `PREPROD` oldu (`GET /environments`, `env` parametreleri, taşıma talepleri, rozetler). Ön kontrol mesajı "v4 PREPROD ortamında aktif" biçiminde. |
 | 2026-10-26 | Ad değişikliği: proje Yapi, ekranın adı Yapi Admin. Merkezi admin `yapi-admin`, yerel broker'ın dosyası `yapi-local.json`, CORS ayarı `yapi.admin.cors.allowed-origins`. Admin API'nin yolları, gövdeleri ve hata kodları değişmedi. |
 | 2026-10-16 | Yeni yer tutucu `${user.permission}`: kullanıcıda olan ilk route yetkisi (önce `permissions`, sonra `foreignPermissions`). Önizleme ve test gövdesi isteğe bağlı `permissions` ve `foreignPermissions` alır; `definition-rules`'daki `placeholders.definition` yeni yer tutucuyu listeler |
@@ -537,6 +536,6 @@ Backend geliştirildikçe bu tablo güncellenir; en yeni kayıt en üsttedir. Bi
 ### Netleşmemiş noktalar
 
 - [ ] **SSO:** Hangi OIDC sağlayıcısı kullanılıyor ve roller token'ın hangi claim'inde geliyor?
-- [ ] **Yetki projesi:** Projeler ve yetkiler aynı yetki projesinden, Koordinatör'den geliyor. Arama, ID ile okuma, yetki listeleme, açma ve varlık kontrolü için varsayılan uçlar (`GET /projects?query=`, `GET /projects/{id}`, `GET /permissions?prefix=`) gerçek API netleşince uyarlanacak; ekranın gördüğü `/catalog/projects` ve `Yetkiler` sekmesinin yolları değişmez.
+- [x] **Yetki projesi:** Koordinatör'ün gerçek uçlarına bağlandı (2026-10-26): katalog, projenin yetkileri ve yetkinin varlığı her ortamın `projeler-ve-yetkileri` ucundan; ekranın gördüğü yollar değişmedi, yetki açma ucu kalktı.
 - [ ] **PROD base URL'i:** Şimdilik yalnızca `APPROVER` değiştirebiliyor; ileride onay akışına alınabilir.
 - [ ] **Acil durum:** PROD'da `DISABLE` ve `ROLLBACK` de onay istiyor; tasarım dokümanında açık bir karar.
