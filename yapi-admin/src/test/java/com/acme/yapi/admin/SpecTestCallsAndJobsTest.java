@@ -141,9 +141,9 @@ class SpecTestCallsAndJobsTest extends AdminTestBase {
         assertThat(post("viewer", "/projects/" + projectId + "/test",
                 call.formatted("DEV", profileId, CoreFixtures.ADD_ORDER_NOTE)).status()).isEqualTo(403);
 
-        ENVIRONMENTS.get("TEST").probeResults.put("GET /orders/{id}", "WRONG_METHOD");
+        ENVIRONMENTS.get("PREPROD").probeResults.put("GET /orders/{id}", "WRONG_METHOD");
         JsonNode probe = post("editor", "/projects/" + projectId + "/probe", """
-                {"environment": "TEST", "httpMethod": "GET", "pathTemplate": "/orders/{id}", "pathVariables": {"id": "7"}}
+                {"environment": "PREPROD", "httpMethod": "GET", "pathTemplate": "/orders/{id}", "pathVariables": {"id": "7"}}
                 """).json();
         assertThat(probe.get("result").stringValue()).isEqualTo("WRONG_METHOD");
     }

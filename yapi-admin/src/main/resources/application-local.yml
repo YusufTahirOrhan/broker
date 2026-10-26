@@ -5,7 +5,7 @@ spring:
   flyway:
     placeholders:
       dev_admin_api_url: http://localhost:8081
-      test_admin_api_url: http://localhost:8081
+      preprod_admin_api_url: http://localhost:8081
       prod_admin_api_url: http://localhost:8081
 
 springdoc:
@@ -31,5 +31,5 @@ yapi:
       mode: memory
       permissions:
         DEV: [ORDER_READ, ORDER_WRITE, LOGPROJECT_TEMEL]
-        TEST: [ORDER_READ, ORDER_WRITE, LOGPROJECT_TEMEL]
+        PREPROD: [ORDER_READ, ORDER_WRITE, LOGPROJECT_TEMEL]
         PROD: [ORDER_READ, ORDER_WRITE, LOGPROJECT_TEMEL]

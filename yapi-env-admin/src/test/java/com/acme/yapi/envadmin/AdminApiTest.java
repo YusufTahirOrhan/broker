@@ -39,7 +39,7 @@ import tools.jackson.databind.JsonNode;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "server.ssl.enabled=false",
         "management.server.port=0",
-        "yapi.env-admin.environment=TEST",
+        "yapi.env-admin.environment=PREPROD",
         "yapi.env-admin.test.enabled=true",
         "yapi.env-admin.test.secret=s3cret"
 })
@@ -145,16 +145,16 @@ class AdminApiTest {
     @Test
     void projectWriteMovesTheVersionOnlyWhenSomethingChanged() {
         long before = configVersion();
-        project("order-service", "http://order-service.test.svc:8080");
+        project("order-service", "http://order-service.preprod.svc:8080");
         assertThat(configVersion()).isEqualTo(before + 1);
 
         JsonHttp.Response same = http.put("/admin/v1/projects/order-service",
-                "{\"baseUrl\": \"http://order-service.test.svc:8080\", \"actor\": \"devops.ali\"}");
+                "{\"baseUrl\": \"http://order-service.preprod.svc:8080\", \"actor\": \"devops.ali\"}");
         assertThat(same.json().get("changed").booleanValue()).isFalse();
         assertThat(configVersion()).isEqualTo(before + 1);
 
         JsonHttp.Response disabled = http.put("/admin/v1/projects/order-service",
-                "{\"baseUrl\": \"http://order-service.test.svc:8080\", \"enabled\": false, \"actor\": \"devops.ali\"}");
+                "{\"baseUrl\": \"http://order-service.preprod.svc:8080\", \"enabled\": false, \"actor\": \"devops.ali\"}");
         assertThat(disabled.json().get("changed").booleanValue()).isTrue();
         assertThat(disabled.json().get("enabled").booleanValue()).isFalse();
         assertThat(configVersion()).isEqualTo(before + 2);
@@ -327,7 +327,7 @@ class AdminApiTest {
 
         JsonNode listing = http.get("/admin/v1/routes").json();
 
-        assertThat(listing.get("environment").stringValue()).isEqualTo("TEST");
+        assertThat(listing.get("environment").stringValue()).isEqualTo("PREPROD");
         assertThat(listing.get("configVersion").longValue()).isEqualTo(configVersion());
         assertThat(listing.get("projects").get(0).get("baseUrl").stringValue()).isEqualTo(service.baseUrl());
         assertThat(listing.get("profiles").get(0).get("version").intValue()).isEqualTo(2);
@@ -429,7 +429,7 @@ class AdminApiTest {
 
     @Test
     void testCallsGoToTheBrokerWithTheRegisteredBaseUrl() {
-        project("order-service", "http://order-service.test.svc:8080");
+        project("order-service", "http://order-service.preprod.svc:8080");
         service.json("POST", TestCallRequest.PATH, 200, """
                 {"request": null, "response": null, "clientResponse": null, "outcome": "INVALID_REQUEST",
                  "interpretation": "x", "errors": [{"field": "siparisNo", "message": "Zorunlu alan eksik"}]}
@@ -446,7 +446,7 @@ class AdminApiTest {
         FakeHttpServer.Recorded forwarded = service.requests(TestCallRequest.PATH).getFirst();
         assertThat(forwarded.header(TestCallRequest.SECRET_HEADER)).isEqualTo("s3cret");
         JsonNode body = Json.parse(forwarded.body());
-        assertThat(body.get("baseUrl").stringValue()).isEqualTo("http://order-service.test.svc:8080");
+        assertThat(body.get("baseUrl").stringValue()).isEqualTo("http://order-service.preprod.svc:8080");
         assertThat(body.get("sample").get("notMetni").stringValue()).isEqualTo("x");
     }
 

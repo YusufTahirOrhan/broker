@@ -43,6 +43,8 @@ Projenin adı Yapi. Henüz hiçbir ortamda kurulum yok; migration'lar dahil her 
 
 TEST, PREPROD olur; ortamlar DEV, PREPROD, PROD (migration'daki tohum, ayarlar, testler, rehberdeki örnekler).
 
+- **Yapıldı (2026-10-26):** `V2__environments.sql`'de ikinci ortam `PREPROD` (görünen ad `Preprod`), Flyway placeholder'ı `preprod_admin_api_url` (`YAPI_PREPROD_ADMIN_API_URL`); admin'in yetki adresi `yapi.admin.authorization.urls.PREPROD` (`YAPI_PREPROD_AUTHORIZATION_URL`). Testler, yorumlar ve rehberin örnekleri PREPROD. Kurulum olmadığı için migration yerinde değişti. Uygulanırken netleşen: `SOURCE_ACTIVE` ön kontrol mesajı ortam koduna Türkçe ek yapıştırıyordu ("TEST'te", PREPROD'la yanlış olurdu); artık "v4 PREPROD ortamında aktif" (`PromotionFlowTest`). Test çağrısıyla ilgili adlar (`TEST_NOT_ALLOWED`, `YAPI_TEST_SECRET`, `test_calls_allowed`) ortam adı olmadığı için aynı.
+
 ### 3. Koordinatör'ün gerçek uçları
 
 Biçimler "Eski broker'dan teyit edilenler"de. Yollar, alan adları (`is_yapi` dahil) ve isteğe bağlı kimlik header'ı ayarda; şimdilik header gerekmediği varsayıldı.
@@ -301,7 +303,7 @@ Tasarım dokümanındakilere ek olarak netleşenler:
 - **Eski sayaç:** Eski broker'ın `broker.gelen.istekler`'i Yapi'de `yapi.gelen.istekler` (2026-10-26 kararı). Tag anahtarları ayarla verilir; eski controller'la teyit edildi (`maintask`, `subtask`). Bilinmeyenler "Bilinmeyen Proje" / "Bilinmeyen Endpoint".
 - **Elastic aylık indeks:** Ay, request ID'deki (UUIDv7) zamandan, ayarlanabilir saat diliminde hesaplanır. Eski kod sunucunun saat dilimini (TSİ) kullanıyor; varsayılan `Europe/Istanbul`. Parametre dokümanı `_id`'si `UUID.nameUUIDFromBytes(requestId|alan|sıra)`.
 - **Admin kimliği:** OAuth2 resource server (JWT); rollerin geldiği claim ve grup→rol eşlemesi ayardan. `local` profilinde HTTP Basic: `viewer`, `editor`, `approver`, `lead` (şifre = kullanıcı adı; `lead` üç role de sahip).
-- **Roller:** `VIEWER`, `ROUTE_EDITOR`, `APPROVER`. `ROUTE_EDITOR` DEV'e doğrudan uygular (talep onaysız uygulanır), TEST ve PROD için talep açar.
+- **Roller:** `VIEWER`, `ROUTE_EDITOR`, `APPROVER`. `ROUTE_EDITOR` DEV'e doğrudan uygular (talep onaysız uygulanır), PREPROD ve PROD için talep açar.
 - **Taşıma kuralları:** Onay gerekir = hedef ortam `requires_approval` **ya da** versiyon anonim erişimi açıyorsa (hangi ortam olursa olsun). Onay gerekenlerde gerekçe zorunlu. `ROLLBACK` yalnızca hedef ortama daha önce `APPLIED` olmuş bir versiyona; `DISABLE`/`ENABLE` hedefteki mevcut versiyonla. Profil önce, route sonra uygulanır. Ön kontroller ve adları `docs/frontend-guide.md`'de.
 - **Ortam ayarı:** `PUT /projects/{id}/environments/{env}` ortama hemen uygulanır; ortama ulaşılamazsa merkezde de değişmez (502 `ENV_UNREACHABLE`). Onay isteyen ortamda yalnızca `APPROVER` değiştirir (açık nokta).
 - **Arşiv:** Yalnızca hiçbir ortamda `ACTIVE` olmayan subtask arşivlenir (409 `ROUTE_DEPLOYED`).
@@ -411,7 +413,7 @@ Paket `com.acme.yapi.admin`. Sözleşme `docs/frontend-guide.md`; uygulama sıra
 | `spec` | Spec karşılaştırma (method + path, değişken adları yok sayılır; `CHANGED` saklanan `spec_fingerprint`'ten), istekten şablon, test (yalnızca `test_calls_allowed`; `yapi.audit` logu), yoklama |
 | `jobs` | `DriftCheck` (gece; ortamın listesiyle karşılaştırma + her ACTIVE route'a yoklama, `yapi.admin.drift` sayacı, `last_probe_status`), `CatalogSync` (ad yenileme, servisten kalkan proje `MISSING`). Birden çok instance'ta aynı anda çalışmaları zararsız (idempotent) |
 
-- **Şema:** `db/migration/yapi_admin/V1__central_schema.sql`, tasarımdaki modelin Oracle 19c karşılığı (yukarıda "Sıradaki iş" 1'deki kararlar: `route_permission`, tablo başına PL/SQL trigger'lar, `CASE`'li açık talep index'leri, `change_note`; kullanıcı yoksa GRANT atlanır). `V2__environments.sql` ortamları `dev/test/prod_admin_api_url` placeholder'larıyla `MERGE` ile seed eder. Uygulama `yapi_admin_app` ile `YAPI_ADMIN_DB_SCHEMA` (varsayılan `YAPI_ADMIN`) üzerinden şemasız çalışır.
+- **Şema:** `db/migration/yapi_admin/V1__central_schema.sql`, tasarımdaki modelin Oracle 19c karşılığı (yukarıda "Sıradaki iş" 1'deki kararlar: `route_permission`, tablo başına PL/SQL trigger'lar, `CASE`'li açık talep index'leri, `change_note`; kullanıcı yoksa GRANT atlanır). `V2__environments.sql` ortamları `dev/preprod/prod_admin_api_url` placeholder'larıyla `MERGE` ile seed eder. Uygulama `yapi_admin_app` ile `YAPI_ADMIN_DB_SCHEMA` (varsayılan `YAPI_ADMIN`) üzerinden şemasız çalışır.
 - **Ayar:** SSO issuer'ı `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUERURI` ile verilir (boş varsayılan yok; boş issuer her token'ı reddeder). mTLS istemci sertifikası `mtls` profilinde (`application-mtls.yml`, bundle `env-client`).
 - **Testler:** Testcontainers Oracle XE (`CentralDatabase`: uygulama `yapi_admin_app` ile, temizlik şema sahibiyle; history trigger'ları temizlik sırasında kapatılır), `local` profili ve bellek içi `FakeEnvironments` (üç ortamın Admin API'si; promotion ID idempotency'si, eski talebin reddi, proje/profil yokluğu, sessiz kalma). SSO testi gerçek imzalı JWT ile; ortam istemcisinin mTLS'i istemci sertifikası isteyen bir `HttpsServer`'a karşı.
 
@@ -466,6 +468,7 @@ Derlemede doğrulandı (Boot 4.1.1, Spring Framework 7.0, Jackson 3.1, Kafka 4.2
 Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya yazılır; canlı doküman buradan güncellenir.
 
 - 2026-10-16 turunun maddeleri canlı dokümana işlendi (rev 180).
+- **Ortamlar (2):** Ön kontrol mesajları ortam kodunu "X ortamında ..." diye yazar, koda ek yapıştırılmaz ("v4 PREPROD ortamında aktif").
 - **Ad (1):** Listede olmayan, kuralla değişen adlar: olay alanı ve ClickHouse kolonu `broker_instance` → `yapi_instance`; ClickHouse `yapi_logs.yapi_metrics_1m` ve view'ı; consumer group'lar `yapi-logs-elastic`, `yapi-logs-clickhouse`; DLQ header'ları `yapi.dlq.*`; Elastic bileşen şablonu `yapi-fields`; test çağrısı header'ı `X-Yapi-Test-Secret`; audit logger'ı `yapi.audit`; yerel override dosyası `yapi-local.json`. 2026-10-26 turunun kararlarını (ad, ortamlar, Koordinatör, magic key, admin girişi, kullanıcı ayarları, alarm) Claude tur bitince tasarım dokümanına işler; buraya yalnızca uygulanırken netleşenler yazılır.
 
 ## Açık noktalar

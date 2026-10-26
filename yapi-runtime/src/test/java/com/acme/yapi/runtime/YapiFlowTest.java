@@ -45,7 +45,7 @@ import tools.jackson.databind.JsonNode;
 
 @Tag("docker")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
-        "yapi.environment=TEST",
+        "yapi.environment=PREPROD",
         "yapi.instance-id=yapi-test-1",
         "yapi.test.enabled=true",
         "yapi.test.secret=s3cret",
@@ -285,7 +285,7 @@ class YapiFlowTest {
 
         LogEvent request = events.awaitType(requestId, LogEvent.EventType.REQUEST);
         assertThat(request.traceId()).isEqualTo(traceId);
-        assertThat(request.environment()).isEqualTo("TEST");
+        assertThat(request.environment()).isEqualTo("PREPROD");
         assertThat(request.maintask()).isEqualTo("order-service");
         assertThat(request.routeVersion()).isEqualTo(3);
         assertThat(request.uid()).isEqualTo("u12345");

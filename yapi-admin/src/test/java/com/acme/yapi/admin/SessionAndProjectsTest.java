@@ -22,7 +22,7 @@ class SessionAndProjectsTest extends AdminTestBase {
 
         JsonNode environments = get("viewer", "/environments").json();
         assertThat(environments.valueStream().map(environment -> environment.get("code").stringValue()))
-                .containsExactly("DEV", "TEST", "PROD");
+                .containsExactly("DEV", "PREPROD", "PROD");
         assertThat(environments.get(2).get("requiresApproval").booleanValue()).isTrue();
         assertThat(environments.get(2).get("testCallsAllowed").booleanValue()).isFalse();
         assertThat(environments.get(0).has("adminApiUrl")).isFalse();
@@ -133,16 +133,16 @@ class SessionAndProjectsTest extends AdminTestBase {
                 {"baseUrl": "http://order-service.prod.svc:8080"}
                 """), 200);
 
-        jdbc.sql("UPDATE environment SET admin_api_url = 'http://127.0.0.1:1' WHERE code = 'TEST'").update();
+        jdbc.sql("UPDATE environment SET admin_api_url = 'http://127.0.0.1:1' WHERE code = 'PREPROD'").update();
         try {
-            JsonHttp.Response unreachable = put("editor", "/projects/" + id + "/environments/TEST", """
-                    {"baseUrl": "http://order-service.test.svc:8080"}
+            JsonHttp.Response unreachable = put("editor", "/projects/" + id + "/environments/PREPROD", """
+                    {"baseUrl": "http://order-service.preprod.svc:8080"}
                     """);
             assertThat(unreachable.status()).isEqualTo(502);
             assertThat(unreachable.json().get("code").stringValue()).isEqualTo("ENV_UNREACHABLE");
         } finally {
-            jdbc.sql("UPDATE environment SET admin_api_url = :url WHERE code = 'TEST'")
-                    .param("url", ENVIRONMENTS.url("test")).update();
+            jdbc.sql("UPDATE environment SET admin_api_url = :url WHERE code = 'PREPROD'")
+                    .param("url", ENVIRONMENTS.url("preprod")).update();
         }
         JsonNode project = get("viewer", "/projects/" + id).json();
         assertThat(project.get("environments").valueStream().map(env -> env.get("environment").stringValue()))

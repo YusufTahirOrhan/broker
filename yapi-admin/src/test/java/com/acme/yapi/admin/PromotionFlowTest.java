@@ -39,7 +39,7 @@ class PromotionFlowTest extends AdminTestBase {
         assertThat(check(noProfile.json(), "PROFILE_ACTIVE").get("ok").booleanValue()).isFalse();
         assertThat(check(noProfile.json(), "NO_OPEN_REQUEST").get("ok").booleanValue()).isTrue();
 
-        for (String environment : new String[]{"DEV", "TEST"}) {
+        for (String environment : new String[]{"DEV", "PREPROD"}) {
             applied(promote("editor", "PROFILE", profileId, 1, environment, "DEPLOY", null));
         }
         JsonNode dev = applied(promote("editor", "ROUTE", routeId, 1, "DEV", "DEPLOY", null));
@@ -57,9 +57,11 @@ class PromotionFlowTest extends AdminTestBase {
 
         JsonNode skipping = promote("editor", "ROUTE", routeId, 1, "PROD", "DEPLOY", "CHG-1").json();
         assertThat(check(skipping, "SOURCE_ACTIVE").get("ok").booleanValue()).isFalse();
+        assertThat(check(skipping, "SOURCE_ACTIVE").get("message").stringValue())
+                .isEqualTo("v1 PREPROD ortamında aktif değil; yalnızca bir önceki ortamda aktif versiyon taşınır");
         assertThat(check(skipping, "PROFILE_ACTIVE").get("ok").booleanValue()).isFalse();
 
-        applied(promote("editor", "ROUTE", routeId, 1, "TEST", "DEPLOY", null));
+        applied(promote("editor", "ROUTE", routeId, 1, "PREPROD", "DEPLOY", null));
         JsonNode profileRequest = promote("lead", "PROFILE", profileId, 1, "PROD", "DEPLOY", "CHG-0").json();
         assertThat(profileRequest.get("status").stringValue()).isEqualTo("PENDING_APPROVAL");
         assertThat(post("approver", "/promotions/" + profileRequest.get("id").longValue() + "/approve", "{}").json()
@@ -74,7 +76,7 @@ class PromotionFlowTest extends AdminTestBase {
         long requestId = pending.get("id").longValue();
         assertThat(pending.get("status").stringValue()).isEqualTo("PENDING_APPROVAL");
         assertThat(pending.get("requiresApproval").booleanValue()).isTrue();
-        assertThat(pending.get("sourceEnv").stringValue()).isEqualTo("TEST");
+        assertThat(pending.get("sourceEnv").stringValue()).isEqualTo("PREPROD");
         assertThat(pending.get("subjectName").stringValue()).isEqualTo("order-service / add_order_note");
         assertThat(pending.get("diff").get("deployedVersion").isNull()).isTrue();
         assertThat(pending.get("diff").get("foreignPermissionsAdded").get(0).stringValue()).isEqualTo("CRM_AGENT");
@@ -103,7 +105,7 @@ class PromotionFlowTest extends AdminTestBase {
 
         JsonNode deployments = get("viewer", "/routes/" + routeId).json().get("deployments");
         assertThat(deployments.valueStream().map(d -> d.get("environment").stringValue() + " v" + d.get("version").intValue()
-                + " " + d.get("status").stringValue())).containsExactly("DEV v1 ACTIVE", "TEST v1 ACTIVE", "PROD v1 ACTIVE");
+                + " " + d.get("status").stringValue())).containsExactly("DEV v1 ACTIVE", "PREPROD v1 ACTIVE", "PROD v1 ACTIVE");
         assertThat(get("viewer", "/routes/" + routeId + "/history").json().get(0).get("activeIn").size()).isEqualTo(3);
         JsonHttp.Response archive = post("editor", "/routes/" + routeId + "/archive", null);
         assertThat(archive.status()).isEqualTo(409);
@@ -206,10 +208,10 @@ class PromotionFlowTest extends AdminTestBase {
                 """);
         applied(promote("editor", "ROUTE", routeId, 1, "DEV", "DEPLOY", null));
 
-        JsonHttp.Response notDeployed = promote("editor", "ROUTE", routeId, null, "TEST", "DISABLE", null);
+        JsonHttp.Response notDeployed = promote("editor", "ROUTE", routeId, null, "PREPROD", "DISABLE", null);
         assertThat(notDeployed.status()).isEqualTo(422);
         assertThat(check(notDeployed.json(), "DEPLOYED_IN_TARGET").get("message").stringValue())
-                .isEqualTo("Subtask TEST ortamında yok");
+                .isEqualTo("Subtask PREPROD ortamında yok");
         JsonHttp.Response notDisabled = promote("editor", "ROUTE", routeId, null, "DEV", "ENABLE", null);
         assertThat(check(notDisabled.json(), "DEPLOYED_IN_TARGET").get("ok").booleanValue()).isFalse();
         JsonNode disabled = applied(promote("editor", "ROUTE", routeId, null, "DEV", "DISABLE", null));
@@ -227,7 +229,7 @@ class PromotionFlowTest extends AdminTestBase {
                  "definition": {"timeoutMs": 2000}, "version": 1}
                 """);
         applied(promote("editor", "ROUTE", routeId, 2, "DEV", "DEPLOY", null));
-        assertThat(promote("editor", "ROUTE", routeId, 2, "TEST", "ROLLBACK", null).json().get("checks").toString())
+        assertThat(promote("editor", "ROUTE", routeId, 2, "PREPROD", "ROLLBACK", null).json().get("checks").toString())
                 .contains("PREVIOUSLY_APPLIED");
         JsonNode rolledBack = applied(promote("editor", "ROUTE", routeId, 1, "DEV", "ROLLBACK", null));
         assertThat(rolledBack.get("action").stringValue()).isEqualTo("ROLLBACK");
@@ -244,7 +246,7 @@ class PromotionFlowTest extends AdminTestBase {
                  "definition": {}}
                 """);
         applied(promote("editor", "ROUTE", routeId, 1, "DEV", "DEPLOY", null));
-        applied(promote("editor", "ROUTE", routeId, 1, "TEST", "DEPLOY", null));
+        applied(promote("editor", "ROUTE", routeId, 1, "PREPROD", "DEPLOY", null));
 
         JsonHttp.Response prod = promote("lead", "ROUTE", routeId, 1, "PROD", "DEPLOY", "CHG-9");
         assertThat(prod.status()).isEqualTo(422);

@@ -21,7 +21,7 @@ spring:
     locations: classpath:db/migration/yapi_admin
     placeholders:
       dev_admin_api_url: ${YAPI_DEV_ADMIN_API_URL:https://yapi-env-admin.dev.internal:8443}
-      test_admin_api_url: ${YAPI_TEST_ADMIN_API_URL:https://yapi-env-admin.test.internal:8443}
+      preprod_admin_api_url: ${YAPI_PREPROD_ADMIN_API_URL:https://yapi-env-admin.preprod.internal:8443}
       prod_admin_api_url: ${YAPI_PROD_ADMIN_API_URL:https://yapi-env-admin.prod.internal:8443}
   # Şirket SSO'su (OIDC): SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUERURI ortam değişkeniyle verilir.
   # Burada boş varsayılan yok: boş issuer her token'ı reddeder, hiç verilmezse uygulama başlamaz.
@@ -74,7 +74,7 @@ yapi:
       # ortam başına ayrı adres gerekirse; boşsa koordinator.url
       urls:
         DEV: ${YAPI_DEV_AUTHORIZATION_URL:}
-        TEST: ${YAPI_TEST_AUTHORIZATION_URL:}
+        PREPROD: ${YAPI_PREPROD_AUTHORIZATION_URL:}
         PROD: ${YAPI_PROD_AUTHORIZATION_URL:}
     drift:
       cron: "0 23 2 * * *"

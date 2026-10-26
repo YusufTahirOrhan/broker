@@ -105,15 +105,15 @@ class CentralSchemaTest extends AdminTestBase {
                 VALUES (:id, 1, :target, :status, 'editor')
                 """;
 
-        jdbc.sql(route).param("id", routeId).param("target", "TEST").param("status", "APPLYING").update();
-        assertThatThrownBy(() -> jdbc.sql(route).param("id", routeId).param("target", "TEST")
+        jdbc.sql(route).param("id", routeId).param("target", "PREPROD").param("status", "APPLYING").update();
+        assertThatThrownBy(() -> jdbc.sql(route).param("id", routeId).param("target", "PREPROD")
                 .param("status", "PENDING_APPROVAL").update()).hasMessageContaining("UQ_PROMOTION_OPEN");
-        jdbc.sql(route).param("id", routeId).param("target", "TEST").param("status", "APPLIED").update();
-        jdbc.sql(route).param("id", routeId).param("target", "TEST").param("status", "FAILED").update();
+        jdbc.sql(route).param("id", routeId).param("target", "PREPROD").param("status", "APPLIED").update();
+        jdbc.sql(route).param("id", routeId).param("target", "PREPROD").param("status", "FAILED").update();
         jdbc.sql(route).param("id", routeId).param("target", "PROD").param("status", "PENDING_APPROVAL").update();
 
-        jdbc.sql(profile).param("id", profileId).param("target", "TEST").param("status", "APPROVED").update();
-        assertThatThrownBy(() -> jdbc.sql(profile).param("id", profileId).param("target", "TEST")
+        jdbc.sql(profile).param("id", profileId).param("target", "PREPROD").param("status", "APPROVED").update();
+        assertThatThrownBy(() -> jdbc.sql(profile).param("id", profileId).param("target", "PREPROD")
                 .param("status", "APPLYING").update()).hasMessageContaining("UQ_PROMOTION_OPEN_PROFILE");
         jdbc.sql(profile).param("id", profileId).param("target", "PROD").param("status", "APPLYING").update();
     }

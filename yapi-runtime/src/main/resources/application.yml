@@ -99,7 +99,7 @@ yapi:
     project-tag: maintask
     endpoint-tag: subtask
   test:
-    # Yalnızca DEV ve TEST'te açılır; ortam Admin API'si paylaşılan gizli anahtarla çağırır
+    # Yalnızca DEV ve PREPROD'da açılır; ortam Admin API'si paylaşılan gizli anahtarla çağırır
     enabled: ${YAPI_TEST_ENABLED:false}
     secret: ${YAPI_TEST_SECRET:}
 

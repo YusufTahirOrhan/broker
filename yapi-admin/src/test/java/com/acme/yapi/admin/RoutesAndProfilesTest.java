@@ -112,7 +112,7 @@ class RoutesAndProfilesTest extends AdminTestBase {
     void previewBuildsTheBackendRequestWithoutSaving() {
         long projectId = project("order-service", "ORDER", "P-100");
         JsonHttp.Response preview = post("editor", "/routes/preview", """
-                {"projectId": %d, "environment": "TEST", "httpMethod": "POST", "pathTemplate": "/orders/{id}/notes",
+                {"projectId": %d, "environment": "PREPROD", "httpMethod": "POST", "pathTemplate": "/orders/{id}/notes",
                  "definition": %s, "sample": {"siparisNo": 981, "notMetni": "Kapıya bırakın"},
                  "headers": {"Accept-Language": "tr-TR"}}
                 """.formatted(projectId, CoreFixtures.ADD_ORDER_NOTE));
@@ -120,7 +120,7 @@ class RoutesAndProfilesTest extends AdminTestBase {
         assertStatus(preview, 200);
         JsonNode request = preview.json().get("request");
         assertThat(request.get("url").stringValue())
-                .isEqualTo("http://order-service.test.svc:8080/orders/981/notes?notify=false");
+                .isEqualTo("http://order-service.preprod.svc:8080/orders/981/notes?notify=false");
         assertThat(request.get("headers").get("X-uid").stringValue()).isEqualTo("editor");
         assertThat(request.get("headers").get("Accept-Language").stringValue()).isEqualTo("tr-TR");
         assertThat(request.get("body").get("authorId").stringValue()).isEqualTo("editor");

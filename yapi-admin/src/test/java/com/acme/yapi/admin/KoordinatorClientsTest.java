@@ -41,12 +41,12 @@ class KoordinatorClientsTest {
         FakeHttpServer own = FakeHttpServer.start();
         own.json("GET", "/permissions", 200, "[]");
         try {
-            AuthorizationService permissions = new HttpAuthorizationService(Map.of("TEST", "", "PROD", own.baseUrl()),
+            AuthorizationService permissions = new HttpAuthorizationService(Map.of("PREPROD", "", "PROD", own.baseUrl()),
                     settings);
 
             assertThat(permissions.list("DEV", "ORDER")).extracting(AuthorizationService.Permission::code)
                     .containsExactly("ORDER_READ");
-            assertThat(permissions.list("TEST", "ORDER")).hasSize(1);
+            assertThat(permissions.list("PREPROD", "ORDER")).hasSize(1);
             assertThat(permissions.list("PROD", "ORDER")).isEmpty();
             assertThat(koordinator.requests("/permissions")).hasSize(2)
                     .allSatisfy(request -> assertThat(request.header("X-Api-Key")).isEqualTo("k1"));

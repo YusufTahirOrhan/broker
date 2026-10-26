@@ -52,7 +52,7 @@ class SsoTokenTest {
         registry.add("spring.security.oauth2.resourceserver.jwt.public-key-location", () -> pem.toUri().toString());
         CentralDatabase.register(registry);
         registry.add("spring.flyway.placeholders.dev_admin_api_url", () -> AdminTestBase.ENVIRONMENTS.url("dev"));
-        registry.add("spring.flyway.placeholders.test_admin_api_url", () -> AdminTestBase.ENVIRONMENTS.url("test"));
+        registry.add("spring.flyway.placeholders.preprod_admin_api_url", () -> AdminTestBase.ENVIRONMENTS.url("preprod"));
         registry.add("spring.flyway.placeholders.prod_admin_api_url", () -> AdminTestBase.ENVIRONMENTS.url("prod"));
     }
 

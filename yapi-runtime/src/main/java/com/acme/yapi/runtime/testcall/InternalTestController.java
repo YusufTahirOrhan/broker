@@ -55,7 +55,7 @@ import tools.jackson.databind.node.ObjectNode;
 /**
  * Test calls with an unsaved definition, through the same validator, request builder and forwarder as real traffic:
  * a separate code path would test that code, not the broker. Exists only where {@code yapi.test.enabled} is set
- * (DEV, TEST) and answers only callers with the shared secret, i.e. the environment's Admin API. Test calls are not
+ * (DEV, PREPROD) and answers only callers with the shared secret, i.e. the environment's Admin API. Test calls are not
  * written to Kafka; the central admin audits them.
  */
 @RestController

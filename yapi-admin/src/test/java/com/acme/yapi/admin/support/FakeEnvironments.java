@@ -21,7 +21,7 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
- * The three environments' Admin APIs in memory, behind one server ({@code /dev}, {@code /test}, {@code /prod}), with
+ * The three environments' Admin APIs in memory, behind one server ({@code /dev}, {@code /preprod}, {@code /prod}), with
  * the behaviour the central admin relies on: promotion IDs make applies idempotent and refuse older requests, a
  * route needs its project and profile in the environment.
  */
@@ -51,7 +51,7 @@ public final class FakeEnvironments implements AutoCloseable {
 
     private final FakeHttpServer server = FakeHttpServer.start();
     private final Map<String, Environment> environments = new ConcurrentHashMap<>(Map.of(
-            "dev", new Environment(), "test", new Environment(), "prod", new Environment()));
+            "dev", new Environment(), "preprod", new Environment(), "prod", new Environment()));
 
     public FakeEnvironments() {
         server.otherwise(this::dispatch);

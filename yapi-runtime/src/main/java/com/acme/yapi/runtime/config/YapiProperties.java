@@ -13,7 +13,7 @@ import com.acme.yapi.core.runtime.RuntimeSignals;
 import com.acme.yapi.core.session.SessionRecordCodec;
 
 /**
- * @param environment     DEV, TEST or PROD; written to every log event
+ * @param environment     DEV, PREPROD or PROD; written to every log event
  * @param instanceId      this instance's name in {@code yapi:loaded:*}; the pod name ({@code HOSTNAME}) by default
  * @param readableHeaders frontend headers that {@code ${header.*}} may read
  * @param logSink         {@code kafka}, or {@code console} for local development
@@ -166,7 +166,7 @@ public record YapiProperties(String environment, String instanceId, List<String>
         }
     }
 
-    /** The internal test endpoint the environment Admin API calls; enabled only in DEV and TEST. */
+    /** The internal test endpoint the environment Admin API calls; enabled only in DEV and PREPROD. */
     public record Test(boolean enabled, String secret) {
     }
 

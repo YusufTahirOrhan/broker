@@ -56,7 +56,7 @@ yapi:
       connect-timeout: 2s
       request-timeout: 10s
     test:
-      # yalnızca test çağrısına açık ortamlarda (DEV, TEST); PROD'da kapalı kalır
+      # yalnızca test çağrısına açık ortamlarda (DEV, PREPROD); PROD'da kapalı kalır
       enabled: ${YAPI_ENV_ADMIN_TEST_ENABLED:false}
       yapi-url: ${YAPI_INTERNAL_URL:}
       secret: ${YAPI_TEST_SECRET:}

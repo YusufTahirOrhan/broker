@@ -25,7 +25,7 @@ import tools.jackson.databind.JsonNode;
 /**
  * {@code yapi-local.json} on top of DEV's routes, only in the {@code local} profile: {@code baseUrls} sends a
  * project's calls to the developer's machine, {@code routes} adds or replaces subtasks in the central definition's
- * format. The file is watched; a change needs no restart. This bean never exists in DEV, TEST or PROD.
+ * format. The file is watched; a change needs no restart. This bean never exists in DEV, PREPROD or PROD.
  */
 @Component
 @Profile("local")

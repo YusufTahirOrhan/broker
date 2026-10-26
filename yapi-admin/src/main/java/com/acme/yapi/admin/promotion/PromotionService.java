@@ -247,8 +247,8 @@ public class PromotionService {
                     ? target.code() + " ilk ortam" : target.code() + ", " + source.get().code() + " ortamının hemen sonrası"));
             if (source.isPresent()) {
                 boolean active = activeIn(subject, version, source.get().code());
-                checks.add(new Check("SOURCE_ACTIVE", active, "v" + version + " " + source.get().code() + "'"
-                        + (active ? "te aktif" : "te aktif değil; yalnızca bir önceki ortamda aktif versiyon taşınır")));
+                checks.add(new Check("SOURCE_ACTIVE", active, "v" + version + " " + source.get().code() + " ortamında "
+                        + (active ? "aktif" : "aktif değil; yalnızca bir önceki ortamda aktif versiyon taşınır")));
             }
         }
         Optional<Long> open = promotions.open(subject.route(), subject.id(), target.code());

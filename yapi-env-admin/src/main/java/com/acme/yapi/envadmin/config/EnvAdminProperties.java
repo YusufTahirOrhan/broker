@@ -9,7 +9,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import com.acme.yapi.core.runtime.RuntimeSignals;
 
 /**
- * @param environment            code of this environment (DEV, TEST, PROD); returned in listings
+ * @param environment            code of this environment (DEV, PREPROD, PROD); returned in listings
  * @param allowedClientSubjects  certificate subjects (RFC 2253) allowed to call; empty accepts any certificate the
  *                               trust store accepts
  */
@@ -49,7 +49,7 @@ public record EnvAdminProperties(String environment, Signals signals, Upstream u
 
     /**
      * Test calls, forwarded to the broker's internal endpoint. Enabled only in environments that allow test calls
-     * (DEV, TEST); in PROD a POST would create real records.
+     * (DEV, PREPROD); in PROD a POST would create real records.
      */
     public record Test(boolean enabled, String yapiUrl, String secret, Duration timeout) {
         public Test {

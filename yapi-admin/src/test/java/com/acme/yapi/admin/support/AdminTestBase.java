@@ -26,7 +26,7 @@ import com.acme.yapi.core.testing.JsonHttp;
         "yapi.admin.catalog.projects.P-300=CRM",
         "yapi.admin.catalog.projects.P-400=İnsan Kaynakları",
         "yapi.admin.authorization.permissions.DEV=ORDER_READ,ORDER_WRITE,LOGPROJECT_TEMEL,CRM_AGENT",
-        "yapi.admin.authorization.permissions.TEST=ORDER_READ,ORDER_WRITE,LOGPROJECT_TEMEL,CRM_AGENT",
+        "yapi.admin.authorization.permissions.PREPROD=ORDER_READ,ORDER_WRITE,LOGPROJECT_TEMEL,CRM_AGENT",
         "yapi.admin.authorization.permissions.PROD=ORDER_READ,ORDER_WRITE,CRM_AGENT",
         "yapi.admin.local.seed=false"
 })
@@ -39,7 +39,7 @@ public abstract class AdminTestBase {
     static void properties(DynamicPropertyRegistry registry) {
         CentralDatabase.register(registry);
         registry.add("spring.flyway.placeholders.dev_admin_api_url", () -> ENVIRONMENTS.url("dev"));
-        registry.add("spring.flyway.placeholders.test_admin_api_url", () -> ENVIRONMENTS.url("test"));
+        registry.add("spring.flyway.placeholders.preprod_admin_api_url", () -> ENVIRONMENTS.url("preprod"));
         registry.add("spring.flyway.placeholders.prod_admin_api_url", () -> ENVIRONMENTS.url("prod"));
     }
 
@@ -82,7 +82,7 @@ public abstract class AdminTestBase {
                 """.formatted(externalId == null ? "null" : "\"" + externalId + "\"", maintask, prefix));
         assertStatus(created, 201);
         long id = created.json().get("id").longValue();
-        for (String environment : java.util.List.of("DEV", "TEST", "PROD")) {
+        for (String environment : java.util.List.of("DEV", "PREPROD", "PROD")) {
             assertStatus(put("lead", "/projects/" + id + "/environments/" + environment, """
                     {"baseUrl": "http://%s.%s.svc:8080", "enabled": true}
                     """.formatted(maintask, environment.toLowerCase(java.util.Locale.ROOT))), 200);

@@ -6,12 +6,12 @@
 -- `comment` (ayrılmış kelime) kolonları change_note.
 
 CREATE TABLE environment (
-    code                VARCHAR2(16 CHAR)  NOT NULL,              -- DEV, TEST, PROD
+    code                VARCHAR2(16 CHAR)  NOT NULL,              -- DEV, PREPROD, PROD
     name                VARCHAR2(64 CHAR)  NOT NULL,
     sort_order          NUMBER(5)          NOT NULL,              -- promote sırası: 1 → 2 → 3
     admin_api_url       VARCHAR2(512 CHAR) NOT NULL,              -- ortamdaki yönetim API'si
     requires_approval   NUMBER(1)          DEFAULT 0 NOT NULL,    -- PROD için 1
-    test_calls_allowed  NUMBER(1)          DEFAULT 0 NOT NULL,    -- "test et" yalnızca DEV/TEST
+    test_calls_allowed  NUMBER(1)          DEFAULT 0 NOT NULL,    -- "test et" yalnızca DEV/PREPROD
     CONSTRAINT pk_environment PRIMARY KEY (code),
     CONSTRAINT uq_environment_order UNIQUE (sort_order),
     CONSTRAINT ck_environment_approval CHECK (requires_approval IN (0, 1)),

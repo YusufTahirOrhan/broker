@@ -6,7 +6,7 @@ Bu rehber, broker yönetim ekranlarını geliştirecek frontend için ekranları
 
 ## Genel bakış
 
-Yapi Admin, DevOps'un subtask'leri, yetkileri ve yanıt profillerini kod yazmadan tanımladığı ve DEV → TEST → PROD sırasıyla taşıdığı yönetim ekranıdır. Ekran yalnızca merkezi admin backend'iyle (`yapi-admin`) konuşur; ortamlara, broker'lara ve proje servisine backend bağlanır.
+Yapi Admin, DevOps'un subtask'leri, yetkileri ve yanıt profillerini kod yazmadan tanımladığı ve DEV → PREPROD → PROD sırasıyla taşıdığı yönetim ekranıdır. Ekran yalnızca merkezi admin backend'iyle (`yapi-admin`) konuşur; ortamlara, broker'lara ve proje servisine backend bağlanır.
 
 - **Ekrandan yapılanlar:** Proje kaydı ve ortam adresleri, proje yetkileri, subtask tanımı (servisin spec'inden, yapıştırılan bir istekten ya da elle), yanıt profilleri, test çağrısı, versiyon geçmişi ve geri alma, taşıma talebi ve onay.
 - **Ekranın dışında kalanlar:** Kullanıcılara yetki atamak yetkilendirme servisinde kalır. Uygulamaların broker trafiği ve logları bu ekrandan geçmez.
@@ -15,7 +15,7 @@ Yapi Admin, DevOps'un subtask'leri, yetkileri ve yanıt profillerini kod yazmada
 | Rol | Ne yapabilir |
 | --- | --- |
 | İzleyici (`VIEWER`) | Her şeyi görür, hiçbir şeyi değiştiremez |
-| Düzenleyen (`ROUTE_EDITOR`) | Proje, subtask ve profil tanımlar; test eder; DEV'e doğrudan uygular, TEST ve PROD için taşıma talebi açar; kendi talebini iptal eder |
+| Düzenleyen (`ROUTE_EDITOR`) | Proje, subtask ve profil tanımlar; test eder; DEV'e doğrudan uygular, PREPROD ve PROD için taşıma talebi açar; kendi talebini iptal eder |
 | Onaylayan (`APPROVER`) | Onay isteyen talepleri (PROD'a her taşıma, hangi ortamda olursa olsun anonim erişimin açılması) onaylar ya da reddeder; kendi açtığı talebi onaylayamaz |
 
 Roller şirketin SSO'sundaki ya da yetkilendirme servisindeki gruplardan gelir; bir kullanıcı birden fazla role sahip olabilir. Ekran, hangi düğmelerin görüneceğine `GET /api/v1/me` yanıtındaki rollere bakarak karar verir; backend aynı kuralı ayrıca uygular.
@@ -23,7 +23,7 @@ Roller şirketin SSO'sundaki ya da yetkilendirme servisindeki gruplardan gelir; 
 | Ortam | Taşıma sırası | Onay | Test çağrısı |
 | --- | --- | --- | --- |
 | DEV | 1 | Yok; talep hemen uygulanır | Açık |
-| TEST (PREPROD) | 2 | Yok; talep hemen uygulanır | Açık |
+| PREPROD | 2 | Yok; talep hemen uygulanır | Açık |
 | PROD | 3 | Zorunlu, dört göz kuralıyla | Kapalı |
 
 Ortamlar, sıraları, onay ve test ayarları sabit kodlanmaz; ekran bunları `GET /api/v1/environments` yanıtından okur.
@@ -58,7 +58,7 @@ Sekmeler: Genel, Ortamlar, Yetkiler, Subtask'ler ve Spec.
 - **Genel:** Görünen ad, takım, açıklama ve varsayılan yanıt profili (`PATCH /projects/{id}`). Varsayılan profil yeni subtask formunda ön seçim olur.
 - **Ortamlar:** Ortam başına base URL, spec yolu ve açık/kapalı (`PUT /projects/{id}/environments/{env}`). Kayıt o ortama hemen uygulanır; ortama ulaşılamazsa 502 `ENV_UNREACHABLE` döner ve hiçbir şey değişmez. Onay isteyen ortamda (PROD) bu ayarı yalnızca `APPROVER` değiştirebilir.
 - **Yetkiler:** Projenin yetkileri seçilen ortamın yetkilendirme servisinden listelenir (`GET /projects/{id}/permissions?env=DEV`). "Yetki ekle" yalnızca son eki sorar, önek sabit gösterilir: `LOGPROJECT_` + `MODERATOR` (`POST /projects/{id}/permissions`). Her yetkinin yanında onu kullanan subtask sayısı durur; tıklanınca liste açılır (`GET /permissions/{code}/routes`).
-- **Subtask'ler:** Liste (`GET /projects/{id}/routes`) ve her satırda ortam rozetleri: `DEV v4 · TEST v4 · PROD v3`. Rozet, güncel versiyonun aktif olduğunu, eski bir versiyonun aktif olduğunu, `DISABLED` olduğunu ya da hiç taşınmadığını ayırt etmelidir.
+- **Subtask'ler:** Liste (`GET /projects/{id}/routes`) ve her satırda ortam rozetleri: `DEV v4 · PREPROD v4 · PROD v3`. Rozet, güncel versiyonun aktif olduğunu, eski bir versiyonun aktif olduğunu, `DISABLED` olduğunu ya da hiç taşınmadığını ayırt etmelidir.
 
 ### Subtask editörü
 
@@ -74,7 +74,7 @@ Yeni ve mevcut subtask aynı formu kullanır (`POST /projects/{id}/routes`, `PUT
 
 - **Anlık doğrulama:** Form değiştikçe (yaklaşık 500 ms bekleyerek) `POST /routes/validate` çağrılır. Dönen `errors[].field` yolu forma eşlenir, örneğin `definition.request.pathVariables.id`. Aynı doğrulama kayıtta da çalışır.
 - **Önizleme:** Örnek bir frontend gövdesiyle servise gidecek isteği (method, URL, header'lar, body) kaydetmeden gösterir (`POST /routes/preview`).
-- **Test:** Yalnızca test çağrısına açık ortamlarda (DEV, TEST) görünür ve kaydedilmemiş tanımla gerçek istek atar (`POST /projects/{id}/test`). Sonuçta üretilen istek, servisin yanıtı (status, header'lar, body, süre), profil varsa frontend'in alacağı zarflı yanıt ve backend'in yorumu gösterilir.
+- **Test:** Yalnızca test çağrısına açık ortamlarda (DEV, PREPROD) görünür ve kaydedilmemiş tanımla gerçek istek atar (`POST /projects/{id}/test`). Sonuçta üretilen istek, servisin yanıtı (status, header'lar, body, süre), profil varsa frontend'in alacağı zarflı yanıt ve backend'in yorumu gösterilir.
 - **Yoklama:** "Endpoint var mı?" düğmesi OPTIONS yoklaması yapar (`POST /projects/{id}/probe`): `OK`, `WRONG_METHOD`, `PATH_NOT_FOUND` ya da `INCONCLUSIVE`.
 - **Çakışma:** Başkası aynı subtask'i kaydettiyse `PUT` 409 `VERSION_CONFLICT` döner. Ekran kullanıcının değişikliklerini kaybetmeden güncel hali yükler ve farkı gösterir.
 - **JSON'dan içe aktar:** Yerel broker'ın `yapi-local.json` dosyasındaki bir route forma yüklenir. `permissions` önekle ayrılır: projenin önekiyle başlayanlar proje yetkisine, diğerleri başka projeden yetkiye gider. `responseProfile` adı profil listesinden ID'ye çevrilir.
@@ -336,7 +336,7 @@ Gövde `fields` tanımına uymazsa istek gönderilmez: `outcome` `INVALID_REQUES
   "subjectId": 17,
   "subjectName": "order-service / get_order",
   "version": 4,
-  "sourceEnv": "TEST",
+  "sourceEnv": "PREPROD",
   "targetEnv": "PROD",
   "action": "DEPLOY",
   "status": "PENDING_APPROVAL",
@@ -370,7 +370,7 @@ Gövde `fields` tanımına uymazsa istek gönderilmez: `outcome` `INVALID_REQUES
   "code": "PRECHECK_FAILED",
   "detail": "Talep açılamadı: 1 kontrol geçmedi.",
   "checks": [
-    { "check": "SOURCE_ACTIVE", "ok": true, "message": "v4 TEST'te aktif" },
+    { "check": "SOURCE_ACTIVE", "ok": true, "message": "v4 PREPROD ortamında aktif" },
     { "check": "PERMISSIONS_EXIST", "ok": false, "message": "PROD yetkilendirme servisinde yok: ORDER_WRITE" }
   ]
 }
@@ -525,6 +525,7 @@ Backend geliştirildikçe bu tablo güncellenir; en yeni kayıt en üsttedir. Bi
 
 | Tarih | Değişiklik |
 | --- | --- |
+| 2026-10-26 | Ortamlar DEV, PREPROD, PROD: TEST'in kodu `PREPROD` oldu (`GET /environments`, `env` parametreleri, taşıma talepleri, rozetler). Ön kontrol mesajı "v4 PREPROD ortamında aktif" biçiminde. |
 | 2026-10-26 | Ad değişikliği: proje Yapi, ekranın adı Yapi Admin. Merkezi admin `yapi-admin`, yerel broker'ın dosyası `yapi-local.json`, CORS ayarı `yapi.admin.cors.allowed-origins`. Admin API'nin yolları, gövdeleri ve hata kodları değişmedi. |
 | 2026-10-16 | Yeni yer tutucu `${user.permission}`: kullanıcıda olan ilk route yetkisi (önce `permissions`, sonra `foreignPermissions`). Önizleme ve test gövdesi isteğe bağlı `permissions` ve `foreignPermissions` alır; `definition-rules`'daki `placeholders.definition` yeni yer tutucuyu listeler |
 | 2026-10-16 | Swagger ve OpenAPI yalnızca `local` ve `dev` profillerinde açık. Yerel çalıştırma `docs/local-run.md`'de: admin API `local` profilinde DEV Oracle'daki yerel bir şemaya bağlanır ve boş şemayı örnek veriyle doldurur |
