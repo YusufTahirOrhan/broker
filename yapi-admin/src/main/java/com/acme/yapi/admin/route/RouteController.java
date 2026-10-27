@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.RestController;
 import com.acme.yapi.admin.db.Versions;
 import com.acme.yapi.admin.security.CurrentUser;
 import com.acme.yapi.admin.security.Role;
+import com.acme.yapi.admin.web.ApiException;
+import com.acme.yapi.core.validation.FieldError;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -34,6 +36,17 @@ public class RouteController {
                                            @RequestParam(required = false) String query) {
         currentUser.get();
         return routes.list(projectId, status, query);
+    }
+
+    /** Across projects; only {@code alarmService=true} is supported, for the alarm route pickers. */
+    @GetMapping("/routes")
+    public List<RouteService.Summary> listAcrossProjects(@RequestParam(required = false) String alarmService) {
+        currentUser.get();
+        if (!"true".equalsIgnoreCase(alarmService)) {
+            throw ApiException.validation(
+                    List.of(new FieldError("alarmService", "Şimdilik yalnızca alarmService=true destekleniyor")));
+        }
+        return routes.alarmServices();
     }
 
     @PostMapping("/projects/{projectId}/routes")

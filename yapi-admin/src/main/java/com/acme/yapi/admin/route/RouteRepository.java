@@ -87,6 +87,14 @@ public class RouteRepository {
                 .query(RouteRepository::row).list();
     }
 
+    /** Active subtasks whose current definition has an {@code alarmService} key; a null value is the caller's call. */
+    private static final String ALARM_SERVICE = "r.status = 'ACTIVE' AND JSON_EXISTS(r.definition, '$.alarmService')";
+
+    public List<Row> alarmServices() {
+        return jdbc.sql(SELECT + " WHERE " + ALARM_SERVICE + " ORDER BY p.maintask, r.subtask")
+                .query(RouteRepository::row).list();
+    }
+
     public Optional<Row> find(long id) {
         return jdbc.sql(SELECT + " WHERE r.id = :id").param("id", id).query(RouteRepository::row).optional();
     }
@@ -255,6 +263,12 @@ public class RouteRepository {
                         WHERE r.project_id = :project ORDER BY e.sort_order
                         """)
                 .param("project", projectId)
+                .query(RouteRepository::deployment).list();
+    }
+
+    public List<Deployment> deploymentsOfAlarmServices() {
+        return jdbc.sql(DEPLOYMENTS + " JOIN route_definition r ON r.id = d.definition_id WHERE " + ALARM_SERVICE
+                        + " ORDER BY e.sort_order")
                 .query(RouteRepository::deployment).list();
     }
 

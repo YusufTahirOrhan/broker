@@ -76,10 +76,11 @@ public class RouteService {
                                  Instant activatedAt, String lastProbeStatus, Instant lastProbeAt) {
     }
 
+    /** @param alarmService whether the current version is an alarm service route ({@code definition.alarmService}) */
     public record Summary(long id, long projectId, String maintask, String subtask, String httpMethod,
                           String pathTemplate, List<String> permissions, List<String> foreignPermissions,
-                          boolean anonymous, ProfileRef responseProfile, String status, int version, String updatedBy,
-                          Instant updatedAt, List<DeploymentView> deployments) {
+                          boolean anonymous, ProfileRef responseProfile, boolean alarmService, String status,
+                          int version, String updatedBy, Instant updatedAt, List<DeploymentView> deployments) {
     }
 
     public record View(long id, long projectId, String maintask, String subtask, String httpMethod,
@@ -96,11 +97,32 @@ public class RouteService {
             deployments.computeIfAbsent(deployment.definitionId(), id -> new ArrayList<>()).add(view(deployment));
         }
         return routes.list(projectId, status, query).stream()
-                .map(row -> new Summary(row.id(), row.projectId(), row.maintask(), row.subtask(), row.httpMethod(),
-                        row.pathTemplate(), row.permissions(), row.foreignPermissions(), row.anonymous(),
-                        profileRef(row), row.status(), row.version(), row.updatedBy(), row.updatedAt(),
-                        deployments.getOrDefault(row.id(), List.of())))
+                .map(row -> summary(row, deployments.getOrDefault(row.id(), List.of())))
                 .toList();
+    }
+
+    /** The alarm service routes of every project, for the alarm route pickers; archived ones are left out. */
+    public List<Summary> alarmServices() {
+        Map<Long, List<DeploymentView>> deployments = new HashMap<>();
+        for (RouteRepository.Deployment deployment : routes.deploymentsOfAlarmServices()) {
+            deployments.computeIfAbsent(deployment.definitionId(), id -> new ArrayList<>()).add(view(deployment));
+        }
+        return routes.alarmServices().stream()
+                .filter(RouteService::isAlarmService)
+                .map(row -> summary(row, deployments.getOrDefault(row.id(), List.of())))
+                .toList();
+    }
+
+    /** As the parser reads it: an {@code alarmService} object; a JSON {@code null} there is no alarm service. */
+    private static boolean isAlarmService(RouteRepository.Row row) {
+        JsonNode alarmService = row.definition() == null ? null : row.definition().get("alarmService");
+        return alarmService != null && alarmService.isObject();
+    }
+
+    private Summary summary(RouteRepository.Row row, List<DeploymentView> deployments) {
+        return new Summary(row.id(), row.projectId(), row.maintask(), row.subtask(), row.httpMethod(),
+                row.pathTemplate(), row.permissions(), row.foreignPermissions(), row.anonymous(), profileRef(row),
+                isAlarmService(row), row.status(), row.version(), row.updatedBy(), row.updatedAt(), deployments);
     }
 
     public View get(long id) {
