@@ -98,6 +98,16 @@ class AlarmTest {
                 """)).containsExactly("definition.request.body.template.v");
     }
 
+    @Test
+    void onlyAnObjectMakesAnAlarmService() {
+        assertThat(RouteDefinitionParser.isAlarmService(Json.parse("{\"alarmService\": {}}"))).isTrue();
+        assertThat(RouteDefinitionParser.isAlarmService(Json.parse("{\"alarmService\": null}"))).isFalse();
+        assertThat(RouteDefinitionParser.isAlarmService(Json.parse("{}"))).isFalse();
+        assertThat(RouteDefinitionParser.isAlarmService(null)).isFalse();
+        assertThat(RouteDefinitionParser.parse(Json.parse("{\"alarmService\": null}")).definition().isAlarmService())
+                .isFalse();
+    }
+
     private static List<String> fields(String definition) {
         return RouteValidator.validate("POST", "/a", Json.parse(definition), RouteValidator.Context.anyHeader())
                 .stream().map(FieldError::field).toList();

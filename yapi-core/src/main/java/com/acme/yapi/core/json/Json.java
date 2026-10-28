@@ -136,6 +136,15 @@ public final class Json {
         return value != null && value.isString() ? value.stringValue() : null;
     }
 
+    /** A field whose value is a JSON object, or null when it is absent, null or anything else. */
+    public static ObjectNode objectField(JsonNode node, String field) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        JsonNode value = node.get(field);
+        return value != null && value.isObject() ? (ObjectNode) value : null;
+    }
+
     public static List<String> fieldNames(JsonNode node) {
         List<String> names = new ArrayList<>();
         if (node != null && node.isObject()) {

@@ -26,6 +26,7 @@ import com.acme.yapi.admin.security.User;
 import com.acme.yapi.admin.web.ApiException;
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.route.AlarmRoute;
+import com.acme.yapi.core.route.RouteDefinitionParser;
 import com.acme.yapi.core.validation.FieldError;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -319,7 +320,7 @@ public class PromotionService {
      */
     private Optional<Check> alarmCheck(Subject subject, Environment target) {
         JsonNode definition = subject.snapshot().path("definition");
-        if (definition.has("alarmService")) {
+        if (RouteDefinitionParser.isAlarmService(definition)) {
             return Optional.empty();
         }
         String check = Json.text(definition.path("alarm").get("check"));
@@ -346,7 +347,8 @@ public class PromotionService {
         Optional<RouteRepository.Deployment> deployed = routes.deployment(route.get().id(), target.code())
                 .filter(deployment -> "ACTIVE".equals(deployment.status()));
         boolean service = deployed.flatMap(deployment -> routes.history(route.get().id(), deployment.version()))
-                .map(history -> history.snapshot().path("definition").has("alarmService")).orElse(false);
+                .map(history -> RouteDefinitionParser.isAlarmService(history.snapshot().get("definition")))
+                .orElse(false);
         return Optional.of(new Check("ALARM_ROUTE_ACTIVE", deployed.isPresent() && service, deployed.isEmpty()
                 ? "Alarm route'u " + name + " " + target.code() + " ortamında aktif değil; önce o taşınmalı"
                 : service ? "Alarm route'u " + name + " v" + deployed.get().version() + " " + target.code()

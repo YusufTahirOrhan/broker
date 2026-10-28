@@ -48,6 +48,14 @@ public final class RouteDefinitionParser {
         }
     }
 
+    /**
+     * Whether a stored definition is an alarm service route: its {@code alarmService} is an object. A JSON
+     * {@code null} there is not one, as {@link #parse} reads it; screens, prechecks and the broker decide alike.
+     */
+    public static boolean isAlarmService(JsonNode definition) {
+        return Json.objectField(definition, "alarmService") != null;
+    }
+
     public static Parsed parse(JsonNode node) {
         List<FieldError> errors = new ArrayList<>();
         if (node == null || !node.isObject()) {

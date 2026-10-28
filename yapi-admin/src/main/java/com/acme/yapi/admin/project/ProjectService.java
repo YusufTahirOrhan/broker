@@ -26,6 +26,7 @@ import com.acme.yapi.admin.web.ApiException;
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.naming.Names;
 import com.acme.yapi.core.route.AlarmRoute;
+import com.acme.yapi.core.route.RouteDefinitionParser;
 import com.acme.yapi.core.validation.FieldError;
 
 import tools.jackson.databind.JsonNode;
@@ -252,7 +253,7 @@ public class ProjectService {
                     + requested.subtask()));
             return null;
         }
-        if (route.get().definition() == null || !route.get().definition().has("alarmService")) {
+        if (!RouteDefinitionParser.isAlarmService(route.get().definition())) {
             errors.add(new FieldError("alarmRoute", "Alarm servisi route'u değil: " + route.get().maintask() + "/"
                     + route.get().subtask()));
             return null;

@@ -113,10 +113,9 @@ public class RouteService {
                 .toList();
     }
 
-    /** As the parser reads it: an {@code alarmService} object; a JSON {@code null} there is no alarm service. */
+    /** As the parser reads it ({@link RouteDefinitionParser#isAlarmService}). */
     private static boolean isAlarmService(RouteRepository.Row row) {
-        JsonNode alarmService = row.definition() == null ? null : row.definition().get("alarmService");
-        return alarmService != null && alarmService.isObject();
+        return RouteDefinitionParser.isAlarmService(row.definition());
     }
 
     private Summary summary(RouteRepository.Row row, List<DeploymentView> deployments) {

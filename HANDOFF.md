@@ -26,6 +26,7 @@ Maddeler sırayla yapılır; her biri kendi commit'inde biter, her push'tan önc
 - `ProjectService.alarmRoute` ve `PromotionService.alarmCheck`'teki iki yer `has("alarmService")` yerine parser'ın kararını kullanır: yalnızca nesne olan `alarmService` alarm servisidir. Karar tek bir yerde toplanır; PR #3'teki `RouteService.isAlarmService` ile aynı fonksiyondur.
 - `RouteService.isAlarmService` Jackson ağaç API'sini doğrudan kullanıyor; `Json` yardımcılarına taşınır.
 - Test: `"alarmService": null` olan route ortam ayarında 400 alır, ön kontrolde `ALARM_ROUTE_ACTIVE` geçmez.
+- **Yapıldı (2026-10-28):** Karar core'da tek yerde: `RouteDefinitionParser.isAlarmService(definition)` (`Json.objectField` ile; parser'ın `parse` sonucu da aynı kuralla, `RouteDefinition.isAlarmService()`). Admin'de `RouteService` (liste), `ProjectService.alarmRoute` (ortam ayarı) ve `PromotionService.alarmCheck` (subtask'in kendisi ve hedefteki alarm route'unun versiyonu) bunu kullanır. Yeni yardımcı `Json.objectField(node, field)`. Testler: `AlarmTest.onlyAnObjectMakesAnAlarmService`, `PromotionFlowTest.aNullAlarmServiceIsNotAnAlarmService` (ortam ayarında 400, `ALARM_ROUTE_ACTIVE` "versiyonunda alarm servisi değil"). Admin API sözleşmesi değişmedi.
 
 ### 2. Reddedilen istekler ayrı indekse
 
@@ -574,6 +575,7 @@ Derlemede doğrulandı (Boot 4.1.1, Spring Framework 7.0, Jackson 3.1, Kafka 4.2
 Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya yazılır; canlı doküman buradan güncellenir.
 
 - 2026-10-16 turunun maddeleri canlı dokümana işlendi (rev 180).
+- **`alarmService: null` (2026-10-28, 1):** Alarm servisi yalnızca tanımında `alarmService` bir nesne olan route'tur; `null` alarm servisi değildir. Ortam ayarı, ön kontrol, alarm servisi listesi ve broker aynı kuralı uygular.
 - 2026-10-26 turunun kararları (ad, ortamlar, Koordinatör, magic key, admin girişi, kullanıcı ayarları, alarm) ve uygulanırken netleşenlerin hepsi canlı dokümana işlendi (rev 191): yeni "Alarm kontrolü" bölümü, giriş ve oturumda magic key, Koordinatör uçları ve kullanıcı ayarları, admin girişi "Güvenlik ve yönetişim"de, şemalarda alarm kolonları, `yapi` adları, ortam Admin API'sinde `sessions/verify`, alarm dokümanı, geçiş planında pilot ve elle tanımlama. Açık kalanlar dokümanın "Açık kararlar ve varsayımlar" listesinde.
 
 ## Açık noktalar
