@@ -362,6 +362,40 @@ class YapiFlowTest {
     }
 
     @Test
+    void profileCasesSeeTheServicesFieldsHeadersAndStatus() {
+        RuntimeFixture.profile("cased", 1, """
+                {"success": {
+                   "cases": [{"when": [{"value": "${backend.body.status-code}", "exists": true}],
+                              "httpStatus": 200, "body": {"status": "${backend.body.status-code}",
+                                                          "message": "${backend.body.message}",
+                                                          "trace": "${backend.header.X-Trace}"}}],
+                   "httpStatus": 200, "body": {"status": 200, "data": "${backend.body}"}},
+                 "error": {"httpStatus": "${backend.status}",
+                           "body": {"status": "${backend.status}", "reason": "Hata: ${backend.body}"}}}
+                """);
+        RuntimeFixture.route("LogProject", "get_case", "GET", "/cases/{id}", List.of("LOGPROJECT_TEMEL"), false,
+                "cased", """
+                {"request": {"fields": [{"name": "id", "type": "integer", "required": true}],
+                             "pathVariables": {"id": "${request.id}"}}}
+                """);
+        cache.reload();
+        backend.on("GET", "/cases/1", (exchange, request) -> FakeHttpServer.respond(exchange, 200,
+                Map.of("Content-Type", "application/json", "X-Trace", "t-1"),
+                "{\"status-code\": 7}".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        backend.json("GET", "/cases/2", 200, "{\"id\": 2}");
+        backend.json("GET", "/cases/3", 404, "{\"code\": \"YOK\"}");
+
+        JsonHttp.Response flagged = yapi("tok-1", "{\"maintask\": \"LogProject\", \"subtask\": \"get_case\", \"id\": 1}");
+        assertThat(flagged.status()).isEqualTo(200);
+        assertThat(flagged.json()).isEqualTo(Json.parse("{\"status\": 7, \"message\": null, \"trace\": \"t-1\"}"));
+        assertThat(yapi("tok-1", "{\"maintask\": \"LogProject\", \"subtask\": \"get_case\", \"id\": 2}").json())
+                .isEqualTo(Json.parse("{\"status\": 200, \"data\": {\"id\": 2}}"));
+        JsonHttp.Response missing = yapi("tok-1", "{\"maintask\": \"LogProject\", \"subtask\": \"get_case\", \"id\": 3}");
+        assertThat(missing.status()).isEqualTo(404);
+        assertThat(missing.json()).isEqualTo(Json.parse("{\"status\": 404, \"reason\": \"Hata: {\\\"code\\\":\\\"YOK\\\"}\"}"));
+    }
+
+    @Test
     void yapiErrorsUseTheCommonFormatAndAreLoggedToo() {
         JsonHttp.Response noToken = yapi(null, "{\"maintask\": \"order-service\", \"subtask\": \"add_order_note\"}");
         assertError(noToken, 400, "INVALID_REQUEST");

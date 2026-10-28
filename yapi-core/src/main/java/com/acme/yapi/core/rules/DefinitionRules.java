@@ -6,6 +6,7 @@ import java.util.List;
 
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.naming.Names;
+import com.acme.yapi.core.response.ResponseProfile;
 import com.acme.yapi.core.route.AlarmSpec;
 import com.acme.yapi.core.route.BodyMode;
 import com.acme.yapi.core.route.FieldType;
@@ -69,8 +70,14 @@ public final class DefinitionRules {
                         "${request.subtask}", "${header.<ad>}", "${user.id}", "${user.permission}",
                         "${requestId}"));
         strings(placeholders.putArray("profile"),
-                List.of("${backend.status}", "${backend.body}", "${outcome}", "${requestId}"));
+                List.of("${backend.status}", "${backend.body}", "${backend.body.<yol>}", "${backend.header.<ad>}",
+                        "${outcome}", "${requestId}"));
         strings(placeholders.putArray("alarmService"), List.of("${alarm.values}"));
+
+        ObjectNode profile = rules.putObject("profile");
+        strings(profile.putArray("operators"), ResponseProfile.OPERATORS);
+        strings(profile.putArray("httpStatus"), List.of("<100-599>", ResponseProfile.BACKEND_STATUS));
+        profile.put("exposeServerErrorBodyDefault", false);
 
         ObjectNode alarm = rules.putObject("alarm");
         strings(alarm.putArray("checks"), Arrays.stream(AlarmSpec.Check.values()).map(Enum::name).toList());

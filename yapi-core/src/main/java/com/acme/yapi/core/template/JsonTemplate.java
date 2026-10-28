@@ -17,7 +17,12 @@ import tools.jackson.databind.node.ObjectNode;
  */
 public sealed interface JsonTemplate {
 
-    JsonNode render(Resolver resolver, boolean keepNulls);
+    default JsonNode render(Resolver resolver, boolean keepNulls) {
+        return render(resolver, keepNulls, false);
+    }
+
+    /** With {@code absentAsEmpty}, a placeholder without a value inside text renders as empty text. */
+    JsonNode render(Resolver resolver, boolean keepNulls, boolean absentAsEmpty);
 
     void collectPlaceholders(String path, List<Located> into);
 
@@ -58,7 +63,7 @@ public sealed interface JsonTemplate {
 
     record Constant(JsonNode value) implements JsonTemplate {
         @Override
-        public JsonNode render(Resolver resolver, boolean keepNulls) {
+        public JsonNode render(Resolver resolver, boolean keepNulls, boolean absentAsEmpty) {
             return value;
         }
 
@@ -69,8 +74,8 @@ public sealed interface JsonTemplate {
 
     record StringTemplate(TemplateString template) implements JsonTemplate {
         @Override
-        public JsonNode render(Resolver resolver, boolean keepNulls) {
-            JsonNode value = template.render(resolver, keepNulls);
+        public JsonNode render(Resolver resolver, boolean keepNulls, boolean absentAsEmpty) {
+            JsonNode value = template.render(resolver, keepNulls, absentAsEmpty);
             return value.isObject() || value.isArray() ? value.deepCopy() : value;
         }
 
@@ -84,10 +89,10 @@ public sealed interface JsonTemplate {
 
     record ObjectTemplate(Map<String, JsonTemplate> fields) implements JsonTemplate {
         @Override
-        public JsonNode render(Resolver resolver, boolean keepNulls) {
+        public JsonNode render(Resolver resolver, boolean keepNulls, boolean absentAsEmpty) {
             ObjectNode result = Json.object();
             for (Map.Entry<String, JsonTemplate> entry : fields.entrySet()) {
-                JsonNode value = entry.getValue().render(resolver, keepNulls);
+                JsonNode value = entry.getValue().render(resolver, keepNulls, absentAsEmpty);
                 if (!Json.isMissing(value)) {
                     result.set(entry.getKey(), value);
                 }
@@ -103,10 +108,10 @@ public sealed interface JsonTemplate {
 
     record ArrayTemplate(List<JsonTemplate> elements) implements JsonTemplate {
         @Override
-        public JsonNode render(Resolver resolver, boolean keepNulls) {
+        public JsonNode render(Resolver resolver, boolean keepNulls, boolean absentAsEmpty) {
             ArrayNode result = Json.array();
             for (JsonTemplate element : elements) {
-                JsonNode value = element.render(resolver, keepNulls);
+                JsonNode value = element.render(resolver, keepNulls, absentAsEmpty);
                 if (!Json.isMissing(value)) {
                     result.add(value);
                 }

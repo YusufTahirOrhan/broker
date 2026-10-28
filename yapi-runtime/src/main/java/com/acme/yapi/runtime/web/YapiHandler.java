@@ -470,7 +470,8 @@ public class YapiHandler {
         EventFactory.ClientLog clientLog;
         if (route.profile() != null) {
             ClientResponse wrapped = route.profile().profile()
-                    .render(new ResponseProfile.BackendResult(status, parsed, outcome, x.requestId));
+                    .render(new ResponseProfile.BackendResult(status, parsed, outcome, x.requestId,
+                            BackendResponses.profileHeaders(backend)));
             reply = Reply.json(wrapped.status(), outcome, wrapped.body());
             clientLog = EventFactory.clientResponse(wrapped.body(), definition.logging());
         } else if (x.sessionOperation != null) {

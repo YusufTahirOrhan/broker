@@ -178,7 +178,8 @@ public class InternalTestController {
         JsonNode shown = Json.isMissing(parsed) ? null : parsed;
         TestCallResult.ClientView client;
         if (profile != null) {
-            ClientResponse wrapped = profile.render(new ResponseProfile.BackendResult(status, parsed, outcome, requestId));
+            ClientResponse wrapped = profile.render(new ResponseProfile.BackendResult(status, parsed, outcome, requestId,
+                    BackendResponses.profileHeaders(response)));
             client = new TestCallResult.ClientView(wrapped.status(), wrapped.body());
         } else {
             client = new TestCallResult.ClientView(status, shown);

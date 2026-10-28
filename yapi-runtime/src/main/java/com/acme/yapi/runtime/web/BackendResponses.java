@@ -4,7 +4,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -16,6 +18,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import com.acme.yapi.core.json.Json;
+import com.acme.yapi.core.naming.Names;
 import com.acme.yapi.core.route.LoggingSpec;
 import com.acme.yapi.core.route.ResponseType;
 
@@ -32,6 +35,17 @@ public final class BackendResponses {
     }
 
     /** A file is streamed, never parsed, logged or wrapped: BINARY routes and any response with Content-Disposition. */
+    /** The service's headers for a response profile: first value of each, by {@link Names#key}. */
+    public static Map<String, String> profileHeaders(HttpResponse<?> response) {
+        Map<String, String> headers = new HashMap<>();
+        response.headers().map().forEach((name, values) -> {
+            if (!values.isEmpty()) {
+                headers.putIfAbsent(Names.key(name), values.getFirst());
+            }
+        });
+        return headers;
+    }
+
     public static boolean isFile(ResponseType type, HttpResponse<?> response) {
         return type == ResponseType.BINARY || response.headers().firstValue("Content-Disposition").isPresent();
     }

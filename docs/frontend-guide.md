@@ -110,8 +110,10 @@ Ham metin backend'de saklanmaz; ekran da onu tarayıcı deposuna (localStorage) 
 ### Yanıt profilleri
 
 - **Desen:** Liste, editör, geçmiş ve karşılaştırma subtask'lerle aynıdır (`/response-profiles`).
-- **Editör:** `success` ve `error` için birer HTTP status ve JSON şablonu alır; `${backend.status}`, `${backend.body}`, `${outcome}` ve `${requestId}` önerilir.
-- **Önizleme:** Örnek bir servis yanıtıyla (status ve body) frontend'in alacağı yanıtı gösterir (`POST /response-profiles/preview`).
+- **Editör:** `success` ve `error` için birer HTTP status ve JSON şablonu alır; `${backend.status}`, `${backend.body}`, `${backend.body.<yol>}`, `${backend.header.<ad>}`, `${outcome}` ve `${requestId}` önerilir. HTTP status sayı ya da "servisin status'u" (`${backend.status}`) seçilir.
+- **Koşullar:** Her şablonun altında "Koşul ekle" ile sıralı `cases` açılır. Her koşullu şablon bir ya da daha çok koşul (yer tutucu, operatör, değer) ile kendi HTTP status ve gövdesini taşır; koşulların hepsi tutmalıdır. Koşullar yukarıdan aşağı denenir, ilk tutan kullanılır; hiçbiri tutmazsa şablonun kendisi. Operatörler `definition-rules`'daki `profile.operators`: "var/yok" (`exists`), "eşittir" (`equals`), "eşit değildir" (`notEquals`), "şunlardan biri" (`in`). Değer kutusu JSON tipini korur: `409` sayı, `"409"` metin; editör tipi ayrıca gösterir.
+- **Sunucu hatasının gövdesi:** "5xx gövdesi de şablona verilsin" (`exposeServerErrorBody`) varsayılan kapalıdır. Açılınca editör, servisin hata gövdesinde stack trace ya da iç bilgi olabileceğini ve bunun frontend'e gideceğini uyarır.
+- **Önizleme:** Örnek bir servis yanıtıyla (status, body ve isteğe bağlı header'lar) frontend'in alacağı yanıtı gösterir (`POST /response-profiles/preview`); kullanılan şablon (`matchedTemplate`) ve tutan koşulun sırası (`matchedCase`) editörde işaretlenir.
 - **Etki:** Detayda profili kullanan subtask'ler ortam bazında listelenir. Profil değişikliği taşındığı ortamda hepsini etkiler.
 
 ### Taşıma ve onay
@@ -403,7 +405,7 @@ Yukarıdaki örneklerde görünmeyen gövde ve yanıt alanları. Alan adları ca
 | `POST /projects/{id}/test` | Örnekteki gövde | Profil, ortamda aktif versiyonuyla uygulanır; ortamda yoksa güncel versiyonuyla. `userId` verilmezse oturumdaki kullanıcıdır |
 | `POST /projects/{id}/probe` | `{"environment", "httpMethod", "pathTemplate", "pathVariables"}` | `{"result", "status", "allow", "url", "message"}`; değeri verilmeyen path değişkenine `1` yazılır, redirect izlenmez |
 | `GET /response-profiles/{id}` | — | Profil alanları, `deployments` ve `usage: [{"environment", "routes": [{"routeId", "maintask", "subtask", "version"}]}]` |
-| `POST /response-profiles/preview` | `{"definition", "status", "body"}` | `{"status", "body", "outcome"}`; `status: null` timeout'u temsil eder |
+| `POST /response-profiles/preview` | `{"definition", "status", "body", "headers"}` | `{"status", "body", "outcome", "matchedTemplate", "matchedCase"}`; `status: null` timeout'u temsil eder. `headers` ad → değer, isteğe bağlı. `matchedTemplate` `success` ya da `error`, `matchedCase` o şablondaki tutan koşulun sırası (0'dan) ya da hiçbiri tutmadıysa `null` |
 | `POST /promotions` | Örnekteki gövde | `DISABLE` ve `ENABLE`'da `version` verilmeyebilir; hedefte çalışan versiyon kullanılır. Ortamdan yanıt alınamazsa talep `APPLYING`'de kalır ve `failureReason` dolar; `RETRY` ile tamamlanır |
 | `GET /promotions` | — | `status` virgülle birden fazla değer alır (`status=APPLIED,FAILED`); `size` en fazla 100 |
 
@@ -444,6 +446,48 @@ Ekran bu kuralları `GET /meta/definition-rules` yanıtından okur ve kendi içi
 | `alarm.check` | `INHERIT`, `OFF`, `ROUTE` | Varsayılan `INHERIT`: projenin ortamdaki `alarmRoute`'u, yoksa kontrol yok. `ROUTE`'ta `alarm.maintask` ve `alarm.subtask` zorunlu, diğerlerinde verilmez. Alarm servisinde `alarm` olmaz |
 | `alarmService.resultPath` | Noktalı JSON yolu ya da boş | Varsa subtask alarm servisidir. Yanıtta alarm listesinin yolu (`data.alarms`); boşsa yanıtın kendisi dizi. Liste dolu dönerse istek durdurulur |
 
+### Yanıt profili (`definition`)
+
+| Alan | Değerler | Kural |
+| --- | --- | --- |
+| `success`, `error` | `{"httpStatus", "body", "cases"}` | İkisi de zorunlu. `success` 2xx'te, `error` 4xx, 5xx, timeout ve bağlantı hatasında kullanılır |
+| `httpStatus` | 100–599 ya da `"${backend.status}"` | `"${backend.status}"` servisin status'unu verir. Servis yanıt vermediyse timeout'ta 504, bağlantı hatasında 502; bu durum için `{"value": "${backend.status}", "exists": false}` koşulu yazılabilir |
+| `body` | JSON | Yer tutucular aşağıdaki gibi; değeri olmayan yer tutucu alanda `null`, metin içinde boş metin olur |
+| `cases[]` | `{"when", "httpStatus", "body"}` | Sırayla denenir; ilk tutan kullanılır, hiçbiri tutmazsa şablonun kendi `httpStatus` ve `body`'si. `cases` yoksa profil eskisi gibi çalışır |
+| `cases[].when[]` | `{"value": "<yer tutucu>", "<operatör>": <değer>}` | En az bir koşul; hepsi sağlanmalı. `value` tek bir profil yer tutucusudur. Operatörler: `exists` (`true`/`false`; gövdede `null` değerli alan "var"dır), `equals`, `notEquals`, `in` (değerler dizisi). Karşılaştırma JSON tipine duyarlıdır: `409` ile `"409"` eşit değildir; sayılar değerce karşılaştırılır. Değer yoksa `equals` ve `in` tutmaz, `notEquals` tutar |
+| `exposeServerErrorBody` | `true`, `false` | Varsayılan `false`: 5xx'te `${backend.body}` ve `${backend.body.*}` boştur, tek başına durdukları alan yazılmaz. `true` iken 5xx gövdesi de şablona verilir |
+
+Örnek: 2xx gövdesinde `status-code` alanı varsa hata zarfı (eksik alan `null`), `status-code` 409 ve `ref_id` varsa başka bir zarf, diğer 2xx'ler `{"status": 200, "data": ...}`; hatada servisin status'u ve metne gömülü gövde; yanıt yoksa sabit bir cevap.
+
+```json
+{
+  "success": {
+    "cases": [
+      { "when": [ { "value": "${backend.body.status-code}", "equals": 409 },
+                  { "value": "${backend.body.ref_id}", "exists": true } ],
+        "httpStatus": 200,
+        "body": { "data": { "ref_id": "${backend.body.ref_id}" }, "message": "${backend.body.message}",
+                  "status": "${backend.body.status-code}" } },
+      { "when": [ { "value": "${backend.body.status-code}", "exists": true } ],
+        "httpStatus": 200,
+        "body": { "data": null, "message": "${backend.body.message}", "status": "${backend.body.status-code}" } }
+    ],
+    "httpStatus": 200,
+    "body": { "status": 200, "data": "${backend.body}" }
+  },
+  "error": {
+    "cases": [
+      { "when": [ { "value": "${backend.status}", "exists": false } ],
+        "httpStatus": 400, "body": { "status": 400, "reason": "Servis hatası: yanıt yok" } }
+    ],
+    "httpStatus": "${backend.status}",
+    "body": { "status": "${backend.status}", "reason": "Servis hatası: ${backend.body}" }
+  }
+}
+```
+
+Dosya yanıtları (subtask'te `response.type: BINARY` ya da servisin `Content-Disposition` döndürmesi) profile girmez; olduğu gibi akıtılır ve `Content-Type` servisten geçer.
+
 ### Yer tutucular
 
 Değeri yalnızca bir yer tutucudan oluşan alan değerin tipini korur: `"${request.siparisNo}"` sayı olarak gider. Metnin içindeki yer tutucu metne çevrilir. İfade dili ya da script yoktur.
@@ -456,8 +500,10 @@ Değeri yalnızca bir yer tutucudan oluşan alan değerin tipini korur: `"${requ
 | `${user.permission}` | Tanım | Kullanıcıda olan ilk route yetkisi: önce `permissions`, sonra `foreignPermissions`, tanımdaki sırayla. Oturum yoksa ya da kullanıcıda bu yetkilerden hiçbiri yoksa değeri yoktur, alan yazılmaz. Önizleme ve testte kullanıcının formdaki yetkilere sahip olduğu varsayılır |
 | `${requestId}` | Tanım, profil | İsteğin ID'si |
 | `${alarm.values}` | Yalnızca alarm servisi tanımı | Gelen isteğin gövdesindeki bütün yaprak değerler (iç içe dahil), metin olarak ve sırayla, JSON dizisi. Zarf alanları (`definition-rules`'da `alarm.excludedFromValues`), maskelenen alanlar ve `null`'lar hariç. Önizleme ve testte değeri yoktur, alan yazılmaz |
-| `${backend.status}` | Profil | Servisin HTTP status kodu; timeout'ta null |
-| `${backend.body}` | Profil | Servisin yanıt gövdesi; `error` şablonunda yalnızca 4xx'te dolu |
+| `${backend.status}` | Profil | Servisin HTTP status kodu; timeout ve bağlantı hatasında değeri yoktur (alanda `null`) |
+| `${backend.body}` | Profil | Servisin yanıt gövdesi; `error` şablonunda 4xx'te (`exposeServerErrorBody` ile 5xx'te de) dolu. Metin içinde nesne ya da dizi JSON metni olarak gömülür |
+| `${backend.body.<yol>}` | Profil | Gövdeden tek alan: noktalı yol, tire ve alt çizgili anahtarlar (`status-code`), dizi indeksi (`items.0`). Alan yoksa profilde `null` yazılır (alan atlanmaz), metin içinde boş metin olur; tanım şablonlarındaki "değeri olmayan alan yazılmaz" kuralı profiller için geçerli değildir |
+| `${backend.header.<ad>}` | Profil | Servisin yanıt header'ı, harf duyarsız; birden çok değerde ilki. Yoksa `null` |
 | `${outcome}` | Profil | `SUCCESS`, `BUSINESS_ERROR`, `TECHNICAL_ERROR`, `TIMEOUT` |
 
 ### Durumlar ve aksiyonlar
@@ -535,6 +581,7 @@ Backend geliştirildikçe bu tablo güncellenir; en yeni kayıt en üsttedir. Bi
 
 | Tarih | Değişiklik |
 | --- | --- |
+| 2026-10-28 | Yanıt profilinde koşullar ve alan seçme: `success` ve `error`'da sıralı `cases` (`when` koşulları `exists`, `equals`, `notEquals`, `in`; tip duyarlı), yeni yer tutucular `${backend.body.<yol>}` ve `${backend.header.<ad>}`, `httpStatus: "${backend.status}"` (yanıt yoksa 504/502), profil düzeyinde `exposeServerErrorBody`. Profilde değeri olmayan yer tutucu alanda `null`, metin içinde boş metin olur. `POST /response-profiles/preview` gövdesine `headers`, yanıtına `matchedTemplate` ve `matchedCase`; `definition-rules`'a `profile` (`operators`, `httpStatus`, `exposeServerErrorBodyDefault`). Mevcut profiller aynı çalışır. |
 | 2026-10-26 | Alarm route seçicileri: yeni uç `GET /routes?alarmService=true` (bütün projelerin alarm servisi subtask'leri, arşivdekiler hariç); subtask listelerinin öğelerinde yeni alan `alarmService`. |
 | 2026-10-26 | Alarm: proje ortam ayarında `alarmRoute` (`{"maintask", "subtask"}` ya da `null`; gövdede, yanıtta ve `environments[]`'de), subtask tanımında `alarm` (`check`: `INHERIT`, `OFF`, `ROUTE`) ve `alarmService` (`resultPath`), yeni yer tutucu `${alarm.values}` (yalnızca alarm servisinde), yeni outcome `ALARM`, yeni ön kontrol `ALARM_ROUTE_ACTIVE`. `definition-rules`'da `placeholders.alarmService` ve `alarm` (`checks`, `default`, `excludedFromValues`). Alarm servisi frontend'den çağrılamaz (404 `UNKNOWN_TASK`). |
 | 2026-10-26 | Admin'e giriş: SSO ve `Authorization: Bearer` kalktı. Ekran her istekte giriş uygulamasının oturumunu gönderir (`X-Token`, `X-Uid`, `X-Clientip`, `X-User-Agent`); oturum geçersizse 401, Yapi yetkisi (`YAPI_DEVELOPER`, `YAPI_ADMIN`) yoksa ya da rol yetmezse 403. `GET /me`'de `username` ve `displayName` sicil. `local` profilinde HTTP Basic aynı. |
