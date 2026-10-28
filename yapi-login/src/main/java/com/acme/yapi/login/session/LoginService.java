@@ -48,7 +48,9 @@ public class LoginService {
 
     /**
      * LDAP bind, then the user's permissions from the Koordinatör (only after a successful bind), then the record.
-     * The legacy code asked the Koordinatör either way; the answer is the same.
+     * The legacy code asked the Koordinatör either way; the answer is the same. A user who logs in again from the
+     * client of their open session gets that session's token back: the record, its permissions and its remaining
+     * time stay as they are. From another client the new session replaces the old one.
      */
     public LoginResult login(String uid, String password, String clientIp, String userAgent) {
         boolean ldapOk = ldap.authenticate(uid, password);
@@ -57,12 +59,28 @@ public class LoginService {
             log.info("Giriş reddedildi: uid={}, ldap={}, yetki={}", uid, ldapOk, permissions.isPresent());
             return new LoginResult.Refused(ldapOk);
         }
+        Optional<String> open = openSession(uid, clientIp, userAgent);
+        if (open.isPresent()) {
+            log.info("Giriş yapıldı, açık oturum sürüyor: uid={}", uid);
+            return new LoginResult.LoggedIn(open.get());
+        }
         String token = UUID.randomUUID().toString();
         if (!sessions.write(new SessionRecord(uid, token, clientIp, userAgent, permissions.get()))) {
             return new LoginResult.NotStored();
         }
         log.info("Giriş yapıldı: uid={}", uid);
         return new LoginResult.LoggedIn(token);
+    }
+
+    /** The token of the user's session opened from this client; empty when there is none or Redis cannot tell. */
+    private Optional<String> openSession(String uid, String clientIp, String userAgent) {
+        try {
+            return sessions.find(uid).filter(record -> record.sameClient(clientIp, userAgent))
+                    .map(SessionRecord::token).filter(token -> !token.isBlank());
+        } catch (RuntimeException e) {
+            log.warn("Açık oturum okunamadı, yeni oturum açılıyor: uid={}", uid, e);
+            return Optional.empty();
+        }
     }
 
     /**

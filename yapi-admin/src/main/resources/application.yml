@@ -54,6 +54,8 @@ yapi:
     # Giriş: şirketin giriş uygulamasının oturumu. Ekran her istekte X-Token, X-Uid, X-Clientip, X-User-Agent gönderir;
     # oturum bu ortamın env-admin'ine sorulur (POST /admin/v1/sessions/verify), sonuç cache-ttl boyunca tutulur.
     # local profilinde HTTP Basic.
+    # Oturum yoksa 401 gövdesindeki loginUrl: giriş uygulamasının sayfası; boşsa alan yazılmaz
+    login-url: ${YAPI_ADMIN_LOGIN_URL:}
     session:
       environment: ${YAPI_ADMIN_SESSION_ENVIRONMENT:PROD}
       cache-ttl: 30s

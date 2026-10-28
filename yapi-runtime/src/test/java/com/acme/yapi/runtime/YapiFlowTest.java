@@ -674,6 +674,15 @@ class YapiFlowTest {
         assertThat(pings).hasSize(2);
         assertThat(pings.get(0).header("X-uid")).isEqualTo("u12345");
         assertThat(pings.get(1).header("X-uid")).isNull();
+        // both calls are signed; only the one with a valid session names the user
+        assertThat(signedUser(pings.get(0))).isEqualTo("u12345");
+        assertThat(signedUser(pings.get(1))).isNull();
+    }
+
+    private static String signedUser(FakeHttpServer.Recorded call) {
+        return com.acme.yapi.core.context.UserContextToken.verify("k3y".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                call.header("X-User-Context"), java.time.Instant.now(), java.time.Duration.ofMinutes(1))
+                .orElseThrow(() -> new AssertionError("imzasız çağrı")).userId();
     }
 
     private double legacyCount(String maintask, String subtask) {

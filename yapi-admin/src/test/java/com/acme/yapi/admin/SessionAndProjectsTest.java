@@ -40,6 +40,8 @@ class SessionAndProjectsTest extends AdminTestBase {
     void authenticationAndRoleErrorsUseTheProblemFormat() {
         JsonHttp.Response anonymous = http.get("/api/v1/me");
         assertThat(anonymous.status()).isEqualTo(401);
+        // without yapi.admin.login-url the field is not written
+        assertThat(anonymous.json().has("loginUrl")).isFalse();
         assertThat(anonymous.header("Content-Type")).startsWith("application/problem+json");
         assertThat(anonymous.json().get("code").stringValue()).isEqualTo("UNAUTHENTICATED");
 

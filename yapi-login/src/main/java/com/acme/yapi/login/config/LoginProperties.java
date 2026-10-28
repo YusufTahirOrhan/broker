@@ -15,11 +15,13 @@ import com.acme.yapi.core.session.SessionRecordCodec;
  * @param userContextSecret  the broker's {@code X-User-Context} key; when set, unsigned calls to login and logout
  *                           get 403
  * @param userContextMaxAge  how far the signature's {@code issuedAt} may be from now
+ * @param loginUrl           where frontends send a user without a session ({@code GET /users/me/session}); set per
+ *                           environment
  */
 @ConfigurationProperties("login")
 public record LoginProperties(Ldap ldap, Session session, Logout logout, String koordinatorSecret,
                               String userContextSecret, Duration userContextMaxAge, Applications applications,
-                              UserSettings userSettings) {
+                              UserSettings userSettings, String loginUrl) {
 
     public LoginProperties {
         ldap = ldap == null ? new Ldap(null, null, null, null, null, null, null) : ldap;

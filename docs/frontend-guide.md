@@ -42,7 +42,7 @@ Uygulama dört ana bölümden oluşur: Projeler, Yanıt profilleri, Talepler ve 
 
 1. Kullanıcı şirketin giriş uygulamasından girer. Ekran her istekte o oturumun dört header'ını gönderir: `X-Token`, `X-Uid` (sicil), `X-Clientip` ve `X-User-Agent` (broker'a giden isteklerdeki gibi). `X-Clientip`'i ekranın önündeki proxy koyar.
 2. Açılışta üç çağrı yapılır ve oturum boyunca saklanır: `GET /me` (kullanıcı ve roller), `GET /environments` (ortam sırası, onay ve test ayarları), `GET /meta/definition-rules` (enum'lar, sınırlar, okunabilir header'lar).
-3. 401 gelirse oturum yok ya da geçersizdir; giriş uygulamasına dönülür. 403 gelirse işlem için rolün olmadığı gösterilir.
+3. 401 gelirse oturum yok ya da geçersizdir; gövdedeki `loginUrl`'e (giriş uygulamasının sayfası) gidilir. 403 gelirse işlem için rolün olmadığı gösterilir.
 
 ### Projeler
 
@@ -169,7 +169,7 @@ Hatalar RFC 9457 problem detail olarak (`application/problem+json`) döner. `cod
 | code | HTTP | Ne zaman |
 | --- | --- | --- |
 | `VALIDATION_FAILED` | 400 | Gövde ya da tanım kurallara uymuyor; `errors` alan bazında gelir |
-| `UNAUTHENTICATED` | 401 | Oturum header'ları yok ya da oturum geçersiz |
+| `UNAUTHENTICATED` | 401 | Oturum header'ları yok ya da oturum geçersiz. Gövdede `loginUrl` (giriş sayfası; backend'de ayarlı değilse alan yok) |
 | `FORBIDDEN` | 403 | Kullanıcının rolü işlem için yetmiyor |
 | `FOUR_EYES` | 403 | Talep eden kendi talebini onaylamaya ya da reddetmeye çalıştı |
 | `TEST_NOT_ALLOWED` | 403 | Ortam test çağrısına kapalı |
@@ -575,12 +575,15 @@ Alarm kontrolü oturum, yetki ve alan doğrulamasından sonra, servis çağrıs�
 
 `X-Token: login` ve `logout` istekleri gövdedeki maintask'a bakılmadan giriş servisinin route'larına gider; yanıtları eski broker'la birebir aynıdır (tasarım dokümanında "Giriş ve oturum").
 
+Uygulamalar açılışta oturumu giriş servisinin anonim `giris/session_check` route'uyla sorar: oturum geçerliyse `{"response": true, "valid": true, "uid"}`, değilse `{"response": true, "valid": false, "loginUrl"}` ve uygulama `loginUrl`'e gider. Aynı istemciden (`X-Clientip`, `X-User-Agent`) tekrar giriş yeni token üretmez, mevcut token'la aynı başarılı gövdeyi döner; başka istemciden giriş eski oturumu kapatır.
+
 ## Değişiklik kaydı
 
 Backend geliştirildikçe bu tablo güncellenir; en yeni kayıt en üsttedir. Bir uç nokta uygulandığında ya da sözleşmesi değiştiğinde burada ayrı bir satır olarak görünür.
 
 | Tarih | Değişiklik |
 | --- | --- |
+| 2026-10-28 | Login kontrolü: 401 gövdesinde `loginUrl` (giriş uygulamasının sayfası; ayarlı değilse alan yazılmaz); ekran 401'de oraya gider. Uygulama frontend'leri için giriş servisinde oturum kontrolü (`giris/session_check`, anonim route): `{"response": true, "valid": true, "uid"}` ya da `{"response": true, "valid": false, "loginUrl"}`. Aynı istemciden tekrar giriş mevcut token'ı döner. |
 | 2026-10-28 | Yanıt profilinde koşullar ve alan seçme: `success` ve `error`'da sıralı `cases` (`when` koşulları `exists`, `equals`, `notEquals`, `in`; tip duyarlı), yeni yer tutucular `${backend.body.<yol>}` ve `${backend.header.<ad>}`, `httpStatus: "${backend.status}"` (yanıt yoksa 504/502), profil düzeyinde `exposeServerErrorBody`. Profilde değeri olmayan yer tutucu alanda `null`, metin içinde boş metin olur. `POST /response-profiles/preview` gövdesine `headers`, yanıtına `matchedTemplate` ve `matchedCase`; `definition-rules`'a `profile` (`operators`, `httpStatus`, `exposeServerErrorBodyDefault`). Mevcut profiller aynı çalışır. |
 | 2026-10-26 | Alarm route seçicileri: yeni uç `GET /routes?alarmService=true` (bütün projelerin alarm servisi subtask'leri, arşivdekiler hariç); subtask listelerinin öğelerinde yeni alan `alarmService`. |
 | 2026-10-26 | Alarm: proje ortam ayarında `alarmRoute` (`{"maintask", "subtask"}` ya da `null`; gövdede, yanıtta ve `environments[]`'de), subtask tanımında `alarm` (`check`: `INHERIT`, `OFF`, `ROUTE`) ve `alarmService` (`resultPath`), yeni yer tutucu `${alarm.values}` (yalnızca alarm servisinde), yeni outcome `ALARM`, yeni ön kontrol `ALARM_ROUTE_ACTIVE`. `definition-rules`'da `placeholders.alarmService` ve `alarm` (`checks`, `default`, `excludedFromValues`). Alarm servisi frontend'den çağrılamaz (404 `UNKNOWN_TASK`). |

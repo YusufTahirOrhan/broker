@@ -28,7 +28,7 @@ import com.acme.yapi.login.web.LoginController;
 /** What needs a broken Redis. */
 class LoginUnitTest {
 
-    private static final LoginProperties PROPERTIES = new LoginProperties(null, null, null, null, null, null, null, null);
+    private static final LoginProperties PROPERTIES = new LoginProperties(null, null, null, null, null, null, null, null, null);
 
     @SuppressWarnings("unchecked")
     private static LoginController controller(StringRedisTemplate redis) {

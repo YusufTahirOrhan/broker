@@ -16,6 +16,7 @@ Broker `X-Token: login` ve `X-Token: logout` isteklerini gövdedeki maintask'a b
 | `POST /login` | `{"uid", "password"}`, `X-Clientip`, `X-User-Agent` | Başarılı: `{"response": true, "status": 200, "LDAP": true, "login": true, "X-Token": "<uuid>"}`. LDAP ya da yetki çağrısı başarısız: `{"response": false, "status": 401, "Ldap": <ldap>, "login": false}`. Kayıt Redis'e yazılamadı: `{"status": 401, "Ldap": false, "login": false, "X-Token": "404"}` |
 | `POST /logout` | `{"uid"}`, `X-Clientip`, `X-User-Agent` | Kayıt var ve istemci aynı: `{"response": true, "status": 200, "message": "logged out"}`; değilse `{"response": false, "status": 301, "message": "something went wrong with logging out."}` |
 | `POST /internal/v1/sessions/{uid}/logout` | `X-Koordinator-Secret` | Koordinatör'ün zorla çıkışı, broker'dan geçmez: 204 kapatıldı, 404 oturum yok, 403 gizli anahtar yanlış ya da ayarlı değil |
+| `GET /users/me/session` | `X-User-Context` | Oturum kontrolü: imzada kullanıcı varsa `{"response": true, "valid": true, "uid"}`, yoksa `{"response": true, "valid": false, "loginUrl"}` (`login.login-url`; ayarlı değilse `null`) |
 | `GET /users/me/settings/{name}` | `X-User-Context` (imzalı kullanıcı) | Kayıt varsa saklanan JSON metni olduğu gibi, yoksa `null` (200) |
 | `PUT /users/me/settings/{name}` | JSON gövde, `X-User-Context` | Gövdedeki JSON süresiz ve sıkışık metin olarak yazılır (eski `RedisTemplate` + `JacksonJsonRedisSerializer`'ın yazdığıyla aynı); yanıt yazılan JSON (200) |
 
@@ -26,6 +27,10 @@ Broker `X-Token: login` ve `X-Token: logout` isteklerini gövdedeki maintask'a b
   map'teki bütün listelerin `yetkiIsim`'leri, sırası korunup tekrarları atılarak; `askidaMi` true (ya da 1) olan yetki
   aktif değildir ve listeye girmez. Boş map yetkisiz giriştir. 200 dışı ya da başka biçimdeki cevap (map değil, liste
   değil, isimsiz öğe) Koordinatör hatasıdır: giriş reddedilir, uyarı loglanır.
+- Tekrar giriş: kimlik her girişte doğrulanır (LDAP ya da magic key, sonra Koordinatör). Başarılıysa ve kullanıcının
+  kaydı aynı `X-Clientip` ve `X-User-Agent` ile duruyorsa yeni token üretilmez: aynı başarılı gövde mevcut token'la
+  döner, kayda (yetkiler ve kalan süre dahil) dokunulmaz. Başka istemciden giriş eskisi gibi yeni oturumla eskisini
+  ezer. Kayıt okunamazsa yeni oturum açılır.
 - Logout kaydı yalnızca onu açan istemci kapatabilir (`login.logout.require-client-match`, varsayılan true).
 - `/actuator/` ve `/internal/` ile başlayanlar dışındaki her uç (yeni uçlar dahil) yalnızca broker'ın imzaladığı, en
   fazla 60 sn önce verilmiş `X-User-Context` ile kabul edilir; değilse 403. Yol, container'ın çözdüğü ve normalize
@@ -77,13 +82,14 @@ Okuma (`giris/get_layout`) aynı yolun `GET`'i, gövdesiz. `harici_uygulamalar` 
 | `login.user-context-secret` | — | `YAPI_USER_CONTEXT_SECRET`; `local` dışında zorunlu |
 | `login.koordinator-secret` | — | `YAPI_LOGIN_KOORDINATOR_SECRET` |
 | `login.user-settings.keys` | `layout`, `quick_link` | Ad → Redis anahtarı (`{uid}`); `local` profilinde `local:` önekli |
+| `login.login-url` | — | `YAPI_LOGIN_URL`; oturumu olmayan kullanıcının gideceği giriş sayfası, ortam başına girilir |
 | `koordinator.url`, `auth-header`, `auth-value` | — | Bu ortamın Koordinatör'ü; kimlik header'ı şimdilik gerekmiyor (`auth-value` boşken gönderilmez). Admin ortam başına `koordinator.urls.<ENV>` kullanır |
 | `koordinator.permissions-path`, `permission-field`, `suspended-field` | `/api/koordinator/personel-yetki/aktif-yetkiler/{uid}`, `yetkiIsim`, `askidaMi` | |
 | `koordinator.projects-path`, `application-field`, `yapi-field` | `/api/koordinator/projeler-ve-yetkileri`, `projeAdi`, `is_yapi` | |
 
 ## Route tanımları
 
-Merkezi admin'de `giris` projesinin iki anonim route'u, yanıt profili yok. Aynı tanımlar yerel broker için
+Merkezi admin'de `giris` projesinin anonim route'ları, yanıt profili yok. Aynı tanımlar yerel broker için
 `yapi-runtime/yapi-local.example.json`'da.
 
 `giris/login`, `POST /login`:
@@ -121,3 +127,11 @@ Merkezi admin'de `giris` projesinin iki anonim route'u, yanıt profili yok. Ayn�
 
 `${request.uid}` zarf alanıdır, `fields`'ta tanımlanmadan okunur. `X-User-Agent`, `X-User-*` yasağının tek
 istisnasıdır.
+
+`giris/session_check`, `GET /users/me/session`, anonim (frontend'ler açılışta çağırır, `valid: false` ise
+`loginUrl`'e gider). Broker anonim route'ta da oturumu çözer ve her çağrıyı imzalar: oturum geçerliyse imzada
+kullanıcı vardır, değilse imza kullanıcısızdır; route'un yetkisi olmaz.
+
+```json
+{ "response": { "type": "JSON" } }
+```

@@ -308,8 +308,9 @@ public class YapiHandler {
         // 6. Forward
         Map<String, String> extra = new LinkedHashMap<>();
         extra.put("traceparent", x.trace.traceparent());
-        // session operations are signed too, without a user: the login service accepts only the broker's calls
-        if (userContext.enabled() && (userId != null || x.sessionOperation != null)) {
+        // every call is signed, without a user when there is no valid session (session operations, anonymous
+        // routes): services that check the signature accept only the broker's calls and tell who the user is
+        if (userContext.enabled()) {
             extra.put(userContext.header(), userContext.sign(userId, x.requestId, Instant.now()));
         }
         Forwarder.Result result = forwarder.send(backendRequest, definition.timeoutMs(), definition.maxAttempts(), extra);
