@@ -25,6 +25,7 @@ CREATE TABLE yapi_logs.yapi_log
     target_path      String,
     status_code      UInt16,                            -- yalnızca RESPONSE
     outcome          LowCardinality(String),            -- yalnızca RESPONSE
+    denied_reason    LowCardinality(String),            -- DENIED'da PERMISSION, APPLICATION ya da SESSION; değilse boş
     duration_ms      UInt32,                            -- yalnızca RESPONSE
     body             String CODEC(ZSTD(3)),             -- maskelenmiş; yanıtta kırpılmış olabilir
     body_size        UInt32,

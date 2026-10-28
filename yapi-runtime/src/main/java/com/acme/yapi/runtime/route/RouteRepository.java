@@ -83,11 +83,13 @@ public class RouteRepository {
                             rs.getString("response_profile"), rs.getString("definition"), rs.getString("base_url")))
                     .list();
             List<RouteSnapshot.Project> projects = jdbc.sql("""
-                            SELECT maintask, base_url, enabled, alarm_maintask, alarm_subtask FROM runtime_project
+                            SELECT maintask, base_url, enabled, alarm_maintask, alarm_subtask, permission_prefix
+                              FROM runtime_project
                             """)
                     .query((rs, row) -> new RouteSnapshot.Project(rs.getString("maintask"), rs.getString("base_url"),
                             rs.getBoolean("enabled"), rs.getString("alarm_maintask") == null ? null
-                            : new AlarmRoute(rs.getString("alarm_maintask"), rs.getString("alarm_subtask"))))
+                            : new AlarmRoute(rs.getString("alarm_maintask"), rs.getString("alarm_subtask")),
+                            rs.getString("permission_prefix")))
                     .list();
 
             Map<String, CompiledProfile> profiles = new HashMap<>();

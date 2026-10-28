@@ -500,6 +500,55 @@ class YapiFlowTest {
     }
 
     @Test
+    void refusedRequestsSayWhyAndWhatTheRouteAskedFor() {
+        RuntimeFixture.project("order-service", backend.baseUrl(), null, "ORDER");
+        cache.reload();
+        session("tok-3", "u888", "ORDER_EXPORT");
+        String getOrder = "{\"maintask\": \"Order-Service\", \"subtask\": \"GET_ORDER\", \"orderId\": 1, \"password\": \"x\"}";
+
+        LogEvent.Denial ownProject = denial(yapi("tok-3", getOrder));
+        assertThat(ownProject.reason()).isEqualTo(LogEvent.DeniedReason.PERMISSION);
+        assertThat(ownProject.routePermissions()).containsExactly("ORDER_READ");
+        assertThat(ownProject.hasProjectPermission()).isTrue();
+        assertThat(ownProject.requestBody().get("maintask").stringValue()).isEqualTo("Order-Service");
+        assertThat(ownProject.requestBody().get("password").stringValue()).isEqualTo("xxxx");
+        assertThat(denial(yapi("tok-2", getOrder)).hasProjectPermission()).isFalse();
+        // no prefix sent for this project: whether the user has one of its permissions cannot be told
+        assertThat(denial(yapi("tok-2", "{\"maintask\": \"LogProject\", \"subtask\": \"get_id\", \"id\": 1}"))
+                .hasProjectPermission()).isNull();
+
+        JsonHttp.Response application = yapi("tok-1", getOrder.replace("}", ", \"application\": \"kiosk\"}"));
+        LogEvent applicationEvent = events.awaitType(application.header("X-Request-Id"), LogEvent.EventType.RESPONSE);
+        assertThat(applicationEvent.denial().reason()).isEqualTo(LogEvent.DeniedReason.APPLICATION);
+        assertThat(applicationEvent.denial().routePermissions()).containsExactly("ORDER_READ");
+        assertThat(applicationEvent.denial().hasProjectPermission()).isNull();
+        assertThat(applicationEvent.maintask()).isEqualTo("order-service");
+        assertThat(applicationEvent.subtask()).isEqualTo("get_order");
+
+        LogEvent.Denial knownRoute = denial(yapi("missing-session", getOrder));
+        assertThat(knownRoute.reason()).isEqualTo(LogEvent.DeniedReason.SESSION);
+        assertThat(knownRoute.routePermissions()).containsExactly("ORDER_READ");
+        assertThat(knownRoute.hasProjectPermission()).isNull();
+        LogEvent.Denial unknownRoute = denial(yapi("missing-session", "{\"maintask\": \"order-service\", \"subtask\": \"nope\"}"));
+        assertThat(unknownRoute.reason()).isEqualTo(LogEvent.DeniedReason.SESSION);
+        assertThat(unknownRoute.routePermissions()).isNull();
+
+        JsonHttp.Response login = yapi("login", "{\"uid\": \"u42\", \"application\": \"kiosk\"}");
+        assertThat(events.awaitType(login.header("X-Request-Id"), LogEvent.EventType.RESPONSE).denial()).isNull();
+        backend.json("GET", "/orders/1", 200, "{}");
+        JsonHttp.Response served = yapi("tok-1", getOrder);
+        assertThat(served.status()).isEqualTo(200);
+        assertThat(events.awaitType(served.header("X-Request-Id"), LogEvent.EventType.RESPONSE).denial()).isNull();
+    }
+
+    private LogEvent.Denial denial(JsonHttp.Response refused) {
+        LogEvent response = events.awaitType(refused.header("X-Request-Id"), LogEvent.EventType.RESPONSE);
+        assertThat(response.outcome()).isEqualTo("DENIED");
+        assertThat(response.denial()).as(response.toString()).isNotNull();
+        return response.denial();
+    }
+
+    @Test
     void anInvalidSessionGetsTheLegacyAnswerWhetherTheRouteExistsOrNot() {
         String known = "{\"maintask\": \"order-service\", \"subtask\": \"get_order\", \"orderId\": 1}";
         String unknown = "{\"maintask\": \"order-service\", \"subtask\": \"nope\"}";

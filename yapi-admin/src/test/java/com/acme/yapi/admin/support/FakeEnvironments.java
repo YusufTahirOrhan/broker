@@ -106,6 +106,7 @@ public final class FakeEnvironments implements AutoCloseable {
                 project.set("baseUrl", body.get("baseUrl"));
                 project.set("enabled", body.get("enabled"));
                 project.set("alarmRoute", body.has("alarmRoute") ? body.get("alarmRoute") : Json.nullNode());
+                project.set("permissionPrefix", body.has("permissionPrefix") ? body.get("permissionPrefix") : Json.nullNode());
                 ObjectNode previous = environment.projects.put(rest.get(1), project);
                 boolean changed = previous == null || !previous.equals(project);
                 ObjectNode answer = Json.object();

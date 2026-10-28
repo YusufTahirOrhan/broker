@@ -57,7 +57,7 @@ class LoggingTest {
                 "create_order", 3, "order-service", 2, "web", "u12345", "u12345", null,
                 List.of("ORDER_READ", "ORDER_WRITE"), "3f2b8c1e", null, "10.20.30.40", "3f1c9a7b", "POST", "/orders",
                 201, "SUCCESS", 87L, null, 412, false,
-                Json.parse("{\"BACKEND_STATUS\": 201, \"status\": 200, \"data\": \"\"}"), null, "yapi-7f9c-2", null);
+                Json.parse("{\"BACKEND_STATUS\": 201, \"status\": 200, \"data\": \"\"}"), null, "yapi-7f9c-2", null, null);
 
         JsonNode json = EventCodec.toJson(event);
         assertThat(Json.text(json.get("event_time"))).isEqualTo("2026-10-08T11:28:41.512Z");

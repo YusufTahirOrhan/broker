@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 import com.acme.yapi.core.ids.Ids;
+import com.acme.yapi.core.logging.LogEvent;
 import com.acme.yapi.runtime.forward.TraceContext;
 import com.acme.yapi.runtime.route.Route;
 import com.acme.yapi.runtime.session.Session;
@@ -39,6 +40,12 @@ final class Exchange {
     boolean requestLogged;
     /** The alarm check's record for the RESPONSE event; null when no check ran. */
     ObjectNode alarm;
+    /** Why the broker refused the request; null unless the outcome is {@code DENIED}. */
+    LogEvent.DeniedReason deniedReason;
+    /** The route the refused request asked for, when there was one ({@link #route} may still be unset). */
+    Route deniedRoute;
+    /** Whether the refused user holds a permission of the route's project; null when that cannot be told. */
+    Boolean hasProjectPermission;
 
     Exchange(TraceContext trace, String token, String clientIp, String userAgent) {
         this.trace = trace;

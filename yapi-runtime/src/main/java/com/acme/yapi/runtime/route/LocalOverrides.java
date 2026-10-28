@@ -75,7 +75,7 @@ public class LocalOverrides implements SnapshotCustomizer {
         for (RouteSnapshot.Project project : loaded.projects()) {
             String url = baseUrls.getOrDefault(Names.key(project.maintask()), project.baseUrl());
             projects.put(Names.key(project.maintask()), new RouteSnapshot.Project(project.maintask(), url,
-                    project.enabled(), project.alarmRoute()));
+                    project.enabled(), project.alarmRoute(), project.permissionPrefix()));
         }
         Map<String, Route> routes = new LinkedHashMap<>();
         for (Route route : loaded.routes()) {
@@ -88,7 +88,7 @@ public class LocalOverrides implements SnapshotCustomizer {
             if (route != null) {
                 routes.put(RouteSnapshot.key(route.maintask(), route.subtask()), route);
                 projects.putIfAbsent(Names.key(route.maintask()),
-                        new RouteSnapshot.Project(route.maintask(), route.baseUrl(), true, null));
+                        new RouteSnapshot.Project(route.maintask(), route.baseUrl(), true, null, null));
                 added++;
             }
         }

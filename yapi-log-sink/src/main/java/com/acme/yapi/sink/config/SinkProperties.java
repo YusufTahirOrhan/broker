@@ -19,7 +19,7 @@ public record SinkProperties(String topic, String dlqTopic, Duration retryInterv
         topic = topic == null ? "yapi.logs.v1" : topic;
         dlqTopic = dlqTopic == null ? "yapi.logs.v1.dlq" : dlqTopic;
         retryInterval = retryInterval == null ? Duration.ofSeconds(5) : retryInterval;
-        elastic = elastic == null ? new Elastic(false, null, null, null, null, null, null, null, null, null) : elastic;
+        elastic = elastic == null ? new Elastic(false, null, null, null, null, null, null, null, null, null, null) : elastic;
         clickhouse = clickhouse == null ? new ClickHouse(false, null, null, null, null, null) : clickhouse;
     }
 
@@ -28,16 +28,19 @@ public record SinkProperties(String topic, String dlqTopic, Duration retryInterv
      *                  {@code new SimpleDateFormat("yyyy-MM")}, in the server's zone; its servers run in Turkish time
      * @param apiKey    sent as {@code Authorization: ApiKey ...}; else basic auth when a username is set
      * @param alarmIndex the old broker's alarm log index, written for responses whose alarm check found alarms
+     * @param unauthorizedIndex the index of refused ({@code DENIED}) requests; one index, not monthly
      */
     public record Elastic(boolean enabled, String url, String indexPrefix, ZoneId indexZone, String apiKey,
                           String username, String password, Duration timeout, Integer retryOnConflict,
-                          String alarmIndex) {
+                          String alarmIndex, String unauthorizedIndex) {
         public Elastic {
             indexPrefix = indexPrefix == null ? "requests_" : indexPrefix;
             indexZone = indexZone == null ? ZoneId.of("Europe/Istanbul") : indexZone;
             timeout = timeout == null ? Duration.ofSeconds(30) : timeout;
             retryOnConflict = retryOnConflict == null ? 3 : retryOnConflict;
             alarmIndex = alarmIndex == null || alarmIndex.isBlank() ? LegacyDocuments.ALARM_INDEX : alarmIndex;
+            unauthorizedIndex = unauthorizedIndex == null || unauthorizedIndex.isBlank()
+                    ? LegacyDocuments.UNAUTHORIZED_INDEX : unauthorizedIndex;
         }
     }
 

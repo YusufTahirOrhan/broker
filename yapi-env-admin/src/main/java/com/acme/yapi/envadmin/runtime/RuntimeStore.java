@@ -47,9 +47,12 @@ public class RuntimeStore {
     public record ConfigVersion(long version, Instant updatedAt) {
     }
 
-    /** @param alarmRoute the project's alarm service route; null when its subtasks inherit none */
+    /**
+     * @param alarmRoute       the project's alarm service route; null when its subtasks inherit none
+     * @param permissionPrefix the project's permission prefix; null until the central admin has sent it
+     */
     public record ProjectRow(String maintask, String baseUrl, boolean enabled, AlarmRoute alarmRoute,
-                             Instant updatedAt) {
+                             String permissionPrefix, Instant updatedAt) {
     }
 
     public record ProfileRow(String name, long profileId, int version, long promotionId, String appliedBy,
@@ -166,10 +169,12 @@ public class RuntimeStore {
     }
 
     /**
-     * Writes the project's base URL, switch and alarm route. Brokers read them with every snapshot, so a change moves
-     * the config version like a route change does. Returns the new version, or empty when nothing changed.
+     * Writes the project's base URL, switch, alarm route and permission prefix. Brokers read them with every snapshot,
+     * so a change moves the config version like a route change does. Returns the new version, or empty when nothing
+     * changed.
      */
-    public Optional<Long> upsertProject(String maintask, String baseUrl, boolean enabled, AlarmRoute alarmRoute) {
+    public Optional<Long> upsertProject(String maintask, String baseUrl, boolean enabled, AlarmRoute alarmRoute,
+                                        String permissionPrefix) {
         String alarmMaintask = alarmRoute == null ? null : alarmRoute.maintask();
         String alarmSubtask = alarmRoute == null ? null : alarmRoute.subtask();
         return transactions.execute(status -> bumpIf(merge(() -> jdbc.sql("""
@@ -177,18 +182,22 @@ public class RuntimeStore {
                         USING dual ON (p.maintask = :maintask)
                          WHEN MATCHED THEN UPDATE
                               SET p.base_url = :baseUrl, p.enabled = :enabled, p.alarm_maintask = :alarmMaintask,
-                                  p.alarm_subtask = :alarmSubtask, p.updated_at = SYSTIMESTAMP
+                                  p.alarm_subtask = :alarmSubtask, p.permission_prefix = :permissionPrefix,
+                                  p.updated_at = SYSTIMESTAMP
                             WHERE p.base_url <> :baseUrl OR p.enabled <> :enabled
                                OR DECODE(p.alarm_maintask, :alarmMaintask, 0, 1) = 1
                                OR DECODE(p.alarm_subtask, :alarmSubtask, 0, 1) = 1
-                         WHEN NOT MATCHED THEN INSERT (maintask, base_url, enabled, alarm_maintask, alarm_subtask)
-                              VALUES (:maintask, :baseUrl, :enabled, :alarmMaintask, :alarmSubtask)
+                               OR DECODE(p.permission_prefix, :permissionPrefix, 0, 1) = 1
+                         WHEN NOT MATCHED THEN INSERT (maintask, base_url, enabled, alarm_maintask, alarm_subtask,
+                                                       permission_prefix)
+                              VALUES (:maintask, :baseUrl, :enabled, :alarmMaintask, :alarmSubtask, :permissionPrefix)
                         """)
                 .param("maintask", maintask)
                 .param("baseUrl", baseUrl)
                 .param("enabled", flag(enabled))
                 .param("alarmMaintask", alarmMaintask)
                 .param("alarmSubtask", alarmSubtask)
+                .param("permissionPrefix", permissionPrefix)
                 .update())));
     }
 
@@ -234,7 +243,7 @@ public class RuntimeStore {
 
     public Optional<ProjectRow> project(String maintask) {
         return jdbc.sql("""
-                        SELECT maintask, base_url, enabled, alarm_maintask, alarm_subtask, updated_at
+                        SELECT maintask, base_url, enabled, alarm_maintask, alarm_subtask, permission_prefix, updated_at
                           FROM runtime_project WHERE maintask = :maintask
                         """)
                 .param("maintask", maintask)
@@ -244,7 +253,7 @@ public class RuntimeStore {
 
     public List<ProjectRow> projects() {
         return jdbc.sql("""
-                        SELECT maintask, base_url, enabled, alarm_maintask, alarm_subtask, updated_at
+                        SELECT maintask, base_url, enabled, alarm_maintask, alarm_subtask, permission_prefix, updated_at
                           FROM runtime_project ORDER BY maintask
                         """)
                 .query(RuntimeStore::projectRow)
@@ -312,7 +321,7 @@ public class RuntimeStore {
         String alarmMaintask = rs.getString("alarm_maintask");
         return new ProjectRow(rs.getString("maintask"), rs.getString("base_url"), rs.getBoolean("enabled"),
                 alarmMaintask == null ? null : new AlarmRoute(alarmMaintask, rs.getString("alarm_subtask")),
-                instant(rs, "updated_at"));
+                rs.getString("permission_prefix"), instant(rs, "updated_at"));
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

@@ -63,6 +63,12 @@ class RealTargetsTest {
         for (String statement : statements(resource("/clickhouse/yapi_logs.sql"))) {
             clickhouseQuery(statement);
         }
+        // the upgrade script is a no-op on a table that already has the column
+        for (String statement : statements(resource("/clickhouse/2026-10-28-denied_reason.sql"))) {
+            clickhouseQuery(statement);
+        }
+        send("PUT", elasticUrl() + "/_index_template/yapi-unauthorized",
+                resource("/elastic/yapi-unauthorized.index-template.json"));
         send("PUT", elasticUrl() + "/_component_template/yapi-fields", resource("/elastic/yapi-fields.component-template.json"));
         send("PUT", elasticUrl() + "/_index_template/requests", """
                 {"index_patterns": ["requests_*"], "composed_of": ["yapi-fields"], "priority": 100}
@@ -102,7 +108,7 @@ class RealTargetsTest {
     @Test
     void elasticBuildsTheLegacyDocumentInAnyOrder() throws Exception {
         ElasticBulkWriter writer = new ElasticBulkWriter(new SinkProperties.Elastic(true, elasticUrl(), null, null,
-                null, null, null, null, null, null));
+                null, null, null, null, null, null, null));
         String id = Events.newRequestId();
 
         assertThat(writer.write(List.of(Events.response(id)))).isEmpty();
@@ -127,7 +133,7 @@ class RealTargetsTest {
     @Test
     void elasticKeepsTheLegacyAlarmLog() throws Exception {
         ElasticBulkWriter writer = new ElasticBulkWriter(new SinkProperties.Elastic(true, elasticUrl(), null, null,
-                null, null, null, null, null, null));
+                null, null, null, null, null, null, null));
         LogEvent alarmed = Events.alarmed(Events.newRequestId());
 
         assertThat(writer.write(List.of(alarmed))).isEmpty();
@@ -141,9 +147,37 @@ class RealTargetsTest {
     }
 
     @Test
+    void refusedRequestsGetTheirOwnIndexAndClickHouseColumn() throws Exception {
+        ElasticBulkWriter elasticWriter = new ElasticBulkWriter(new SinkProperties.Elastic(true, elasticUrl(), null,
+                null, null, null, null, null, null, null, null));
+        ClickHouseWriter clickhouseWriter = new ClickHouseWriter(new SinkProperties.ClickHouse(true, clickhouseUrl(),
+                null, "yapi", "yapi", null));
+        LogEvent denied = Events.denied(Events.newRequestId());
+
+        assertThat(elasticWriter.write(List.of(denied))).isEmpty();
+        assertThat(clickhouseWriter.write(List.of(denied))).isEmpty();
+        send("POST", elasticUrl() + "/yapi_unauthorized/_refresh", "");
+
+        JsonNode document = Json.parse(send("GET", elasticUrl() + "/yapi_unauthorized/_doc/" + denied.requestId(), null))
+                .get("_source");
+        assertThat(document.get("denied_reason").stringValue()).isEqualTo("PERMISSION");
+        assertThat(document.get("has_project_permission").booleanValue()).isFalse();
+        assertThat(document.has("token")).isFalse();
+        assertThat(Json.parse(document.get("body").stringValue()).get("password").stringValue()).isEqualTo("xxxx");
+        String mapping = send("GET", elasticUrl() + "/yapi_unauthorized/_mapping", null);
+        assertThat(mapping).contains("\"denied_reason\":{\"type\":\"keyword\"}").doesNotContain("adres");
+        JsonNode count = Json.parse(send("POST", elasticUrl() + "/yapi_unauthorized/_count", """
+                {"query": {"term": {"route_permissions": "ORDER_WRITE"}}}
+                """));
+        assertThat(count.get("count").longValue()).isEqualTo(1);
+        assertThat(clickhouseQuery("SELECT denied_reason FROM yapi_logs.yapi_log WHERE request_id = '"
+                + denied.requestId() + "'")).isEqualTo("PERMISSION");
+    }
+
+    @Test
     void aDocumentElasticCannotMapIsRejected() throws Exception {
         ElasticBulkWriter writer = new ElasticBulkWriter(new SinkProperties.Elastic(true, elasticUrl(), null, null,
-                null, null, null, null, null, null));
+                null, null, null, null, null, null, null));
         LogEvent first = withBody(Events.request(Events.newRequestId(), "order-service"), "tutar", Json.number(10));
         LogEvent clashing = withBody(Events.request(Events.newRequestId(), "order-service"), "tutar",
                 Json.string("on lira"));
@@ -158,7 +192,7 @@ class RealTargetsTest {
     @Test
     void aLoggedResponseDataTextOf40KbIsAcceptedByTheDefaultMapping() throws Exception {
         ElasticBulkWriter writer = new ElasticBulkWriter(new SinkProperties.Elastic(true, elasticUrl(), null, null,
-                null, null, null, null, null, null));
+                null, null, null, null, null, null, null));
         String id = Events.newRequestId();
         ObjectNode data = Json.object();
         data.put("kayitlar", "müşteri kaydı; ".repeat(2_600));
@@ -176,7 +210,7 @@ class RealTargetsTest {
                 response.token(), response.sessionOperation(), response.clientIp(), response.userAgent(),
                 response.httpMethod(), response.targetPath(), response.statusCode(), response.outcome(),
                 response.durationMs(), response.body(), response.bodySize(), true, clientResponse,
-                response.errorMessage(), response.yapiInstance(), response.alarm());
+                response.errorMessage(), response.yapiInstance(), response.alarm(), response.denial());
 
         assertThat(writer.write(List.of(Events.request(id, "order-service"), logged))).isEmpty();
         send("POST", elasticUrl() + "/requests_2026-10/_refresh", "");
@@ -196,7 +230,7 @@ class RealTargetsTest {
                 event.permList(), event.token(), event.sessionOperation(), event.clientIp(), event.userAgent(),
                 event.httpMethod(), event.targetPath(), event.statusCode(), event.outcome(), event.durationMs(), body,
                 event.bodySize(), event.bodyTruncated(), event.clientResponse(), event.errorMessage(),
-                event.yapiInstance(), event.alarm());
+                event.yapiInstance(), event.alarm(), event.denial());
     }
 
     private static String clickhouseUrl() {

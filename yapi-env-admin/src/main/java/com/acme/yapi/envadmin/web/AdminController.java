@@ -149,7 +149,7 @@ public class AdminController {
     }
 
     public record ProjectResponse(String maintask, String baseUrl, boolean enabled, AlarmRoute alarmRoute,
-                                  boolean changed, long configVersion, boolean signalled) {
+                                  String permissionPrefix, boolean changed, long configVersion, boolean signalled) {
     }
 
     @PutMapping("/projects/{maintask}")
@@ -166,13 +166,17 @@ public class AdminController {
         if (alarm != null && !Names.isValidSubtask(alarm.subtask())) {
             errors.add(new FieldError("alarmRoute.subtask", "Geçerli bir subtask olmalı"));
         }
+        String prefix = body.permissionPrefix();
+        if (prefix != null && !Names.isValidPrefix(prefix)) {
+            errors.add(new FieldError("permissionPrefix", "Geçerli bir yetki öneki olmalı"));
+        }
         if (!errors.isEmpty()) {
             throw ApiException.validation(errors);
         }
         boolean enabled = body.enabled() == null || body.enabled();
-        Optional<Long> version = store.upsertProject(maintask, body.baseUrl(), enabled, alarm);
+        Optional<Long> version = store.upsertProject(maintask, body.baseUrl(), enabled, alarm, prefix);
         boolean signalled = version.isPresent() && signals.publishRoutesChanged(version.get());
-        ProjectResponse response = new ProjectResponse(maintask, body.baseUrl(), enabled, alarm, version.isPresent(),
+        ProjectResponse response = new ProjectResponse(maintask, body.baseUrl(), enabled, alarm, prefix, version.isPresent(),
                 version.orElseGet(() -> store.configVersion().version()), signalled);
         Audit.record(http, "project.apply", body.actor(), null, maintask,
                 (response.changed() ? "changed" : "unchanged") + " v" + response.configVersion());

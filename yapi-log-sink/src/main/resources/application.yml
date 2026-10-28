@@ -47,6 +47,8 @@ yapi:
       index-zone: ${YAPI_ELASTIC_INDEX_ZONE:Europe/Istanbul}
       # Alarm kontrolüne takılan isteklerin eski alarm logu
       alarm-index: ${YAPI_ELASTIC_ALARM_INDEX:alarm}
+      # Reddedilen (DENIED) istekler; eşlemesi elastic/yapi-unauthorized.index-template.json
+      unauthorized-index: ${YAPI_ELASTIC_UNAUTHORIZED_INDEX:yapi_unauthorized}
       api-key: ${YAPI_ELASTIC_API_KEY:}
       username: ${YAPI_ELASTIC_USERNAME:}
       password: ${YAPI_ELASTIC_PASSWORD:}

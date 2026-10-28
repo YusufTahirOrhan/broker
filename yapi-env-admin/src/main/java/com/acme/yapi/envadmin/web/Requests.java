@@ -28,7 +28,8 @@ public final class Requests {
     }
 
     /** {@code PUT /admin/v1/projects/{maintask}}; {@code alarmRoute} null clears it. */
-    public record ProjectApply(String baseUrl, Boolean enabled, AlarmRoute alarmRoute, String actor) {
+    public record ProjectApply(String baseUrl, Boolean enabled, AlarmRoute alarmRoute, String permissionPrefix,
+                               String actor) {
     }
 
     /** {@code POST /admin/v1/probe}; path variables without a value are filled with a sample. */

@@ -63,6 +63,19 @@ public final class EventCodec {
         put(node, "error_message", event.errorMessage());
         put(node, "yapi_instance", event.yapiInstance());
         node.set("alarm", event.alarm() == null ? Json.nullNode() : event.alarm());
+        LogEvent.Denial denial = event.denial();
+        put(node, "denied_reason", denial == null ? null : denial.reason().name());
+        if (denial == null || denial.routePermissions() == null) {
+            node.putNull("route_permissions");
+        } else {
+            node.set("route_permissions", Json.stringArray(denial.routePermissions()));
+        }
+        if (denial == null || denial.hasProjectPermission() == null) {
+            node.putNull("has_project_permission");
+        } else {
+            node.put("has_project_permission", denial.hasProjectPermission().booleanValue());
+        }
+        node.set("request_body", denial == null || denial.requestBody() == null ? Json.nullNode() : denial.requestBody());
         return node;
     }
 
@@ -71,14 +84,7 @@ public final class EventCodec {
     }
 
     public static LogEvent fromJson(JsonNode node) {
-        List<String> permissions = null;
-        JsonNode permList = node.get("perm_list");
-        if (permList != null && permList.isArray()) {
-            permissions = new ArrayList<>();
-            for (JsonNode permission : permList) {
-                permissions.add(Json.text(permission));
-            }
-        }
+        List<String> permissions = strings(node.get("perm_list"));
         String eventTime = string(node, "event_time");
         return new LogEvent(
                 string(node, "request_id"),
@@ -111,7 +117,17 @@ public final class EventCodec {
                 nullToNull(node.get("client_response")),
                 string(node, "error_message"),
                 string(node, "yapi_instance"),
-                nullToNull(node.get("alarm")));
+                nullToNull(node.get("alarm")),
+                denial(node));
+    }
+
+    private static LogEvent.Denial denial(JsonNode node) {
+        String reason = string(node, "denied_reason");
+        if (reason == null) {
+            return null;
+        }
+        return new LogEvent.Denial(LogEvent.DeniedReason.valueOf(reason), strings(node.get("route_permissions")),
+                booleanValue(node, "has_project_permission"), nullToNull(node.get("request_body")));
     }
 
     public static LogEvent fromBytes(byte[] bytes) {
@@ -156,6 +172,17 @@ public final class EventCodec {
     private static Boolean booleanValue(JsonNode node, String name) {
         JsonNode value = node.get(name);
         return Json.isAbsent(value) || !value.isBoolean() ? null : value.booleanValue();
+    }
+
+    private static List<String> strings(JsonNode array) {
+        if (array == null || !array.isArray()) {
+            return null;
+        }
+        List<String> values = new ArrayList<>();
+        for (JsonNode value : array) {
+            values.add(Json.text(value));
+        }
+        return values;
     }
 
     private static JsonNode nullToNull(JsonNode value) {

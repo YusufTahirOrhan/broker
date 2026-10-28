@@ -38,24 +38,30 @@ public final class LegacyDocuments {
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss").withZone(ZoneOffset.UTC);
 
     public static final String ALARM_INDEX = "alarm";
+    public static final String UNAUTHORIZED_INDEX = "yapi_unauthorized";
 
     private final String indexPrefix;
     private final ZoneId indexZone;
     private final String alarmIndex;
+    private final String unauthorizedIndex;
 
     /**
      * @param indexPrefix {@code requests_}
      * @param indexZone   time zone the old code used to pick the monthly index
      */
     public LegacyDocuments(String indexPrefix, ZoneId indexZone) {
-        this(indexPrefix, indexZone, ALARM_INDEX);
+        this(indexPrefix, indexZone, ALARM_INDEX, UNAUTHORIZED_INDEX);
     }
 
-    /** @param alarmIndex the legacy {@code alarm_log}'s index, {@code alarm} */
-    public LegacyDocuments(String indexPrefix, ZoneId indexZone, String alarmIndex) {
+    /**
+     * @param alarmIndex        the legacy {@code alarm_log}'s index, {@code alarm}
+     * @param unauthorizedIndex the index of refused requests, {@code yapi_unauthorized}
+     */
+    public LegacyDocuments(String indexPrefix, ZoneId indexZone, String alarmIndex, String unauthorizedIndex) {
         this.indexPrefix = indexPrefix;
         this.indexZone = indexZone;
         this.alarmIndex = alarmIndex;
+        this.unauthorizedIndex = unauthorizedIndex;
     }
 
     public List<ElasticOperation> operations(LogEvent event) {
@@ -74,7 +80,62 @@ public final class LegacyDocuments {
         if (alarm != null) {
             operations.add(new ElasticOperation(ElasticOperation.Kind.INDEX, alarmIndex, event.queryId(), alarm));
         }
+        if (event.denial() != null) {
+            operations.add(new ElasticOperation(ElasticOperation.Kind.INDEX, unauthorizedIndex, event.requestId(),
+                    unauthorizedDocument(event)));
+        }
         return operations;
+    }
+
+    /**
+     * A refused request on its own, under the request ID: who asked for what, why it was refused, and the masked
+     * body as JSON text (so the index's mapping does not grow with every body). The token is not written.
+     */
+    private static ObjectNode unauthorizedDocument(LogEvent event) {
+        LogEvent.Denial denial = event.denial();
+        JsonNode body = denial.requestBody();
+        boolean routeFound = denial.routePermissions() != null;
+        ObjectNode document = Json.object();
+        document.put("request_id", event.requestId());
+        document.put("time", EventCodec.formatTime(requestTime(event)));
+        putOrNull(document, "environment", event.environment());
+        document.put("denied_reason", denial.reason().name());
+        putOrNull(document, "status", event.statusCode());
+        putOrNull(document, "uid", event.uid());
+        putOrNull(document, "user_id", event.userId());
+        putOrNull(document, "application", event.application());
+        putOrNull(document, "maintask", Json.stringField(body, "maintask"));
+        putOrNull(document, "subtask", Json.stringField(body, "subtask"));
+        putOrNull(document, "route_maintask", routeFound ? event.maintask() : null);
+        putOrNull(document, "route_subtask", routeFound ? event.subtask() : null);
+        document.set("route_permissions", routeFound ? Json.stringArray(denial.routePermissions()) : Json.nullNode());
+        document.set("user_permissions", event.permList() == null ? Json.nullNode() : Json.stringArray(event.permList()));
+        if (denial.hasProjectPermission() == null) {
+            document.putNull("has_project_permission");
+        } else {
+            document.put("has_project_permission", denial.hasProjectPermission().booleanValue());
+        }
+        putOrNull(document, "client_ip", event.clientIp());
+        putOrNull(document, "user_agent", event.userAgent());
+        putOrNull(document, "body", body == null ? null : Json.write(body));
+        return document;
+    }
+
+    /** When the request arrived: the time inside its UUIDv7 ID, which is the REQUEST event's time. */
+    private static Instant requestTime(LogEvent event) {
+        return timeOf(event.requestId(), event.eventTime());
+    }
+
+    private static Instant timeOf(String requestId, Instant fallback) {
+        try {
+            UUID uuid = UUID.fromString(requestId);
+            if (uuid.version() == 7) {
+                return Ids.timeOf(uuid);
+            }
+        } catch (IllegalArgumentException ignored) {
+            // not a UUID: fall back to the event time
+        }
+        return fallback;
     }
 
     /**
@@ -109,15 +170,7 @@ public final class LegacyDocuments {
 
     /** {@code requests_yyyy-MM} from the time inside the UUIDv7 request ID, so both events land in one index. */
     public String indexFor(String requestId, Instant fallback) {
-        Instant time = fallback;
-        try {
-            UUID uuid = UUID.fromString(requestId);
-            if (uuid.version() == 7) {
-                time = Ids.timeOf(uuid);
-            }
-        } catch (IllegalArgumentException ignored) {
-            // not a UUID: fall back to the event time
-        }
+        Instant time = timeOf(requestId, fallback);
         return indexPrefix + DateTimeFormatter.ofPattern("yyyy-MM").withZone(indexZone).format(time);
     }
 
@@ -237,6 +290,14 @@ public final class LegacyDocuments {
             node.putNull(name);
         } else {
             node.put(name, value);
+        }
+    }
+
+    private static void putOrNull(ObjectNode node, String name, Integer value) {
+        if (value == null) {
+            node.putNull(name);
+        } else {
+            node.put(name, value.intValue());
         }
     }
 

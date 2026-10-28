@@ -19,9 +19,11 @@ public final class RouteSnapshot {
     /**
      * A project of the environment; disabled projects are known but serve no routes.
      *
-     * @param alarmRoute the alarm service route of its subtasks that inherit one; null when none
+     * @param alarmRoute       the alarm service route of its subtasks that inherit one; null when none
+     * @param permissionPrefix the project's permission prefix; null when the central admin has not sent it
      */
-    public record Project(String maintask, String baseUrl, boolean enabled, AlarmRoute alarmRoute) {
+    public record Project(String maintask, String baseUrl, boolean enabled, AlarmRoute alarmRoute,
+                          String permissionPrefix) {
     }
 
     private final long version;

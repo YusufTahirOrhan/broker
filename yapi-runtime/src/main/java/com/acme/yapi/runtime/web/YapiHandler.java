@@ -22,6 +22,7 @@ import org.springframework.stereotype.Component;
 import com.acme.yapi.core.alarm.AlarmValues;
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.logging.LogEvent;
+import com.acme.yapi.core.naming.Names;
 import com.acme.yapi.core.logging.Masker;
 import com.acme.yapi.core.request.BackendRequest;
 import com.acme.yapi.core.request.BackendRequestBuilder;
@@ -156,6 +157,9 @@ public class YapiHandler {
 
         // 3. Application: login, logout ve anonim route'lar dahil her istekte
         if (!applications.allows(x.application)) {
+            if (!sessionToken || sessionSettings.isPublic(x.maintask)) {
+                denied(x, snapshot, LogEvent.DeniedReason.APPLICATION, found.orElse(null));
+            }
             if (legacyResponses) {
                 legacy(x, response, YapiErrors.legacyRefused());
             } else {
@@ -186,7 +190,10 @@ public class YapiHandler {
         if (found.isEmpty()) {
             switch (checkSession(x)) {
                 case UNAVAILABLE -> sessionUnavailable(x, response);
-                case INVALID -> sessionRefused(x, response);
+                case INVALID -> {
+                    denied(x, snapshot, LogEvent.DeniedReason.SESSION, null);
+                    sessionRefused(x, response);
+                }
                 case VALID -> {
                     String name = (x.maintask == null ? "?" : x.maintask) + "/" + (x.subtask == null ? "?" : x.subtask);
                     reject(x, response, 404, Outcome.UNKNOWN_TASK, "Bilinmeyen işlem: " + name, List.of());
@@ -204,10 +211,12 @@ public class YapiHandler {
                 return;
             }
             if (session == SessionCheck.INVALID) {
+                denied(x, snapshot, LogEvent.DeniedReason.SESSION, route);
                 sessionRefused(x, response);
                 return;
             }
             if (!route.allows(x.session.permissions())) {
+                denied(x, snapshot, LogEvent.DeniedReason.PERMISSION, route);
                 reject(x, response, 403, Outcome.DENIED, "Bu işlem için yetkiniz yok.", List.of());
                 return;
             }
@@ -216,6 +225,21 @@ public class YapiHandler {
     }
 
     private enum SessionCheck { VALID, INVALID, UNAVAILABLE }
+
+    /**
+     * Marks the request as refused for the RESPONSE event. Whether the user holds a permission of the route's project
+     * is told only with a route, a verified user and the project's prefix.
+     */
+    private static void denied(Exchange x, RouteSnapshot snapshot, LogEvent.DeniedReason reason, Route route) {
+        x.deniedReason = reason;
+        x.deniedRoute = route;
+        if (route != null && x.session != null) {
+            String prefix = snapshot.projectOf(route.maintask()).map(RouteSnapshot.Project::permissionPrefix)
+                    .orElse(null);
+            x.hasProjectPermission = prefix == null ? null
+                    : x.session.permissionList().stream().anyMatch(permission -> Names.belongsTo(permission, prefix));
+        }
+    }
 
     /** One Redis read: the record of the body's uid, valid when the token and client headers match it. */
     private SessionCheck checkSession(Exchange x) {

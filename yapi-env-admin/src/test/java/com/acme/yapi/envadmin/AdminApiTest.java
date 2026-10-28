@@ -193,6 +193,30 @@ class AdminApiTest {
     }
 
     @Test
+    void thePermissionPrefixOfAProjectIsPartOfItsSettings() {
+        project("order-service", "http://order-service.preprod.svc:8080");
+        long before = configVersion();
+        String withPrefix = """
+                {"baseUrl": "http://order-service.preprod.svc:8080", "permissionPrefix": "ORDER", "actor": "devops.ali"}
+                """;
+
+        JsonHttp.Response set = http.put("/admin/v1/projects/order-service", withPrefix);
+        assertThat(set.json().get("changed").booleanValue()).as(set.text()).isTrue();
+        assertThat(set.json().get("permissionPrefix").stringValue()).isEqualTo("ORDER");
+        assertThat(jdbc.sql("SELECT permission_prefix FROM runtime_project WHERE maintask = 'order-service'")
+                .query(String.class).single()).isEqualTo("ORDER");
+        assertThat(http.put("/admin/v1/projects/order-service", withPrefix).json().get("changed").booleanValue())
+                .isFalse();
+        assertThat(configVersion()).isEqualTo(before + 1);
+
+        JsonHttp.Response invalid = http.put("/admin/v1/projects/order-service", """
+                {"baseUrl": "http://order-service.preprod.svc:8080", "permissionPrefix": "order_", "actor": "devops.ali"}
+                """);
+        assertThat(invalid.status()).isEqualTo(400);
+        assertThat(invalid.json().get("errors").get(0).get("field").stringValue()).isEqualTo("permissionPrefix");
+    }
+
+    @Test
     void baseUrlMustBeAPlainHttpAddress() {
         JsonHttp.Response response = http.put("/admin/v1/projects/order-service",
                 "{\"baseUrl\": \"file:///etc/passwd\", \"actor\": \"devops.ali\"}");

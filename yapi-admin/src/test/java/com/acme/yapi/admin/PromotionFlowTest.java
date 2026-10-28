@@ -292,6 +292,8 @@ class PromotionFlowTest extends AdminTestBase {
                 settings.formatted("{\"maintask\": \"Guvenlik\", \"subtask\": \"alarm_kontrol\"}"));
         assertStatus(set, 200);
         assertThat(set.json().get("alarmRoute").get("subtask").stringValue()).isEqualTo("alarm_kontrol");
+        assertThat(ENVIRONMENTS.get("DEV").projects.get("kredi").get("permissionPrefix").stringValue())
+                .isEqualTo("KREDI");
         assertThat(ENVIRONMENTS.get("DEV").projects.get("kredi").get("alarmRoute").get("maintask").stringValue())
                 .isEqualTo("guvenlik");
         assertThat(get("viewer", "/projects/" + projectId).json().toString()).contains("\"alarmRoute\"");

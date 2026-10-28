@@ -67,6 +67,7 @@ public class ClickHouseWriter implements SinkWriter {
         row.put("target_path", text(event.targetPath()));
         row.put("status_code", number(event.statusCode()));
         row.put("outcome", text(event.outcome()));
+        row.put("denied_reason", event.denial() == null ? "" : event.denial().reason().name());
         row.put("duration_ms", event.durationMs() == null ? 0 : event.durationMs());
         row.put("body", body(event.body()));
         row.put("body_size", number(event.bodySize()));

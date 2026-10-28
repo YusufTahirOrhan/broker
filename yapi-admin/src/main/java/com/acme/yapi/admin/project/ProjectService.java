@@ -227,6 +227,8 @@ public class ProjectService {
         } else {
             request.putObject("alarmRoute").put("maintask", alarm.maintask()).put("subtask", alarm.subtask());
         }
+        // the broker tells from it whether a refused user holds a permission of the project
+        request.put("permissionPrefix", project.permissionPrefix());
         request.put("actor", user.username());
         JsonNode applied = environmentClient.call(environment, "PUT", "/admin/v1/projects/" + project.maintask(), request);
         projects.upsertEnvironment(id, code, body.baseUrl(), specPath, enabled, alarm);
