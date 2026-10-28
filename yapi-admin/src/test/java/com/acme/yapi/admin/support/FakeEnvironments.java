@@ -31,6 +31,7 @@ public final class FakeEnvironments implements AutoCloseable {
         public final AtomicLong configVersion = new AtomicLong();
         public final Map<String, ObjectNode> projects = new ConcurrentHashMap<>();
         public final Map<String, ObjectNode> profiles = new ConcurrentHashMap<>();
+        public final Map<String, ObjectNode> plugins = new ConcurrentHashMap<>();
         public final Map<String, ObjectNode> routes = new ConcurrentHashMap<>();
         public final Map<String, String> probeResults = new ConcurrentHashMap<>();
         public final List<JsonNode> testCalls = new CopyOnWriteArrayList<>();
@@ -44,6 +45,7 @@ public final class FakeEnvironments implements AutoCloseable {
             configVersion.set(0);
             projects.clear();
             profiles.clear();
+            plugins.clear();
             routes.clear();
             probeResults.clear();
             testCalls.clear();
@@ -124,6 +126,7 @@ public final class FakeEnvironments implements AutoCloseable {
                 json(exchange, 200, environment.spec);
             }
             case "PUT response-profiles" -> apply(exchange, environment, environment.profiles, rest.get(1), body);
+            case "PUT plugins" -> apply(exchange, environment, environment.plugins, rest.get(1), body);
             case "PUT routes" -> {
                 String key = rest.get(1) + "/" + rest.get(2);
                 if (!environment.projects.containsKey(rest.get(1))) {

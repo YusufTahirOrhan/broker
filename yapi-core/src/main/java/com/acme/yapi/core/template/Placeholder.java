@@ -17,6 +17,10 @@ public record Placeholder(String root, String path) {
 
     public static Placeholder parse(String expression) {
         String trimmed = expression.trim();
+        // ${now:dd.MM.yyyy}: the pattern may hold dots; the path keeps the colon
+        if (trimmed.startsWith(ContextPlaceholders.NOW + ":")) {
+            return new Placeholder(ContextPlaceholders.NOW, trimmed.substring(ContextPlaceholders.NOW.length()));
+        }
         int dot = trimmed.indexOf('.');
         if (dot < 0) {
             return new Placeholder(trimmed, "");
@@ -25,7 +29,7 @@ public record Placeholder(String root, String path) {
     }
 
     public String expression() {
-        return path.isEmpty() ? root : root + "." + path;
+        return path.isEmpty() ? root : path.startsWith(":") ? root + path : root + "." + path;
     }
 
     @Override

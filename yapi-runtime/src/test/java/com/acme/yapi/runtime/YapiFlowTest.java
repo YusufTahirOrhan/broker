@@ -28,6 +28,7 @@ import org.springframework.test.context.DynamicPropertySource;
 
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.logging.LogEvent;
+import com.acme.yapi.core.plugin.Plugin;
 import com.acme.yapi.core.route.AlarmRoute;
 import com.acme.yapi.core.runtime.RuntimeSignals;
 import com.acme.yapi.core.session.SessionRecord;
@@ -691,6 +692,74 @@ class YapiFlowTest {
     }
 
     @Test
+    void pluginsAddToRequestsAndResponsesInTheirOrder() {
+        RuntimeFixture.plugin("stamp", 2, """
+                {"scope": "GLOBAL",
+                 "request": [{"op": "set", "target": "header", "name": "X-Request-Date", "value": "${today}"},
+                             {"op": "set", "target": "header", "name": "X-Channel", "value": "PLUGIN"},
+                             {"op": "set", "target": "body", "name": "meta.environment", "value": "${environment}"},
+                             {"op": "set", "target": "body", "name": "source", "value": "PLUGIN"},
+                             {"op": "set", "target": "query", "name": "trace", "value": "${traceId}"}],
+                 "response": [{"op": "set", "target": "header", "name": "X-Response-Time", "value": "${durationMs}"},
+                              {"op": "set", "target": "body", "name": "meta.subtask", "value": "${route.subtask}"}]}
+                """);
+        RuntimeFixture.plugin("orders-only", 1, """
+                {"scope": "PROJECT", "projects": ["order-service"],
+                 "response": [{"op": "set", "target": "header", "name": "X-Order-Plugin", "value": "${backend.status}"}]}
+                """);
+        RuntimeFixture.plugin("chosen", 4, """
+                {"scope": "SUBTASK",
+                 "request": [{"op": "set", "target": "header", "name": "X-Sicil", "value": "${user.id}"}]}
+                """);
+        // a broken row is skipped with a metric; the other plugins and every route still serve
+        RuntimeFixture.plugin("broken", 1, "{\"scope\": \"EVERYWHERE\"}");
+        RuntimeFixture.route("order-service", "add_order_note", "POST", "/orders/{id}/notes", List.of("ORDER_WRITE"),
+                false, null, CoreFixtures.ADD_ORDER_NOTE.replaceFirst("\"response\"", "\"plugins\": [\"chosen\"], \"response\""));
+        double skipped = meters.find("yapi.routes.skipped").tag("kind", "plugin").counter() == null ? 0
+                : meters.find("yapi.routes.skipped").tag("kind", "plugin").counter().count();
+        cache.reload();
+        assertThat(meters.find("yapi.routes.skipped").tag("kind", "plugin").counter().count()).isEqualTo(skipped + 1);
+        backend.json("POST", "/orders/42/notes", 201, "{\"noteId\": 9}");
+
+        JsonHttp.Response note = yapi("tok-1", """
+                {"maintask": "order-service", "subtask": "add_order_note", "siparisNo": 42, "notMetni": "Merhaba"}
+                """);
+
+        assertThat(note.status()).isEqualTo(201);
+        assertThat(note.json()).isEqualTo(Json.parse("{\"noteId\": 9, \"meta\": {\"subtask\": \"add_order_note\"}}"));
+        assertThat(Long.parseLong(note.header("X-Response-Time"))).isNotNegative();
+        assertThat(note.header("X-Order-Plugin")).isEqualTo("201");
+        FakeHttpServer.Recorded sent = backend.requests("/orders/42/notes").getFirst();
+        assertThat(sent.header("X-Request-Date")).isEqualTo(java.time.LocalDate.now(java.time.ZoneId.of("Europe/Istanbul")).toString());
+        // what the definition writes itself stays: its header, its body fields
+        assertThat(sent.header("X-Channel")).isEqualTo("WEB");
+        assertThat(sent.header("X-Sicil")).isEqualTo("u12345");
+        assertThat(sent.query()).startsWith("notify=false&trace=");
+        assertThat(Json.parse(sent.bodyText())).isEqualTo(Json.parse("""
+                {"text": "Merhaba", "authorId": "u12345", "source": "WEB", "meta": {"environment": "PREPROD"}}
+                """));
+        LogEvent event = events.awaitType(note.header("X-Request-Id"), LogEvent.EventType.RESPONSE);
+        assertThat(event.plugins()).extracting(Plugin.Applied::name).containsExactly("stamp", "orders-only", "chosen");
+        assertThat(event.plugins().getFirst().version()).isEqualTo(2);
+
+        // a refusal is the broker's own answer: no plugin
+        JsonHttp.Response refused = yapi("tok-2", """
+                {"maintask": "order-service", "subtask": "add_order_note", "siparisNo": 42, "notMetni": "x"}
+                """);
+        assertThat(refused.header("X-Response-Time")).isNull();
+        assertThat(events.awaitType(refused.header("X-Request-Id"), LogEvent.EventType.RESPONSE).plugins()).isNull();
+
+        // a file gets header operations only, its bytes are untouched
+        byte[] excel = "excel".getBytes(StandardCharsets.US_ASCII);
+        backend.on("GET", "/reports/6/excel", (exchange, request) -> FakeHttpServer.respond(exchange, 200,
+                Map.of("Content-Type", "application/vnd.ms-excel", "Content-Disposition", "attachment"), excel));
+        JsonHttp.Response file = yapi("tok-1", "{\"maintask\": \"files\", \"subtask\": \"download_report\", \"id\": 6}");
+        assertThat(file.bytes()).isEqualTo(excel);
+        assertThat(file.header("X-Response-Time")).isNotNull();
+        assertThat(file.header("Content-Disposition")).isEqualTo("attachment");
+    }
+
+    @Test
     void fileResponsesAreStreamedAndTheirBodyIsNotLogged() {
         byte[] excel = new byte[100_000];
         new java.util.Random(7).nextBytes(excel);
@@ -809,6 +878,28 @@ class YapiFlowTest {
         assertThat(invalid.json().get("errors").valueStream().map(error -> error.get("field").stringValue()))
                 .containsExactlyInAnyOrder("siparisNo", "notMetni");
         assertThat(backend.requests("/orders/5/notes")).hasSize(1);
+
+        // the plugins the central admin chose for the subtask apply to the test too
+        String withPlugin = call.replace("\"actor\": \"devops.ali\"}", """
+                "actor": "devops.ali",
+                 "plugins": [{"name": "stamp", "version": 3, "definition": {"scope": "GLOBAL",
+                   "request": [{"op": "set", "target": "header", "name": "X-Env", "value": "${environment}"}],
+                   "response": [{"op": "set", "target": "body", "name": "meta.outcome", "value": "${outcome}"},
+                                {"op": "set", "target": "header", "name": "X-Took", "value": "${durationMs}"}]}}]}""");
+        JsonNode plugged = http.send("POST", TestCallRequest.PATH, withPlugin.formatted(backend.baseUrl(),
+                        CoreFixtures.ADD_ORDER_NOTE, CoreFixtures.LOG_PROJECT_PROFILE,
+                        "{\"siparisNo\": 5, \"notMetni\": \"x\"}"),
+                Map.of(TestCallRequest.SECRET_HEADER, "s3cret")).json();
+        assertThat(plugged.get("request").get("headers").get("X-Env").stringValue()).isEqualTo("PREPROD");
+        assertThat(plugged.get("clientResponse").get("body").get("meta").get("outcome").stringValue())
+                .isEqualTo("SUCCESS");
+        assertThat(plugged.get("clientResponse").get("headers").has("X-Took")).isTrue();
+        assertThat(plugged.get("plugins").get(0).get("name").stringValue()).isEqualTo("stamp");
+        JsonNode badPlugin = http.send("POST", TestCallRequest.PATH, withPlugin.replace("\"GLOBAL\"", "\"ALL\"")
+                        .formatted(backend.baseUrl(), CoreFixtures.ADD_ORDER_NOTE, CoreFixtures.LOG_PROJECT_PROFILE,
+                                "{\"siparisNo\": 5, \"notMetni\": \"x\"}"),
+                Map.of(TestCallRequest.SECRET_HEADER, "s3cret")).json();
+        assertThat(badPlugin.get("errors").get(0).get("field").stringValue()).isEqualTo("plugins[0].definition.scope");
     }
 
     private static void sleep(long millis) {

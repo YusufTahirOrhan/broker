@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.acme.yapi.core.json.Json;
+import com.acme.yapi.core.plugin.Plugin;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
@@ -76,7 +77,20 @@ public final class EventCodec {
             node.put("has_project_permission", denial.hasProjectPermission().booleanValue());
         }
         node.set("request_body", denial == null || denial.requestBody() == null ? Json.nullNode() : denial.requestBody());
+        node.set("plugins", plugins(event.plugins()));
         return node;
+    }
+
+    /** {@code [{"name", "version"}]} or null. */
+    public static JsonNode plugins(List<Plugin.Applied> plugins) {
+        if (plugins == null) {
+            return Json.nullNode();
+        }
+        ArrayNode array = Json.array();
+        for (Plugin.Applied plugin : plugins) {
+            array.addObject().put("name", plugin.name()).put("version", plugin.version());
+        }
+        return array;
     }
 
     public static byte[] toBytes(LogEvent event) {
@@ -118,7 +132,21 @@ public final class EventCodec {
                 string(node, "error_message"),
                 string(node, "yapi_instance"),
                 nullToNull(node.get("alarm")),
-                denial(node));
+                denial(node),
+                plugins(node.get("plugins")));
+    }
+
+    private static List<Plugin.Applied> plugins(JsonNode array) {
+        if (array == null || !array.isArray()) {
+            return null;
+        }
+        List<Plugin.Applied> plugins = new ArrayList<>();
+        for (JsonNode element : array) {
+            JsonNode version = element.get("version");
+            plugins.add(new Plugin.Applied(Json.stringField(element, "name"),
+                    version != null && version.isNumber() ? version.intValue() : 0));
+        }
+        return plugins;
     }
 
     private static LogEvent.Denial denial(JsonNode node) {

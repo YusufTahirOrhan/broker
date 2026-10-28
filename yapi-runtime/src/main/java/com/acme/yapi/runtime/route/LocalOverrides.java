@@ -93,7 +93,8 @@ public class LocalOverrides implements SnapshotCustomizer {
             }
         }
         log.info("Yerel override uygulandı: {} base URL, {} route", baseUrls.size(), added);
-        return RouteSnapshot.of(loaded.version(), routes.values(), projects.values(), loaded.profiles());
+        return RouteSnapshot.of(loaded.version(), routes.values(), projects.values(), loaded.profiles(),
+                loaded.plugins());
     }
 
     private Route overrideRoute(JsonNode node, RouteSnapshot loaded, Map<String, String> baseUrls,

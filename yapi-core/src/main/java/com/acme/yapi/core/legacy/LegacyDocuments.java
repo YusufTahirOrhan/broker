@@ -217,6 +217,9 @@ public final class LegacyDocuments {
         putIfPresent(yapi, "trace_id", event.traceId());
         putIfPresent(yapi, "environment", event.environment());
         putIfPresent(yapi, "yapi_instance", event.yapiInstance());
+        if (event.plugins() != null && !event.plugins().isEmpty()) {
+            yapi.set("plugins", EventCodec.plugins(event.plugins()));
+        }
         return document;
     }
 

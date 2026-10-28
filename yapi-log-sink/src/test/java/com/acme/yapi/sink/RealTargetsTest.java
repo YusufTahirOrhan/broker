@@ -210,7 +210,7 @@ class RealTargetsTest {
                 response.token(), response.sessionOperation(), response.clientIp(), response.userAgent(),
                 response.httpMethod(), response.targetPath(), response.statusCode(), response.outcome(),
                 response.durationMs(), response.body(), response.bodySize(), true, clientResponse,
-                response.errorMessage(), response.yapiInstance(), response.alarm(), response.denial());
+                response.errorMessage(), response.yapiInstance(), response.alarm(), response.denial(), response.plugins());
 
         assertThat(writer.write(List.of(Events.request(id, "order-service"), logged))).isEmpty();
         send("POST", elasticUrl() + "/requests_2026-10/_refresh", "");
@@ -230,7 +230,7 @@ class RealTargetsTest {
                 event.permList(), event.token(), event.sessionOperation(), event.clientIp(), event.userAgent(),
                 event.httpMethod(), event.targetPath(), event.statusCode(), event.outcome(), event.durationMs(), body,
                 event.bodySize(), event.bodyTruncated(), event.clientResponse(), event.errorMessage(),
-                event.yapiInstance(), event.alarm(), event.denial());
+                event.yapiInstance(), event.alarm(), event.denial(), event.plugins());
     }
 
     private static String clickhouseUrl() {

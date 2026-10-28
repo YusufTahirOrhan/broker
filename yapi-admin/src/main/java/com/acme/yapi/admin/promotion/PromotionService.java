@@ -16,6 +16,8 @@ import com.acme.yapi.admin.authz.AuthorizationService;
 import com.acme.yapi.admin.db.Versions;
 import com.acme.yapi.admin.environment.Environment;
 import com.acme.yapi.admin.environment.EnvironmentRepository;
+import com.acme.yapi.admin.plugin.PluginRepository;
+import com.acme.yapi.admin.plugin.PluginService;
 import com.acme.yapi.admin.profile.ProfileRepository;
 import com.acme.yapi.admin.profile.ProfileService;
 import com.acme.yapi.admin.project.ProjectRepository;
@@ -48,17 +50,19 @@ public class PromotionService {
     private final PromotionApplier applier;
     private final RouteRepository routes;
     private final ProfileRepository profiles;
+    private final PluginRepository plugins;
     private final ProjectRepository projects;
     private final EnvironmentRepository environments;
     private final AuthorizationService authorization;
 
     public PromotionService(PromotionRepository promotions, PromotionApplier applier, RouteRepository routes,
-                            ProfileRepository profiles, ProjectRepository projects, EnvironmentRepository environments,
-                            AuthorizationService authorization) {
+                            ProfileRepository profiles, PluginRepository plugins, ProjectRepository projects,
+                            EnvironmentRepository environments, AuthorizationService authorization) {
         this.promotions = promotions;
         this.applier = applier;
         this.routes = routes;
         this.profiles = profiles;
+        this.plugins = plugins;
         this.projects = projects;
         this.environments = environments;
         this.authorization = authorization;
@@ -91,22 +95,28 @@ public class PromotionService {
     }
 
     /** What a request moves: the version's snapshot in the screens' camelCase form. */
-    private record Subject(boolean route, long id, String name, Long projectId, String profileName, JsonNode snapshot) {
+    private record Subject(SubjectType type, long id, String name, Long projectId, String profileName,
+                           JsonNode snapshot) {
+
+        boolean route() {
+            return type == SubjectType.ROUTE;
+        }
     }
 
     public View create(User user, Create body) {
         user.require(Role.ROUTE_EDITOR);
         List<FieldError> errors = new ArrayList<>();
-        boolean route = "ROUTE".equals(body.subjectType());
-        if (!route && !"PROFILE".equals(body.subjectType())) {
-            errors.add(new FieldError("subjectType", "ROUTE ya da PROFILE olmalı"));
+        Optional<SubjectType> type = SubjectType.parse(body.subjectType());
+        boolean route = type.orElse(null) == SubjectType.ROUTE;
+        if (type.isEmpty()) {
+            errors.add(new FieldError("subjectType", "ROUTE, PROFILE ya da PLUGIN olmalı"));
         }
         if (body.subjectId() == null) {
             errors.add(new FieldError("subjectId", "Zorunlu"));
         }
         if (body.action() == null || !(route ? ROUTE_ACTIONS : PROFILE_ACTIONS).contains(body.action())) {
             errors.add(new FieldError("action", route ? "DEPLOY, DISABLE, ENABLE ya da ROLLBACK olmalı"
-                    : "Profilde yalnızca DEPLOY ve ROLLBACK"));
+                    : "Profil ve eklentide yalnızca DEPLOY ve ROLLBACK"));
         }
         if (body.targetEnv() == null || environments.find(body.targetEnv()).isEmpty()) {
             errors.add(new FieldError("targetEnv", "Ortam yok"));
@@ -130,7 +140,11 @@ public class PromotionService {
                         .orElseThrow(() -> ApiException.notFound("Subtask yok: " + body.subjectId()));
             }
         }
-        Subject subject = subject(route, body.subjectId(), version);
+        Subject subject = subject(type.get(), body.subjectId(), version);
+        if (subject.type() == SubjectType.PLUGIN && PluginService.isGlobal(subject.snapshot().get("definition"))) {
+            // a GLOBAL plugin reaches every subtask: only an APPROVER moves it
+            user.require(Role.APPROVER);
+        }
         Optional<Environment> source = "DEPLOY".equals(body.action()) ? environments.previous(target) : Optional.empty();
         List<Check> checks = prechecks(subject, version, target, source, body.action());
         long failed = checks.stream().filter(check -> !check.ok()).count();
@@ -145,7 +159,7 @@ public class PromotionService {
         }
         long id;
         try {
-            id = promotions.insert(route, subject.id(), version, source.map(Environment::code).orElse(null),
+            id = promotions.insert(subject.type(), subject.id(), version, source.map(Environment::code).orElse(null),
                     target.code(), body.action(), approval ? "PENDING_APPROVAL" : "APPLYING", user.username(),
                     body.reason());
         } catch (DuplicateKeyException e) {
@@ -254,11 +268,11 @@ public class PromotionService {
                         + (active ? "aktif" : "aktif değil; yalnızca bir önceki ortamda aktif versiyon taşınır")));
             }
         }
-        Optional<Long> open = promotions.open(subject.route(), subject.id(), target.code());
+        Optional<Long> open = promotions.open(subject.type(), subject.id(), target.code());
         checks.add(new Check("NO_OPEN_REQUEST", open.isEmpty(), open.isEmpty() ? "Açık talep yok"
                 : "Aynı hedef için açık talep var: #" + open.get()));
         if (rollback) {
-            boolean applied = promotions.previouslyApplied(subject.route(), subject.id(), version, target.code());
+            boolean applied = promotions.previouslyApplied(subject.type(), subject.id(), version, target.code());
             checks.add(new Check("PREVIOUSLY_APPLIED", applied, "v" + version + " " + target.code()
                     + (applied ? " ortamına daha önce uygulanmış" : " ortamına daha önce uygulanmamış")));
         }
@@ -274,8 +288,29 @@ public class PromotionService {
             checks.add(profileCheck(subject, target));
             checks.add(projectCheck(subject, target));
             alarmCheck(subject, target).ifPresent(checks::add);
+            pluginsCheck(subject, target).ifPresent(checks::add);
         }
         return checks;
+    }
+
+    /** The SUBTASK plugins the subtask chooses must be active in the target, or its requests would go without them. */
+    private Optional<Check> pluginsCheck(Subject subject, Environment target) {
+        List<String> chosen = RouteSnapshots.strings(subject.snapshot().path("definition").get("plugins"));
+        if (chosen.isEmpty()) {
+            return Optional.empty();
+        }
+        List<String> missing = new ArrayList<>();
+        for (String name : chosen) {
+            boolean active = plugins.list().stream().filter(row -> com.acme.yapi.core.naming.Names.sameName(row.name(), name))
+                    .findFirst().flatMap(row -> plugins.deployment(row.id(), target.code())).isPresent();
+            if (!active) {
+                missing.add(name);
+            }
+        }
+        return Optional.of(new Check("PLUGINS_ACTIVE", missing.isEmpty(), missing.isEmpty()
+                ? "Seçilen eklentiler " + target.code() + " ortamında aktif"
+                : target.code() + " ortamında aktif olmayan eklenti: " + String.join(", ", missing)
+                        + "; önce eklenti taşınmalı"));
     }
 
     private Check permissionsCheck(Subject subject, Environment target) {
@@ -357,13 +392,15 @@ public class PromotionService {
     }
 
     private boolean activeIn(Subject subject, int version, String environment) {
-        if (subject.route()) {
-            return routes.deployment(subject.id(), environment)
+        return switch (subject.type()) {
+            case ROUTE -> routes.deployment(subject.id(), environment)
                     .filter(deployment -> deployment.version() == version && "ACTIVE".equals(deployment.status()))
                     .isPresent();
-        }
-        return profiles.deployment(subject.id(), environment).filter(deployment -> deployment.version() == version)
-                .isPresent();
+            case PROFILE -> profiles.deployment(subject.id(), environment)
+                    .filter(deployment -> deployment.version() == version).isPresent();
+            case PLUGIN -> plugins.deployment(subject.id(), environment)
+                    .filter(deployment -> deployment.version() == version).isPresent();
+        };
     }
 
     /** Anonymous access needs approval in every environment: the version is anonymous and what runs there is not. */
@@ -372,34 +409,52 @@ public class PromotionService {
     }
 
     private JsonNode deployedSnapshot(Subject subject, String environment) {
-        if (subject.route()) {
-            return routes.deployment(subject.id(), environment)
+        return switch (subject.type()) {
+            case ROUTE -> routes.deployment(subject.id(), environment)
                     .flatMap(deployment -> routes.history(subject.id(), deployment.version()))
                     .map(row -> (JsonNode) RouteSnapshots.view(row.snapshot())).orElse(null);
-        }
-        return profiles.deployment(subject.id(), environment)
-                .flatMap(deployment -> profiles.history(subject.id(), deployment.version()))
-                .map(row -> (JsonNode) ProfileService.snapshot(row.snapshot())).orElse(null);
+            case PROFILE -> profiles.deployment(subject.id(), environment)
+                    .flatMap(deployment -> profiles.history(subject.id(), deployment.version()))
+                    .map(row -> (JsonNode) ProfileService.snapshot(row.snapshot())).orElse(null);
+            case PLUGIN -> plugins.deployment(subject.id(), environment)
+                    .flatMap(deployment -> plugins.history(subject.id(), deployment.version()))
+                    .map(row -> (JsonNode) PluginService.snapshot(row.snapshot())).orElse(null);
+        };
     }
 
     private Integer deployedVersion(Subject subject, String environment) {
-        return subject.route()
-                ? routes.deployment(subject.id(), environment).map(RouteRepository.Deployment::version).orElse(null)
-                : profiles.deployment(subject.id(), environment).map(ProfileRepository.Deployment::version).orElse(null);
+        return switch (subject.type()) {
+            case ROUTE -> routes.deployment(subject.id(), environment).map(RouteRepository.Deployment::version)
+                    .orElse(null);
+            case PROFILE -> profiles.deployment(subject.id(), environment).map(ProfileRepository.Deployment::version)
+                    .orElse(null);
+            case PLUGIN -> plugins.deployment(subject.id(), environment).map(PluginRepository.Deployment::version)
+                    .orElse(null);
+        };
     }
 
-    private Subject subject(boolean route, long id, int version) {
-        if (route) {
-            RouteRepository.Row row = routes.find(id).orElseThrow(() -> ApiException.notFound("Subtask yok: " + id));
-            RouteRepository.HistoryRow history = routes.history(id, version)
-                    .orElseThrow(() -> ApiException.notFound("Versiyon yok: v" + version));
-            return new Subject(true, id, row.maintask() + " / " + row.subtask(), row.projectId(), null,
-                    RouteSnapshots.view(history.snapshot()));
-        }
-        ProfileRepository.Row row = profiles.find(id).orElseThrow(() -> ApiException.notFound("Profil yok: " + id));
-        ProfileRepository.HistoryRow history = profiles.history(id, version)
-                .orElseThrow(() -> ApiException.notFound("Versiyon yok: v" + version));
-        return new Subject(false, id, row.name(), null, row.name(), ProfileService.snapshot(history.snapshot()));
+    private Subject subject(SubjectType type, long id, int version) {
+        return switch (type) {
+            case ROUTE -> {
+                RouteRepository.Row row = routes.find(id).orElseThrow(() -> ApiException.notFound("Subtask yok: " + id));
+                RouteRepository.HistoryRow history = routes.history(id, version)
+                        .orElseThrow(() -> ApiException.notFound("Versiyon yok: v" + version));
+                yield new Subject(type, id, row.maintask() + " / " + row.subtask(), row.projectId(), null,
+                        RouteSnapshots.view(history.snapshot()));
+            }
+            case PROFILE -> {
+                ProfileRepository.Row row = profiles.find(id).orElseThrow(() -> ApiException.notFound("Profil yok: " + id));
+                ProfileRepository.HistoryRow history = profiles.history(id, version)
+                        .orElseThrow(() -> ApiException.notFound("Versiyon yok: v" + version));
+                yield new Subject(type, id, row.name(), null, row.name(), ProfileService.snapshot(history.snapshot()));
+            }
+            case PLUGIN -> {
+                PluginRepository.Row row = plugins.find(id).orElseThrow(() -> ApiException.notFound("Eklenti yok: " + id));
+                PluginRepository.HistoryRow history = plugins.history(id, version)
+                        .orElseThrow(() -> ApiException.notFound("Versiyon yok: v" + version));
+                yield new Subject(type, id, row.name(), null, null, PluginService.snapshot(history.snapshot()));
+            }
+        };
     }
 
     private View view(User user, PromotionRepository.Row row, boolean detail) {
@@ -408,17 +463,17 @@ public class PromotionService {
         Diff diff = null;
         List<AffectedRoute> affected = null;
         if (detail) {
-            Subject subject = subject(row.route(), row.subjectId(), row.subjectVersion());
+            Subject subject = subject(row.type(), row.subjectId(), row.subjectVersion());
             JsonNode deployed = deployedSnapshot(subject, row.targetEnv());
             diff = new Diff(deployedVersion(subject, row.targetEnv()), Versions.changes(deployed, subject.snapshot()),
                     row.route() ? RouteSnapshots.foreignAdded(deployed, subject.snapshot()) : List.of(),
                     row.route() && RouteSnapshots.opensAnonymous(deployed, subject.snapshot()));
-            affected = row.route() ? List.of() : profiles.usage(row.profileId()).stream()
+            affected = row.type() != SubjectType.PROFILE ? List.of() : profiles.usage(row.profileId()).stream()
                     .filter(usage -> usage.environment().equals(row.targetEnv()))
                     .map(usage -> new AffectedRoute(usage.routeId(), usage.maintask(), usage.subtask(), usage.version()))
                     .toList();
         }
-        return new View(row.id(), row.route() ? "ROUTE" : "PROFILE", row.subjectId(), row.subjectName(),
+        return new View(row.id(), row.type().name(), row.subjectId(), row.subjectName(),
                 row.subjectVersion(), row.sourceEnv(), row.targetEnv(), row.action(), row.status(), approval,
                 row.requestedBy(), row.requestedAt(), row.reason(), row.decidedBy(), row.decidedAt(),
                 row.decisionNote(), row.probeStatus(), row.configVersion(), row.appliedAt(), row.failureReason(), diff,

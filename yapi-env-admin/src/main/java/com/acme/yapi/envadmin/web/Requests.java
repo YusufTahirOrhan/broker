@@ -23,6 +23,10 @@ public final class Requests {
     public record ProfileApply(Long promotionId, Long profileId, Integer version, JsonNode definition, String actor) {
     }
 
+    /** {@code PUT /admin/v1/plugins/{name}}. */
+    public record PluginApply(Long promotionId, Long pluginId, Integer version, JsonNode definition, String actor) {
+    }
+
     /** {@code POST /admin/v1/routes/{maintask}/{subtask}/disable}. */
     public record Disable(Long promotionId, String actor) {
     }

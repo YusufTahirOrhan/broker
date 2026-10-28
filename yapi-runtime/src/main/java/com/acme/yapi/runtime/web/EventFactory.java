@@ -1,6 +1,7 @@
 package com.acme.yapi.runtime.web;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 
 import org.springframework.stereotype.Component;
@@ -191,7 +192,15 @@ class EventFactory {
                 x.session == null ? null : x.session.permissionList(), x.token, x.sessionOperation, x.clientIp,
                 x.userAgent, httpMethod, path, statusCode, outcome, durationMs, body, bodySize, truncated,
                 clientResponse, errorMessage, instance, type == LogEvent.EventType.RESPONSE ? x.alarm : null,
-                type == LogEvent.EventType.RESPONSE ? denial(x) : null);
+                type == LogEvent.EventType.RESPONSE ? denial(x) : null,
+                type == LogEvent.EventType.RESPONSE ? applied(x) : null);
+    }
+
+    /** The plugins that worked on the request or its response, in the order they apply; null when none. */
+    private static List<com.acme.yapi.core.plugin.Plugin.Applied> applied(Exchange x) {
+        List<com.acme.yapi.core.plugin.Plugin.Applied> applied = x.plugins.stream()
+                .map(com.acme.yapi.core.plugin.Plugin::applied).filter(x.appliedPlugins::contains).toList();
+        return applied.isEmpty() ? null : applied;
     }
 
     private static LogEvent.Denial denial(Exchange x) {

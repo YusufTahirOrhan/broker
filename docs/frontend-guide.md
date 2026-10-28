@@ -36,7 +36,7 @@ Vurgulu oklar taşıma akışıdır: talep subtask ya da profil editöründen a�
 
 ## Ekranlar ve akışlar
 
-Uygulama dört ana bölümden oluşur: Projeler, Yanıt profilleri, Talepler ve Ortamlar. Subtask editörü proje detayından açılır. Parantez içindeki yollar `/api/v1` altındadır; ayrıntıları Uç noktalar bölümündedir.
+Uygulama beş ana bölümden oluşur: Projeler, Yanıt profilleri, Eklentiler, Talepler ve Ortamlar. Subtask editörü proje detayından açılır. Parantez içindeki yollar `/api/v1` altındadır; ayrıntıları Uç noktalar bölümündedir.
 
 ### Açılış
 
@@ -116,9 +116,20 @@ Ham metin backend'de saklanmaz; ekran da onu tarayıcı deposuna (localStorage) 
 - **Önizleme:** Örnek bir servis yanıtıyla (status, body ve isteğe bağlı header'lar) frontend'in alacağı yanıtı gösterir (`POST /response-profiles/preview`); kullanılan şablon (`matchedTemplate`) ve tutan koşulun sırası (`matchedCase`) editörde işaretlenir.
 - **Etki:** Detayda profili kullanan subtask'ler ortam bazında listelenir. Profil değişikliği taşındığı ortamda hepsini etkiler.
 
+### Eklentiler
+
+Eklenti, subtask'lere istek ve yanıt anında alan ekleyen, adı ve versiyonu olan bir tanımdır; yanıt profilleri gibi geçmişi tutulur ve ortamlara taşınır (`/plugins`).
+
+- **Desen:** Liste, editör, geçmiş, karşılaştırma ve geri alma yanıt profilleriyle aynıdır. Listede her eklentinin kapsamı ve ortam rozetleri görünür.
+- **Kapsam:** "Bütün subtask'ler" (`GLOBAL`), "Seçili projeler" (`PROJECT`, proje seçici) ya da "Yalnızca seçen subtask'ler" (`SUBTASK`). `GLOBAL` eklentiyi yalnızca `APPROVER` oluşturur, değiştirir ve taşır; başkalarına seçenek kapalı gösterilir.
+- **İşlemler:** "İstekte" ve "Yanıtta" iki tablo. Her satır bir işlemdir: ne yapılacağı (`set` yaz, `setIfAbsent` yoksa yaz, `remove` sil), nereye (istekte header, query, body; yanıtta header, body), ad (header adı, parametre ya da noktalı body yolu) ve değer. Değer kutusunda `${` yazılınca o tablonun yer tutucuları önerilir (`definition-rules`'da `placeholders.pluginRequest` ve `pluginResponse`).
+- **Sıra ve kurallar** (editör altta özet olarak gösterir): önce `GLOBAL`, sonra `PROJECT`, sonra `SUBTASK` eklentileri, aynı düzeyde ada göre uygulanır. İstek işlemleri subtask tanımının açıkça yazdığı header, query ve body alanlarına dokunmaz. Yanıt işlemleri yanıt profilinden sonra uygulanır. Body işlemleri yalnızca JSON nesnesinde yapılır. Dosya yanıtına yalnızca header işlemleri uygulanır. Broker'ın kendi verdiği yanıtlara (application, oturum, yetki, ortak format) eklenti uygulanmaz.
+- **Önizleme:** Örnek bir subtask (method, path, tanım, örnek gövde) ve örnek bir servis yanıtıyla eklentinin isteği ve yanıtı nasıl değiştirdiğini gösterir (`POST /plugins/preview`).
+- **Subtask editöründe:** "Eklentiler" bölümünde subtask'e uygulanacak eklentiler sırasıyla listelenir. `SUBTASK` eklentileri buradan seçilir (`definition.plugins`), devralınan `GLOBAL` ve `PROJECT` eklentileri kapatılabilir (`definition.disabledPlugins`). Önizleme ve test sonucu uygulanan eklentileri (`plugins`) gösterir.
+
 ### Taşıma ve onay
 
-- **Talep:** Subtask ya da profil ekranındaki "Taşı" penceresi hedef ortamı (yalnızca bir sonraki ortam), versiyonu (kaynak ortamda aktif olan) ve aksiyonu sorar (`POST /promotions`). Subtask'te `DEPLOY`, `DISABLE`, `ENABLE`, `ROLLBACK`; profilde `DEPLOY` ve `ROLLBACK` vardır. Onay isteyen taleplerde gerekçe ya da değişiklik kaydı numarası zorunludur.
+- **Talep:** Subtask, profil ya da eklenti ekranındaki "Taşı" penceresi hedef ortamı (yalnızca bir sonraki ortam), versiyonu (kaynak ortamda aktif olan) ve aksiyonu sorar (`POST /promotions`). Subtask'te `DEPLOY`, `DISABLE`, `ENABLE`, `ROLLBACK`; profil ve eklentide `DEPLOY` ve `ROLLBACK` vardır. Onay isteyen taleplerde gerekçe ya da değişiklik kaydı numarası zorunludur.
 - **Ön kontrol:** Başarısız olursa talep açılmaz. 422 `PRECHECK_FAILED` yanıtındaki `checks` listesi madde madde gösterilir, örneğin "yetki hedef ortamda yok".
 - **Sonuç:** Onay gerekmiyorsa yanıt talebin son durumunu taşır: `APPLIED` ya da `FAILED`. Ortamdan yanıt alınamadıysa talep `APPLYING`'de kalır ve `RETRY` ile tamamlanır. Onay gerekiyorsa talep `PENDING_APPROVAL` olur.
 - **Talepler listesi:** Durum, hedef ortam, proje ve "benim taleplerim" filtreleri (`GET /promotions`). Onaylayanın varsayılan görünümü onay bekleyenlerdir.
@@ -248,6 +259,18 @@ Tüm yollar `/api/v1` altındadır. Rol sütunu en az gereken roldür; şemalar�
 | GET | `/response-profiles/{id}/history`, `/history/{version}`, `/compare` | VIEWER | Subtask'lerle aynı |
 | POST | `/response-profiles/preview` | VIEWER | Örnek servis yanıtıyla zarflanmış yanıt |
 
+### Eklentiler
+
+| Method | Yol | Rol | Ne yapar |
+| --- | --- | --- | --- |
+| GET | `/plugins` | VIEWER | Eklentiler, kapsamları ve ortam dağılımları |
+| POST | `/plugins` | ROUTE\_EDITOR (`GLOBAL`'de APPROVER) | Yeni eklenti |
+| GET | `/plugins/{id}` | VIEWER | Tam tanım ve ortam dağılımları |
+| PUT | `/plugins/{id}` | ROUTE\_EDITOR (`GLOBAL` olan ya da olacak eklentide APPROVER) | Yeni versiyon; gövdede okunan `version` |
+| POST | `/plugins/{id}/rollback` | ROUTE\_EDITOR (aynı kural) | Eski versiyonu yeni versiyon olarak yazar |
+| GET | `/plugins/{id}/history`, `/history/{version}`, `/compare` | VIEWER | Profillerle aynı |
+| POST | `/plugins/preview` | VIEWER | Eklentiyi örnek bir subtask'e ve servis yanıtına uygular |
+
 ### Taşıma
 
 | Method | Yol | Rol | Ne yapar |
@@ -324,7 +347,7 @@ Gövde `fields` tanımına uymazsa istek gönderilmez: `outcome` `INVALID_REQUES
 
 ### Örnek: taşıma talebi
 
-`POST /promotions` gövdesi; profil için `subjectType` `PROFILE`'dır:
+`POST /promotions` gövdesi; profil için `subjectType` `PROFILE`, eklenti için `PLUGIN`'dir:
 
 ```json
 { "subjectType": "ROUTE", "subjectId": 17, "version": 4, "targetEnv": "PROD", "action": "DEPLOY", "reason": "CHG-1234" }
@@ -399,13 +422,16 @@ Yukarıdaki örneklerde görünmeyen gövde ve yanıt alanları. Alan adları ca
 | `GET /routes/{id}/history/{version}` | — | `{"version", "action", "changedBy", "changedAt", "comment", "snapshot"}`; `snapshot`: `subtask`, `httpMethod`, `pathTemplate`, `permissions`, `foreignPermissions`, `anonymous`, `responseProfileId`, `definition`, `status`. Profilde `name`, `description`, `definition` |
 | `GET /routes/{id}/compare` | — | `{"from", "to", "changes": [{"path", "before", "after"}], "foreignPermissionsAdded", "foreignPermissionsRemoved", "opensAnonymous"}`; profilde yalnızca `from`, `to`, `changes` |
 | `POST /routes/validate` | Subtask gövdesi ve `projectId` | Her zaman 200: `{"valid", "errors"}`. Yetkilendirme servisine gitmez |
-| `POST /routes/preview` | Test gövdesi ve `projectId` | Tanım hatalıysa 400 `VALIDATION_FAILED`. Örnek gövde uymuyorsa 200 ve `request: null`. Base URL seçilen ortamınkidir (`environment` yoksa ilk ortam) |
+| `POST /routes/preview` | Test gövdesi ve `projectId` | Tanım hatalıysa 400 `VALIDATION_FAILED`. Örnek gövde uymuyorsa 200 ve `request: null`. Base URL seçilen ortamınkidir (`environment` yoksa ilk ortam). Yanıtta `plugins: [{"name", "version"}]`: isteğe uygulanan eklentiler; eklentiler seçilen ortamda aktif versiyonlarıyla, ortamda yoksa güncel versiyonlarıyla uygulanır |
 | `GET /projects/{id}/spec?env=` | — | `{"environment", "items": [{"group", "httpMethod", "path", "operationId", "summary", "fingerprint", "specOperation", "route", "proposal", "changes"}]}`. `route`: `{id, subtask, version, pathTemplate, specFingerprint}` ya da `null`; `proposal` yalnızca `NEW`'de, `changes` yalnızca `CHANGED`'de dolu. Sıra `MISSING`, `CHANGED`, `NEW`, `SAME`. Eşleşmede path değişkenlerinin adı yok sayılır: `/orders/{id}` ile `/orders/{orderId}` aynıdır |
 | `POST /projects/{id}/templates/from-sample` | `{"text", "environment", "operation": {"httpMethod", "path"}}` | `{"maintask", "subtask", "removedHeaders", "maskedSample", "fields", "proposal", "unmatchedFields", "unmatchedServiceParameters"}`. `operation` verilmezse `proposal` boştur. Metin okunamazsa 400 (`errors[].field` = `text`) |
-| `POST /projects/{id}/test` | Örnekteki gövde | Profil, ortamda aktif versiyonuyla uygulanır; ortamda yoksa güncel versiyonuyla. `userId` verilmezse oturumdaki kullanıcıdır |
+| `POST /projects/{id}/test` | Örnekteki gövde | Profil ve eklentiler ortamda aktif versiyonlarıyla uygulanır; ortamda yoksa güncel versiyonlarıyla. `userId` verilmezse oturumdaki kullanıcıdır. Sonuçta `plugins: [{"name", "version"}]` ve `clientResponse.headers` (eklentilerin yanıta eklediği header'lar) |
 | `POST /projects/{id}/probe` | `{"environment", "httpMethod", "pathTemplate", "pathVariables"}` | `{"result", "status", "allow", "url", "message"}`; değeri verilmeyen path değişkenine `1` yazılır, redirect izlenmez |
 | `GET /response-profiles/{id}` | — | Profil alanları, `deployments` ve `usage: [{"environment", "routes": [{"routeId", "maintask", "subtask", "version"}]}]` |
 | `POST /response-profiles/preview` | `{"definition", "status", "body", "headers"}` | `{"status", "body", "outcome", "matchedTemplate", "matchedCase"}`; `status: null` timeout'u temsil eder. `headers` ad → değer, isteğe bağlı. `matchedTemplate` `success` ya da `error`, `matchedCase` o şablondaki tutan koşulun sırası (0'dan) ya da hiçbiri tutmadıysa `null` |
+| `POST /plugins`, `PUT /plugins/{id}` | `{"name", "description", "definition", "version", "comment"}` | Profillerle aynı desen: `name` değişmez, `version` okunan versiyon (yalnızca `PUT`), 409 `VERSION_CONFLICT` + `currentVersion`, aynı ad 409 `DUPLICATE`. `definition` aşağıdaki "Eklenti (`definition`)" kurallarıyla doğrulanır; `projects`'teki maintask'lar kayıtlı olmalı (`field: definition.projects[i]`). `GLOBAL` eklentide rol yetmezse 403 |
+| `GET /plugins`, `GET /plugins/{id}` | — | Liste öğesi `{"id", "name", "description", "scope", "projects", "version", "updatedBy", "updatedAt", "deployments"}`; detay ayrıca `definition`, oluşturan ve güncelleyen bilgisi |
+| `POST /plugins/preview` | `{"definition", "request": {"maintask", "subtask", "httpMethod", "pathTemplate", "definition", "sample", "headers", "userId"}, "response": {"status", "headers", "body"}}` | `{"request": {"method", "url", "headers", "body"}, "response": {"status", "body", "headers"}, "errors"}`. `request` subtask önizlemesindeki gibi kurulur (base URL `http://servis`), sonra eklenti uygulanır. `response.body` frontend'in alacağı gövde (profil sonrası) yerine geçer; `response.headers` eklentinin eklediği header'lardır. Örnek gövde alanlara uymuyorsa `errors` dolar. `${environment}` önizlemede `ÖNİZLEME`, `${route.version}` değersizdir |
 | `POST /promotions` | Örnekteki gövde | `DISABLE` ve `ENABLE`'da `version` verilmeyebilir; hedefte çalışan versiyon kullanılır. Ortamdan yanıt alınamazsa talep `APPLYING`'de kalır ve `failureReason` dolar; `RETRY` ile tamamlanır |
 | `GET /promotions` | — | `status` virgülle birden fazla değer alır (`status=APPLIED,FAILED`); `size` en fazla 100 |
 
@@ -445,6 +471,8 @@ Ekran bu kuralları `GET /meta/definition-rules` yanıtından okur ve kendi içi
 | `logging.binaryInfo` | Metin | Dosya yanıtında Elastic'e yazılan `info` mesajı |
 | `alarm.check` | `INHERIT`, `OFF`, `ROUTE` | Varsayılan `INHERIT`: projenin ortamdaki `alarmRoute`'u, yoksa kontrol yok. `ROUTE`'ta `alarm.maintask` ve `alarm.subtask` zorunlu, diğerlerinde verilmez. Alarm servisinde `alarm` olmaz |
 | `alarmService.resultPath` | Noktalı JSON yolu ya da boş | Varsa subtask alarm servisidir. Yanıtta alarm listesinin yolu (`data.alarms`); boşsa yanıtın kendisi dizi. Liste dolu dönerse istek durdurulur |
+| `plugins` | Eklenti adları | Subtask'in seçtiği `SUBTASK` eklentileri. Ad kayıtlı bir eklentinin olmalı ve eklentinin güncel versiyonu `SUBTASK` kapsamlı olmalı, yoksa 400 (`field: definition.plugins[i]`). Harf farkı kabul edilir |
+| `disabledPlugins` | Eklenti adları | Subtask'e kendiliğinden gelen (`GLOBAL`, `PROJECT`) eklentilerden kapatılanlar. Ad kayıtlı olmalı |
 
 ### Yanıt profili (`definition`)
 
@@ -488,6 +516,18 @@ Ekran bu kuralları `GET /meta/definition-rules` yanıtından okur ve kendi içi
 
 Dosya yanıtları (subtask'te `response.type: BINARY` ya da servisin `Content-Disposition` döndürmesi) profile girmez; olduğu gibi akıtılır ve `Content-Type` servisten geçer.
 
+### Eklenti (`definition`)
+
+| Alan | Değerler | Kural |
+| --- | --- | --- |
+| `scope` | `GLOBAL`, `PROJECT`, `SUBTASK` | Zorunlu. `GLOBAL` bütün subtask'lere, `PROJECT` `projects`'teki projelerin bütün subtask'lerine, `SUBTASK` yalnızca `definition.plugins`'te seçen subtask'lere uygulanır. Subtask `disabledPlugins` ile kapatabilir |
+| `projects` | Maintask'lar | Yalnızca `PROJECT`'te ve en az bir tane |
+| `request[]`, `response[]` | `{"op", "target", "name", "value"}` | En az bir işlem. `op`: `set` (yazar, varsa değiştirir), `setIfAbsent` (yoksa yazar), `remove` (siler; `value` verilmez). `target`: istekte `header`, `query`, `body`; yanıtta `header`, `body` |
+| `name` | Header adı, query adı ya da noktalı body yolu | İstek header'larında subtask tanımıyla aynı yasaklar (`Authorization`, `X-User-*`, `X-uid`...). Yanıtta `Content-Length`, `Transfer-Encoding` ve `X-Request-Id` yazılamaz; `Content-Type` yazılabilir. Body yolu `meta.requestTime` gibi; aradaki nesneler yoksa oluşturulur, yol bir değere çarparsa işlem atlanır |
+| `value` | JSON; metinlerde yer tutucu | Tek bir yer tutucu tipini korur (`"${epochMillis}"` sayı). Değeri olmayan yer tutucu işlemi atlatır. Yanıta özgü yer tutucu istek işleminde kullanılırsa 400 |
+
+Uygulama: işlemler önce `GLOBAL`, sonra `PROJECT`, sonra `SUBTASK` eklentilerinden, aynı düzeyde ada göre, her eklentide yazıldığı sırayla çalışır. İstek işlemleri subtask tanımının ürettiği isteğe uygulanır ve tanımın açıkça yazdığı header, query ve body alanlarına (`TEMPLATE` gövdenin yazdığı alanlar) ve broker'ın kendi header'larına (`X-uid`, `X-Request-Id`, `Content-Type`) dokunmaz; `PASS_THROUGH` gövdede bütün alanlar değişebilir. Body işlemleri yalnızca JSON nesnesi olan gövdede yapılır. Yanıt işlemleri profil zarfından (profil yoksa servis gövdesinden) sonra uygulanır; dosya yanıtına yalnızca header işlemleri. Login/logout ve broker'ın servise gitmeden verdiği yanıtlar eklentisizdir. Uygulanan eklentiler log olayına ve Elastic'te `yapi.plugins`'e yazılır.
+
 ### Yer tutucular
 
 Değeri yalnızca bir yer tutucudan oluşan alan değerin tipini korur: `"${request.siparisNo}"` sayı olarak gider. Metnin içindeki yer tutucu metne çevrilir. İfade dili ya da script yoktur.
@@ -504,6 +544,15 @@ Değeri yalnızca bir yer tutucudan oluşan alan değerin tipini korur: `"${requ
 | `${backend.body}` | Profil | Servisin yanıt gövdesi; `error` şablonunda 4xx'te (`exposeServerErrorBody` ile 5xx'te de) dolu. Metin içinde nesne ya da dizi JSON metni olarak gömülür |
 | `${backend.body.<yol>}` | Profil | Gövdeden tek alan: noktalı yol, tire ve alt çizgili anahtarlar (`status-code`), dizi indeksi (`items.0`). Alan yoksa profilde `null` yazılır (alan atlanmaz), metin içinde boş metin olur; tanım şablonlarındaki "değeri olmayan alan yazılmaz" kuralı profiller için geçerli değildir |
 | `${backend.header.<ad>}` | Profil | Servisin yanıt header'ı, harf duyarsız; birden çok değerde ilki. Yoksa `null` |
+| `${now}`, `${now:<desen>}`, `${today}`, `${epochMillis}` | Tanım, profil, eklenti | Şimdiki zaman: `yyyy-MM-dd'T'HH:mm:ss.SSS` (yerel saat, saat dilimi broker'ın ayarı, varsayılan `Europe/Istanbul`); `${now:dd.MM.yyyy HH:mm}` Java `DateTimeFormatter` deseniyle; `${today}` `yyyy-MM-dd`; `${epochMillis}` sayı. Geçersiz desen kayıtta 400 |
+| `${uuid}`, `${traceId}`, `${environment}` | Tanım, profil, eklenti | Her kullanımda yeni bir UUID; isteğin trace ID'si; ortam kodu |
+| `${route.maintask}`, `${route.subtask}`, `${route.version}` | Tanım, profil, eklenti | Route'un kayıtlı adı ve ortamda çalışan versiyonu; önizleme ve testte versiyon değersizdir |
+| `${client.ip}`, `${client.userAgent}` | Tanım, profil, eklenti | `X-Clientip` ve `X-User-Agent` (okunabilir header listesinden bağımsız) |
+| `${user.permissions}` | Tanım, eklenti | Oturum kullanıcısının yetkileri, dizi; oturum yoksa değersiz. Önizlemede formdaki yetkiler, testte `${user.permission}`'ın değeri |
+| `${backend.durationMs}` | Eklenti yanıtı | Servis çağrısının süresi (yanıtın status ve header'ları gelene kadar), ms |
+| `${durationMs}` | Eklenti yanıtı | İsteğin Yapi'ye gelişinden işlemin uygulandığı ana kadar geçen süre, ms |
+| `${requestReceivedAt}` | Eklenti yanıtı | İsteğin geliş zamanı, `${now}` biçiminde |
+| `${backend.status}`, `${backend.header.<ad>}`, `${outcome}` | Profil, eklenti yanıtı | Profildekiyle aynı; eklentide yalnızca yanıt işlemlerinde |
 | `${outcome}` | Profil | `SUCCESS`, `BUSINESS_ERROR`, `TECHNICAL_ERROR`, `TIMEOUT` |
 
 ### Durumlar ve aksiyonlar
@@ -515,7 +564,10 @@ Değeri yalnızca bir yer tutucudan oluşan alan değerin tipini korur: `"${requ
 | `catalogStatus` | `LINKED`, `MISSING`, `UNLINKED` |
 | Subtask geçmişi aksiyonu | `CREATE`, `UPDATE`, `ARCHIVE`, `RESTORE`, `ROLLBACK` |
 | Profil geçmişi aksiyonu | `CREATE`, `UPDATE`, `ROLLBACK` |
-| Talep aksiyonu | `DEPLOY`, `DISABLE`, `ENABLE`, `ROLLBACK`; profilde yalnızca `DEPLOY` ve `ROLLBACK` |
+| Talep konusu (`subjectType`) | `ROUTE`, `PROFILE`, `PLUGIN` |
+| Talep aksiyonu | `DEPLOY`, `DISABLE`, `ENABLE`, `ROLLBACK`; profil ve eklentide yalnızca `DEPLOY` ve `ROLLBACK` |
+| Eklenti kapsamı | `GLOBAL`, `PROJECT`, `SUBTASK` |
+| Eklenti işlemi | `set`, `setIfAbsent`, `remove`; hedef istekte `header`, `query`, `body`, yanıtta `header`, `body` |
 | Talep durumu | `PENDING_APPROVAL`, `APPROVED`, `REJECTED`, `APPLYING`, `APPLIED`, `FAILED`, `CANCELLED` |
 | `allowedActions` | `APPROVE`, `REJECT`, `CANCEL`, `RETRY` |
 | Yoklama sonucu | `OK`, `WRONG_METHOD`, `PATH_NOT_FOUND`, `INCONCLUSIVE` |
@@ -529,15 +581,16 @@ Değeri yalnızca bir yer tutucudan oluşan alan değerin tipini korur: `"${requ
 | `SUBJECT_ACTIVE` | Subtask arşivde değil |
 | `NEXT_ENVIRONMENT` | Hedef ortam, kaynak ortamın hemen sonrası |
 | `SOURCE_ACTIVE` | Versiyon kaynak ortamda aktif; DEV'e taşımada aranmaz |
-| `NO_OPEN_REQUEST` | Aynı subtask ya da profil ve hedef ortam için açık talep yok |
+| `NO_OPEN_REQUEST` | Aynı subtask, profil ya da eklenti ve hedef ortam için açık talep yok |
 | `PERMISSIONS_EXIST` | Yetkiler hedef ortamın Koordinatör'ünde, bir Yapi projesinin yetkileri arasında |
 | `PROFILE_ACTIVE` | Subtask'in yanıt profili hedef ortamda aktif |
 | `PROJECT_ENABLED` | Proje hedef ortamda tanımlı ve açık |
+| `PLUGINS_ACTIVE` | Subtask'in seçtiği `SUBTASK` eklentileri (`definition.plugins`) hedef ortamda aktif. Eklenti seçmeyen subtask'te çalışmaz |
 | `ALARM_ROUTE_ACTIVE` | Subtask'in alarm route'u (`ROUTE`'ta tanımdaki, `INHERIT`'te projenin hedef ortamdaki `alarmRoute`'u) hedef ortamda aktif ve oradaki versiyonu alarm servisi. `INHERIT`'te projenin hedefte alarm route'u yoksa geçer. Alarm servislerinde ve `OFF`'ta çalışmaz |
 | `DEPLOYED_IN_TARGET` | `DISABLE` ve `ENABLE`'da subtask hedef ortamda var |
 | `PREVIOUSLY_APPLIED` | `ROLLBACK`'te versiyon hedef ortama daha önce uygulanmış |
 
-Aksiyona göre çalışan kontroller: `DEPLOY`'da `SUBJECT_ACTIVE`, `NEXT_ENVIRONMENT`, `SOURCE_ACTIVE` (ilk ortamda yok), `NO_OPEN_REQUEST`, `PERMISSIONS_EXIST`, `PROFILE_ACTIVE`, `PROJECT_ENABLED`, `ALARM_ROUTE_ACTIVE`. `ROLLBACK`'te `NEXT_ENVIRONMENT` ve `SOURCE_ACTIVE` yerine `PREVIOUSLY_APPLIED`. `DISABLE`'da `NO_OPEN_REQUEST` ve `DEPLOYED_IN_TARGET` (hedefte `ACTIVE`). `ENABLE`'da `SUBJECT_ACTIVE`, `NO_OPEN_REQUEST`, `DEPLOYED_IN_TARGET` (hedefte `DISABLED`) ile yetki, profil, proje ve alarm kontrolleri. Profil taleplerinde yalnızca `NEXT_ENVIRONMENT`, `SOURCE_ACTIVE`, `NO_OPEN_REQUEST` ve `PREVIOUSLY_APPLIED`. `422` yanıtı çalışan kontrollerin hepsini `ok` bilgisiyle listeler.
+Aksiyona göre çalışan kontroller: `DEPLOY`'da `SUBJECT_ACTIVE`, `NEXT_ENVIRONMENT`, `SOURCE_ACTIVE` (ilk ortamda yok), `NO_OPEN_REQUEST`, `PERMISSIONS_EXIST`, `PROFILE_ACTIVE`, `PROJECT_ENABLED`, `ALARM_ROUTE_ACTIVE`, `PLUGINS_ACTIVE`. `ROLLBACK`'te `NEXT_ENVIRONMENT` ve `SOURCE_ACTIVE` yerine `PREVIOUSLY_APPLIED`. `DISABLE`'da `NO_OPEN_REQUEST` ve `DEPLOYED_IN_TARGET` (hedefte `ACTIVE`). `ENABLE`'da `SUBJECT_ACTIVE`, `NO_OPEN_REQUEST`, `DEPLOYED_IN_TARGET` (hedefte `DISABLED`) ile yetki, profil, proje, alarm ve eklenti kontrolleri. Profil ve eklenti taleplerinde yalnızca `NEXT_ENVIRONMENT`, `SOURCE_ACTIVE`, `NO_OPEN_REQUEST` ve `PREVIOUSLY_APPLIED`. `422` yanıtı çalışan kontrollerin hepsini `ok` bilgisiyle listeler.
 
 ### Broker'ın uygulamalara döndüğü yanıtlar
 
@@ -583,6 +636,7 @@ Backend geliştirildikçe bu tablo güncellenir; en yeni kayıt en üsttedir. Bi
 
 | Tarih | Değişiklik |
 | --- | --- |
+| 2026-10-28 | Eklentiler: yeni uçlar `/plugins` (liste, CRUD, history, compare, rollback, `preview`), kapsam `GLOBAL`/`PROJECT`/`SUBTASK`, istek ve yanıt işlemleri (`set`, `setIfAbsent`, `remove`; header, query, body). `GLOBAL` eklentiyi yalnızca APPROVER yazar ve taşır. Taşımada `subjectType: PLUGIN` (`DEPLOY`, `ROLLBACK`), subtask taşımasında yeni ön kontrol `PLUGINS_ACTIVE`. Subtask tanımında `plugins` ve `disabledPlugins`. Yeni yer tutucular: `${now}`, `${now:<desen>}`, `${today}`, `${epochMillis}`, `${uuid}`, `${traceId}`, `${environment}`, `${route.*}`, `${client.*}`, `${user.permissions}` (tanım, profil, eklenti) ve eklenti yanıtında `${backend.durationMs}`, `${durationMs}`, `${requestReceivedAt}`. `POST /routes/preview` ve test sonucunda `plugins`, test sonucunda `clientResponse.headers`. `definition-rules`'da `plugin` ve `placeholders.pluginRequest`/`pluginResponse`. |
 | 2026-10-28 | Login kontrolü: 401 gövdesinde `loginUrl` (giriş uygulamasının sayfası; ayarlı değilse alan yazılmaz); ekran 401'de oraya gider. Uygulama frontend'leri için giriş servisinde oturum kontrolü (`giris/session_check`, anonim route): `{"response": true, "valid": true, "uid"}` ya da `{"response": true, "valid": false, "loginUrl"}`. Aynı istemciden tekrar giriş mevcut token'ı döner. |
 | 2026-10-28 | Yanıt profilinde koşullar ve alan seçme: `success` ve `error`'da sıralı `cases` (`when` koşulları `exists`, `equals`, `notEquals`, `in`; tip duyarlı), yeni yer tutucular `${backend.body.<yol>}` ve `${backend.header.<ad>}`, `httpStatus: "${backend.status}"` (yanıt yoksa 504/502), profil düzeyinde `exposeServerErrorBody`. Profilde değeri olmayan yer tutucu alanda `null`, metin içinde boş metin olur. `POST /response-profiles/preview` gövdesine `headers`, yanıtına `matchedTemplate` ve `matchedCase`; `definition-rules`'a `profile` (`operators`, `httpStatus`, `exposeServerErrorBodyDefault`). Mevcut profiller aynı çalışır. |
 | 2026-10-26 | Alarm route seçicileri: yeni uç `GET /routes?alarmService=true` (bütün projelerin alarm servisi subtask'leri, arşivdekiler hariç); subtask listelerinin öğelerinde yeni alan `alarmService`. |

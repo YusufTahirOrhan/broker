@@ -81,6 +81,11 @@ public final class RuntimeFixture {
         return configVersion();
     }
 
+    public static void plugin(String name, int version, String definition) {
+        applied(STORE.applyPlugin(new RuntimeStore.PluginSnapshot(name, 9, version, Json.parse(definition), "test",
+                PROMOTIONS.incrementAndGet())));
+    }
+
     public static void profile(String name, int version, String definition) {
         applied(STORE.applyProfile(new RuntimeStore.ProfileSnapshot(name, 3, version, Json.parse(definition),
                 "test", PROMOTIONS.incrementAndGet())));

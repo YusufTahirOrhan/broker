@@ -20,6 +20,7 @@ import com.acme.yapi.admin.config.AdminProperties;
 import com.acme.yapi.admin.db.Versions;
 import com.acme.yapi.admin.environment.Environment;
 import com.acme.yapi.admin.environment.EnvironmentRepository;
+import com.acme.yapi.admin.plugin.PluginService;
 import com.acme.yapi.admin.profile.ProfileRepository;
 import com.acme.yapi.admin.project.ProjectRepository;
 import com.acme.yapi.admin.web.ApiException;
@@ -29,7 +30,10 @@ import com.acme.yapi.core.request.BackendRequest;
 import com.acme.yapi.core.request.BackendRequestBuilder;
 import com.acme.yapi.core.request.RequestBodyValidator;
 import com.acme.yapi.core.request.RequestBuildException;
+import com.acme.yapi.core.plugin.Plugin;
+import com.acme.yapi.core.plugin.Plugins;
 import com.acme.yapi.core.request.RequestContext;
+import com.acme.yapi.core.request.RequestScope;
 import com.acme.yapi.core.route.HttpMethodName;
 import com.acme.yapi.core.route.PathTemplate;
 import com.acme.yapi.core.route.RouteDefinition;
@@ -48,16 +52,18 @@ public class RouteService {
     private final RouteRepository routes;
     private final ProjectRepository projects;
     private final ProfileRepository profiles;
+    private final PluginService plugins;
     private final AuthorizationService authorization;
     private final EnvironmentRepository environments;
     private final RouteValidator.Context readable;
 
     public RouteService(RouteRepository routes, ProjectRepository projects, ProfileRepository profiles,
-                        AuthorizationService authorization, EnvironmentRepository environments,
+                        PluginService plugins, AuthorizationService authorization, EnvironmentRepository environments,
                         AdminProperties properties) {
         this.routes = routes;
         this.projects = projects;
         this.profiles = profiles;
+        this.plugins = plugins;
         this.authorization = authorization;
         this.environments = environments;
         this.readable = RouteValidator.Context.of(properties.readableHeaders());
@@ -313,13 +319,24 @@ public class RouteService {
 
         /** What {@code ${user.permission}} stands for in a preview or test call. */
         public String permission() {
+            List<String> all = allPermissions();
+            return RequestContext.firstPermission(all, all);
+        }
+
+        /** The form's permissions, own ones first: what the trial user is taken to hold. */
+        public List<String> allPermissions() {
             List<String> all = new ArrayList<>(permissions == null ? List.of() : permissions);
             all.addAll(foreignPermissions == null ? List.of() : foreignPermissions);
-            return RequestContext.firstPermission(all, all);
+            return all;
         }
     }
 
-    public record Preview(TestCallResult.RequestView request, List<FieldError> errors) {
+    /** @param plugins the plugins applied to the request, in their order */
+    public record Preview(TestCallResult.RequestView request, List<FieldError> errors, List<Plugin.Applied> plugins) {
+
+        Preview(TestCallResult.RequestView request, List<FieldError> errors) {
+            this(request, errors, List.of());
+        }
     }
 
     /** The request the broker would send, built with the broker's own builder, without calling anything. */
@@ -350,12 +367,19 @@ public class RouteService {
             headers.putAll(trial.headers());
         }
         try {
+            String subtask = Json.stringField(trial.sample(), "subtask");
+            RequestScope scope = new RequestScope(environment.code(), "00000000000000000000000000000000",
+                    project.maintask(), subtask, null, headers.get("X-Clientip"), headers.get("X-User-Agent"),
+                    trial.allPermissions(), Instant.now(), null, null);
+            RequestContext context = new RequestContext((ObjectNode) trial.sample(), validated.effectiveBody(),
+                    headers::get, readable, trial.userId() == null ? user : trial.userId(), trial.permission(),
+                    "00000000-0000-7000-8000-000000000000").withScope(scope);
             BackendRequest request = BackendRequestBuilder.build(HttpMethodName.parse(trial.httpMethod()).orElseThrow(),
-                    PathTemplate.parse(trial.pathTemplate()), definition, baseUrl,
-                    new RequestContext((ObjectNode) trial.sample(), validated.effectiveBody(), headers::get, readable,
-                            trial.userId() == null ? user : trial.userId(), trial.permission(),
-                            "00000000-0000-7000-8000-000000000000"));
-            return new Preview(TestCallResult.RequestView.of(request), List.of());
+                    PathTemplate.parse(trial.pathTemplate()), definition, baseUrl, context);
+            Plugins.RequestResult plugged = Plugins.applyRequest(request,
+                    plugins.forTrial(project.maintask(), definition, environment.code()), definition.request(),
+                    context.resolver());
+            return new Preview(TestCallResult.RequestView.of(plugged.request()), List.of(), plugged.applied());
         } catch (RequestBuildException e) {
             return new Preview(null, List.of(e.error()));
         }
@@ -413,6 +437,10 @@ public class RouteService {
         }
         if (body.specOperation() != null && !body.specOperation().isNull() && !body.specOperation().isObject()) {
             errors.add(new FieldError("specOperation", "Spec operasyonu bir JSON nesnesi olmalı"));
+        }
+        RouteDefinitionParser.Parsed parsed = RouteDefinitionParser.parse(body.definition());
+        if (parsed.valid()) {
+            errors.addAll(plugins.nameErrors(parsed.definition()));
         }
         return errors;
     }

@@ -21,17 +21,19 @@ import tools.jackson.databind.JsonNode;
 public class PromotionRepository {
 
     private static final String SELECT = """
-            SELECT pr.id, pr.definition_id, pr.version, pr.profile_id, pr.profile_version, pr.source_env,
+            SELECT pr.id, pr.definition_id, pr.version, pr.profile_id, pr.profile_version, pr.plugin_id,
+                   pr.plugin_version, pr.source_env,
                    pr.target_env, pr.action, pr.status, pr.requested_by, pr.requested_at, pr.reason, pr.decided_by,
                    pr.decided_at, pr.decision_note, pr.probe_status, pr.probe_detail,
                    pr.config_version, pr.applied_at, pr.failure_reason,
-                   CASE WHEN pr.definition_id IS NOT NULL THEN p.maintask || ' / ' || r.subtask ELSE pf.name END
-                       AS subject_name,
+                   CASE WHEN pr.definition_id IS NOT NULL THEN p.maintask || ' / ' || r.subtask
+                        WHEN pr.profile_id IS NOT NULL THEN pf.name ELSE pl.name END AS subject_name,
                    r.project_id
               FROM promotion_request pr
               LEFT JOIN route_definition r ON r.id = pr.definition_id
               LEFT JOIN project p ON p.id = r.project_id
               LEFT JOIN response_profile pf ON pf.id = pr.profile_id
+              LEFT JOIN plugin pl ON pl.id = pr.plugin_id
             """;
 
     private final JdbcClient jdbc;
@@ -41,27 +43,41 @@ public class PromotionRepository {
     }
 
     public record Row(long id, Long definitionId, Integer version, Long profileId, Integer profileVersion,
-                      String sourceEnv, String targetEnv, String action, String status, String requestedBy,
-                      Instant requestedAt, String reason, String decidedBy, Instant decidedAt, String decisionNote,
-                      String probeStatus, JsonNode probeDetail, Long configVersion, Instant appliedAt,
-                      String failureReason, String subjectName, Long projectId) {
+                      Long pluginId, Integer pluginVersion, String sourceEnv, String targetEnv, String action,
+                      String status, String requestedBy, Instant requestedAt, String reason, String decidedBy,
+                      Instant decidedAt, String decisionNote, String probeStatus, JsonNode probeDetail,
+                      Long configVersion, Instant appliedAt, String failureReason, String subjectName, Long projectId) {
+
+        public SubjectType type() {
+            return definitionId != null ? SubjectType.ROUTE : profileId != null ? SubjectType.PROFILE
+                    : SubjectType.PLUGIN;
+        }
 
         public boolean route() {
-            return definitionId != null;
+            return type() == SubjectType.ROUTE;
         }
 
         public long subjectId() {
-            return route() ? definitionId : profileId;
+            return switch (type()) {
+                case ROUTE -> definitionId;
+                case PROFILE -> profileId;
+                case PLUGIN -> pluginId;
+            };
         }
 
         public int subjectVersion() {
-            return route() ? version : profileVersion;
+            return switch (type()) {
+                case ROUTE -> version;
+                case PROFILE -> profileVersion;
+                case PLUGIN -> pluginVersion;
+            };
         }
     }
 
     private static Row row(ResultSet rs, int index) throws SQLException {
         return new Row(rs.getLong("id"), Rows.longOrNull(rs, "definition_id"), Rows.intOrNull(rs, "version"),
-                Rows.longOrNull(rs, "profile_id"), Rows.intOrNull(rs, "profile_version"), rs.getString("source_env"),
+                Rows.longOrNull(rs, "profile_id"), Rows.intOrNull(rs, "profile_version"),
+                Rows.longOrNull(rs, "plugin_id"), Rows.intOrNull(rs, "plugin_version"), rs.getString("source_env"),
                 rs.getString("target_env"), rs.getString("action"), rs.getString("status"),
                 rs.getString("requested_by"), Rows.instant(rs, "requested_at"), rs.getString("reason"),
                 rs.getString("decided_by"), Rows.instant(rs, "decided_at"), rs.getString("decision_note"),
@@ -70,19 +86,22 @@ public class PromotionRepository {
                 Rows.longOrNull(rs, "project_id"));
     }
 
-    public long insert(boolean route, long subjectId, int version, String sourceEnv, String targetEnv, String action,
-                       String status, String user, String reason) {
+    public long insert(SubjectType type, long subjectId, int version, String sourceEnv, String targetEnv,
+                       String action, String status, String user, String reason) {
         KeyHolder keys = new GeneratedKeyHolder();
         jdbc.sql("""
-                        INSERT INTO promotion_request (definition_id, version, profile_id, profile_version, source_env,
-                                                       target_env, action, status, requested_by, reason)
-                        VALUES (:definition, :version, :profile, :profileVersion, :source, :target, :action, :status,
-                                :user, :reason)
+                        INSERT INTO promotion_request (definition_id, version, profile_id, profile_version, plugin_id,
+                                                       plugin_version, source_env, target_env, action, status,
+                                                       requested_by, reason)
+                        VALUES (:definition, :version, :profile, :profileVersion, :plugin, :pluginVersion, :source,
+                                :target, :action, :status, :user, :reason)
                         """)
-                .param("definition", route ? subjectId : null)
-                .param("version", route ? version : null)
-                .param("profile", route ? null : subjectId)
-                .param("profileVersion", route ? null : version)
+                .param("definition", type == SubjectType.ROUTE ? subjectId : null)
+                .param("version", type == SubjectType.ROUTE ? version : null)
+                .param("profile", type == SubjectType.PROFILE ? subjectId : null)
+                .param("profileVersion", type == SubjectType.PROFILE ? version : null)
+                .param("plugin", type == SubjectType.PLUGIN ? subjectId : null)
+                .param("pluginVersion", type == SubjectType.PLUGIN ? version : null)
                 .param("source", sourceEnv)
                 .param("target", targetEnv)
                 .param("action", action)
@@ -122,11 +141,8 @@ public class PromotionRepository {
         if (filter.targetEnv() != null) {
             conditions.add("pr.target_env = :target");
         }
-        if ("ROUTE".equals(filter.subjectType())) {
-            conditions.add("pr.definition_id IS NOT NULL");
-        } else if ("PROFILE".equals(filter.subjectType())) {
-            conditions.add("pr.profile_id IS NOT NULL");
-        }
+        SubjectType.parse(filter.subjectType())
+                .ifPresent(type -> conditions.add("pr." + type.idColumn() + " IS NOT NULL"));
         if (filter.projectId() != null) {
             conditions.add("r.project_id = :project");
         }
@@ -212,22 +228,22 @@ public class PromotionRepository {
                 .update();
     }
 
-    public Optional<Long> open(boolean route, long subjectId, String targetEnv) {
+    public Optional<Long> open(SubjectType type, long subjectId, String targetEnv) {
         return jdbc.sql("""
                         SELECT id FROM promotion_request
                          WHERE %s = :subject AND target_env = :target
                            AND status IN ('PENDING_APPROVAL', 'APPROVED', 'APPLYING')
-                        """.formatted(route ? "definition_id" : "profile_id"))
+                        """.formatted(type.idColumn()))
                 .param("subject", subjectId)
                 .param("target", targetEnv)
                 .query(Long.class).optional();
     }
 
-    public boolean previouslyApplied(boolean route, long subjectId, int version, String targetEnv) {
+    public boolean previouslyApplied(SubjectType type, long subjectId, int version, String targetEnv) {
         return jdbc.sql("""
                         SELECT count(*) FROM promotion_request
                          WHERE %s = :subject AND %s = :version AND target_env = :target AND status = 'APPLIED'
-                        """.formatted(route ? "definition_id" : "profile_id", route ? "version" : "profile_version"))
+                        """.formatted(type.idColumn(), type.versionColumn()))
                 .param("subject", subjectId)
                 .param("version", version)
                 .param("target", targetEnv)

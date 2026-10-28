@@ -25,6 +25,7 @@ import com.acme.yapi.admin.db.Versions;
 import com.acme.yapi.admin.environment.Environment;
 import com.acme.yapi.admin.environment.EnvironmentClient;
 import com.acme.yapi.admin.environment.EnvironmentRepository;
+import com.acme.yapi.admin.plugin.PluginService;
 import com.acme.yapi.admin.profile.ProfileRepository;
 import com.acme.yapi.admin.project.ProjectRepository;
 import com.acme.yapi.admin.route.RouteRepository;
@@ -37,6 +38,7 @@ import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.sample.SampleTemplate;
 import com.acme.yapi.core.spec.OpenApiSpec;
 import com.acme.yapi.core.spec.SpecProposal;
+import com.acme.yapi.core.route.RouteDefinitionParser;
 import com.acme.yapi.core.testcall.TestCallRequest;
 import com.acme.yapi.core.validation.FieldError;
 
@@ -54,17 +56,19 @@ public class SpecController {
     private final RouteRepository routes;
     private final RouteService routeService;
     private final ProfileRepository profiles;
+    private final PluginService plugins;
     private final EnvironmentRepository environments;
     private final EnvironmentClient client;
     private final CurrentUser currentUser;
 
     public SpecController(ProjectRepository projects, RouteRepository routes, RouteService routeService,
-                          ProfileRepository profiles, EnvironmentRepository environments, EnvironmentClient client,
-                          CurrentUser currentUser) {
+                          ProfileRepository profiles, PluginService plugins, EnvironmentRepository environments,
+                          EnvironmentClient client, CurrentUser currentUser) {
         this.projects = projects;
         this.routes = routes;
         this.routeService = routeService;
         this.profiles = profiles;
+        this.plugins = plugins;
         this.environments = environments;
         this.client = client;
         this.currentUser = currentUser;
@@ -161,9 +165,13 @@ public class SpecController {
         if (trial.responseProfileId() != null) {
             profile = testProfile(trial.responseProfileId(), environment);
         }
+        // the plugins as the environment runs them (the latest version where one is not there yet)
+        List<TestCallRequest.PluginRef> chosen = plugins.testRefs(project.maintask(),
+                RouteDefinitionParser.parse(trial.definition()).definition(), environment.code());
         TestCallRequest call = new TestCallRequest(project.maintask(), null, trial.httpMethod(), trial.pathTemplate(),
                 trial.definition(), profile, trial.sample(), trial.headers(),
-                trial.userId() == null ? user.username() : trial.userId(), trial.permission(), user.username());
+                trial.userId() == null ? user.username() : trial.userId(), trial.permission(), user.username(),
+                chosen);
         JsonNode result = client.call(environment, "POST", "/admin/v1/test", call);
         audit.atInfo()
                 .addKeyValue("operation", "test")

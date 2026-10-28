@@ -27,7 +27,7 @@ class LegacyDocumentsTest {
         return new LogEvent(REQUEST_ID, "trace", LogEvent.EventType.REQUEST, RECEIVED, "PROD", "logProject",
                 "get_logs", 3, "log-project", 2, "web", "u1", "u1", "b1f4c2d8-6e3a-4f5b-9c7d-2a8e0f1b3c4d",
                 List.of("LOGPROJECT_TEMEL"), "token-1", sessionOperation, "10.0.0.1", "agent", "POST", "/logs",
-                null, null, null, Json.parse(body), null, null, null, null, "yapi-1", null, null);
+                null, null, null, Json.parse(body), null, null, null, null, "yapi-1", null, null, null);
     }
 
     private static LogEvent response(String outcome) {
@@ -38,7 +38,7 @@ class LegacyDocumentsTest {
         return new LogEvent(REQUEST_ID, "trace", LogEvent.EventType.RESPONSE, RECEIVED.plusSeconds(1), "PROD",
                 "logProject", "get_logs", 3, "log-project", 2, "web", "u1", "u1", null, null, "token-1", null,
                 "10.0.0.1", "agent", "POST", "/logs", 200, outcome, 87L, null, 10, truncated,
-                Json.parse(clientResponse), null, "yapi-1", null, null);
+                Json.parse(clientResponse), null, "yapi-1", null, null, null);
     }
 
     private static final String BODY = """
@@ -147,7 +147,7 @@ class LegacyDocumentsTest {
                         {"maintask": "guvenlik", "subtask": "alarm_kontrol", "alarms": ["10000000146"],
                          "params": {"maintask": "sorgu", "subtask": "kisi_sorgu", "uid": "12345",
                                     "tckn": "10000000146", "password": "xxxx"}}
-                        """), null);
+                        """), null, null);
 
         List<ElasticOperation> operations = documents.operations(alarmed);
 
@@ -166,13 +166,31 @@ class LegacyDocumentsTest {
     }
 
     @Test
+    void theAppliedPluginsGoIntoTheYapiObjectOfTheResponse() {
+        LogEvent plain = response("SUCCESS");
+        LogEvent plugged = new LogEvent(plain.requestId(), plain.traceId(), plain.eventType(), plain.eventTime(),
+                plain.environment(), plain.maintask(), plain.subtask(), plain.routeVersion(), plain.responseProfile(),
+                plain.responseProfileVersion(), plain.application(), plain.uid(), plain.userId(), plain.queryId(),
+                plain.permList(), plain.token(), plain.sessionOperation(), plain.clientIp(), plain.userAgent(),
+                plain.httpMethod(), plain.targetPath(), plain.statusCode(), plain.outcome(), plain.durationMs(),
+                plain.body(), plain.bodySize(), plain.bodyTruncated(), plain.clientResponse(), plain.errorMessage(),
+                plain.yapiInstance(), null, null, List.of(new com.acme.yapi.core.plugin.Plugin.Applied("stamp", 2)));
+
+        JsonNode yapi = documents.operations(plugged).getFirst().document().get("yapi");
+
+        assertThat(yapi.get("plugins")).isEqualTo(Json.parse("[{\"name\": \"stamp\", \"version\": 2}]"));
+        assertThat(documents.operations(plain).getFirst().document().get("yapi").has("plugins")).isFalse();
+        assertThat(EventCodec.fromJson(EventCodec.toJson(plugged)).plugins()).isEqualTo(plugged.plugins());
+    }
+
+    @Test
     void noAlarmLogWithoutAlarms() {
         LogEvent failed = new LogEvent(REQUEST_ID, "trace", LogEvent.EventType.RESPONSE, RECEIVED.plusSeconds(1),
                 "PROD", "sorgu", "kisi_sorgu", 3, null, null, "web", "12345", "12345", "q-1", null, "token-1", null,
                 "10.0.0.1", "agent", "POST", null, 503, "TECHNICAL_ERROR", 12L, null, null, null, Json.parse("{}"),
                 "Alarm servisi 500 döndü", "yapi-1", Json.parse("""
                         {"maintask": "guvenlik", "subtask": "alarm_kontrol", "error": "Alarm servisi 500 döndü"}
-                        """), null);
+                        """), null, null);
 
         assertThat(documents.operations(failed)).hasSize(1);
         assertThat(EventCodec.fromJson(EventCodec.toJson(failed)).alarm()).isEqualTo(failed.alarm());
@@ -183,7 +201,7 @@ class LegacyDocumentsTest {
         return new LogEvent(REQUEST_ID, "trace", LogEvent.EventType.RESPONSE, RECEIVED.plusSeconds(1), "PROD",
                 "order-service", "create_order", 3, null, null, "web", "u1", userId, "q-1", permissions, "token-1",
                 null, "10.0.0.1", "agent", "POST", "/orders", status, "DENIED", 4L, null, null, null,
-                Json.parse("{\"result\": false}"), null, "yapi-1", null, denial);
+                Json.parse("{\"result\": false}"), null, "yapi-1", null, denial, null);
     }
 
     @Test

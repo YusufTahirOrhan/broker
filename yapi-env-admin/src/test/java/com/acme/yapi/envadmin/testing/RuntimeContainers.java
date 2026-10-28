@@ -56,6 +56,7 @@ public final class RuntimeContainers {
     public static void reset() {
         JdbcClient owner = owner();
         owner.sql("DELETE FROM runtime_route").update();
+        owner.sql("DELETE FROM runtime_plugin").update();
         owner.sql("DELETE FROM runtime_response_profile").update();
         owner.sql("DELETE FROM runtime_project").update();
     }

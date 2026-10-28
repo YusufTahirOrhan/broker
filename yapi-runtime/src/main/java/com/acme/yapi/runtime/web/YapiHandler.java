@@ -23,12 +23,14 @@ import com.acme.yapi.core.alarm.AlarmValues;
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.logging.LogEvent;
 import com.acme.yapi.core.naming.Names;
+import com.acme.yapi.core.plugin.Plugins;
 import com.acme.yapi.core.logging.Masker;
 import com.acme.yapi.core.request.BackendRequest;
 import com.acme.yapi.core.request.BackendRequestBuilder;
 import com.acme.yapi.core.request.RequestBodyValidator;
 import com.acme.yapi.core.request.RequestBuildException;
 import com.acme.yapi.core.request.RequestContext;
+import com.acme.yapi.core.request.RequestScope;
 import com.acme.yapi.core.response.ClientResponse;
 import com.acme.yapi.core.response.Outcome;
 import com.acme.yapi.core.response.ResponseProfile;
@@ -83,6 +85,8 @@ public class YapiHandler {
     private final YapiProperties.Session sessionSettings;
     private final ApplicationList applications;
     private final boolean legacyResponses;
+    private final String environment;
+    private final java.time.ZoneId timeZone;
 
     public YapiHandler(RouteCache routes, SessionStore sessions, ApplicationList applications, LogGate gate,
                          EventFactory events, Forwarder forwarder, UserContextSigner userContext, YapiMetrics metrics,
@@ -98,11 +102,20 @@ public class YapiHandler {
         this.userContext = userContext;
         this.metrics = metrics;
         this.readable = RouteValidator.Context.of(properties.readableHeaders());
+        this.environment = properties.environment();
+        this.timeZone = properties.timeZone();
         this.forward = properties.forward();
     }
 
-    /** A response decided by the broker, written only after the events are acknowledged. */
-    private record Reply(int status, Outcome outcome, String contentType, byte[] body) {
+    /**
+     * A response decided by the broker, written only after the events are acknowledged; {@code headers} are the
+     * plugins' response headers.
+     */
+    private record Reply(int status, Outcome outcome, String contentType, byte[] body, Map<String, String> headers) {
+
+        Reply(int status, Outcome outcome, String contentType, byte[] body) {
+            this(status, outcome, contentType, body, Map.of());
+        }
 
         static Reply json(int status, Outcome outcome, JsonNode body) {
             return new Reply(status, outcome, "application/json", Json.writeBytes(body));
@@ -287,8 +300,12 @@ public class YapiHandler {
         String userId = x.session == null ? null : x.session.userId();
         String permission = x.session == null ? null
                 : RequestContext.firstPermission(route.permissions(), x.session.permissions());
+        RequestScope scope = new RequestScope(environment, x.trace.traceId(), route.maintask(), route.subtask(),
+                route.version(), x.clientIp, x.userAgent, x.session == null ? List.of() : x.session.permissionList(),
+                x.receivedAt, timeZone, null);
         RequestContext context = new RequestContext(x.body, validated.effectiveBody(), request::getHeader, readable,
-                userId, permission, x.requestId);
+                userId, permission, x.requestId).withScope(scope);
+        x.context = context;
         BackendRequest backendRequest;
         try {
             backendRequest = BackendRequestBuilder.build(route.method(), route.pathTemplate(), definition,
@@ -297,6 +314,14 @@ public class YapiHandler {
             reject(x, response, 400, Outcome.INVALID_REQUEST, "İstek gövdesi alan tanımına uymuyor.",
                     List.of(e.error()));
             return;
+        }
+        // plugins: not for login and logout, whose bodies are the legacy ones
+        if (x.sessionOperation == null) {
+            x.plugins = routes.snapshot().pluginsOf(route);
+            Plugins.RequestResult changed = Plugins.applyRequest(backendRequest, x.plugins, definition.request(),
+                    context.resolver());
+            backendRequest = changed.request();
+            x.appliedPlugins.addAll(changed.applied());
         }
         x.targetPath = backendRequest.uri().getRawPath();
 
@@ -313,7 +338,9 @@ public class YapiHandler {
         if (userContext.enabled()) {
             extra.put(userContext.header(), userContext.sign(userId, x.requestId, Instant.now()));
         }
+        long sent = System.nanoTime();
         Forwarder.Result result = forwarder.send(backendRequest, definition.timeoutMs(), definition.maxAttempts(), extra);
+        x.backendDurationMs = (System.nanoTime() - sent) / 1_000_000;
         switch (result) {
             case Forwarder.TimedOut timedOut -> backendFailed(x, response, Outcome.TIMEOUT, 504,
                     "Servis zamanında yanıt vermedi.", "Servis " + definition.timeoutMs() + " ms içinde yanıt vermedi");
@@ -469,20 +496,44 @@ public class YapiHandler {
 
         Reply reply;
         EventFactory.ClientLog clientLog;
+        Map<String, String> backendHeaders = BackendResponses.profileHeaders(backend);
         if (route.profile() != null) {
             ClientResponse wrapped = route.profile().profile()
-                    .render(new ResponseProfile.BackendResult(status, parsed, outcome, x.requestId,
-                            BackendResponses.profileHeaders(backend)));
-            reply = Reply.json(wrapped.status(), outcome, wrapped.body());
-            clientLog = EventFactory.clientResponse(wrapped.body(), definition.logging());
+                    .render(new ResponseProfile.BackendResult(status, parsed, outcome, x.requestId, backendHeaders,
+                            x.context.scope()));
+            Plugins.ResponseResult changed = responsePlugins(x, Map.of(), wrapped.body(), status, backendHeaders,
+                    outcome);
+            reply = new Reply(wrapped.status(), outcome, "application/json", Json.writeBytes(changed.body()),
+                    changed.headers());
+            clientLog = EventFactory.clientResponse(changed.body(), definition.logging());
         } else if (x.sessionOperation != null) {
             reply = new Reply(status, outcome, contentType, body.bytes());
             clientLog = EventFactory.sessionResponse(status, parsed);
         } else {
-            reply = new Reply(status, outcome, contentType, body.bytes());
-            clientLog = EventFactory.passedThrough(status, parsed, definition.logging());
+            // a body is changed only when it is a JSON object; anything else goes out as the service sent it
+            boolean object = parsed != null && parsed.isObject();
+            Plugins.ResponseResult changed = responsePlugins(x, Map.of(), object ? parsed : null, status,
+                    backendHeaders, outcome);
+            byte[] bytes = object && !changed.body().equals(parsed) ? Json.writeBytes(changed.body()) : body.bytes();
+            reply = new Reply(status, outcome, contentType, bytes, changed.headers());
+            clientLog = EventFactory.passedThrough(status, object ? changed.body() : parsed, definition.logging());
         }
         finish(x, response, reply, events.response(x, status, outcome, logged, body.bytes().length, clientLog, null));
+    }
+
+    /** The plugins' response operations on what the frontend gets; {@code body} null for files and other bodies. */
+    private Plugins.ResponseResult responsePlugins(Exchange x, Map<String, String> headers, JsonNode body,
+                                                   Integer status, Map<String, String> backendHeaders,
+                                                   Outcome outcome) {
+        if (x.plugins.isEmpty() || x.context == null) {
+            return new Plugins.ResponseResult(headers, body, List.of());
+        }
+        Plugins.ResponseValues values = new Plugins.ResponseValues(status, backendHeaders, outcome.name(),
+                x.backendDurationMs, x.receivedAt, x.context.scope());
+        Plugins.ResponseResult changed = Plugins.applyResponse(headers, body, x.plugins,
+                Plugins.responseResolver(x.context.resolver(), values));
+        x.appliedPlugins.addAll(changed.applied());
+        return changed;
     }
 
     /** Status and headers arrived: log first, then stream; the body is never buffered, parsed or logged. */
@@ -492,6 +543,13 @@ public class YapiHandler {
         info.put("info", BackendResponses.fileInfo(x.route.definition().logging(), backend));
         Integer size = backend.headers().firstValueAsLong("Content-Length").stream()
                 .mapToObj(length -> (int) Math.min(length, Integer.MAX_VALUE)).findFirst().orElse(null);
+        Map<String, String> fileHeaders = new LinkedHashMap<>();
+        for (String header : FILE_HEADERS) {
+            backend.headers().firstValue(header).ifPresent(value -> fileHeaders.put(header, value));
+        }
+        // a file gets the plugins' header operations only; Content-Length stays the service's
+        Map<String, String> headers = responsePlugins(x, fileHeaders, null, status,
+                BackendResponses.profileHeaders(backend), outcome).headers();
         LogEvent event = events.response(x, status, outcome, null, size, info, null);
         List<LogEvent> unacknowledged = gate.write(event);
         try (InputStream body = backend.body()) {
@@ -500,9 +558,8 @@ public class YapiHandler {
                 return;
             }
             response.setStatus(status);
-            for (String header : FILE_HEADERS) {
-                backend.headers().firstValue(header).ifPresent(value -> response.setHeader(header, value));
-            }
+            headers.forEach(response::setHeader);
+            backend.headers().firstValue("Content-Length").ifPresent(value -> response.setHeader("Content-Length", value));
             try (OutputStream out = response.getOutputStream()) {
                 body.transferTo(out);
             }
@@ -517,9 +574,13 @@ public class YapiHandler {
         EventFactory.ClientLog clientLog;
         if (x.route.profile() != null) {
             ClientResponse wrapped = x.route.profile().profile()
-                    .render(new ResponseProfile.BackendResult(null, null, outcome, x.requestId));
-            reply = Reply.json(wrapped.status(), outcome, wrapped.body());
-            clientLog = EventFactory.clientResponse(wrapped.body(), x.route.definition().logging());
+                    .render(new ResponseProfile.BackendResult(null, null, outcome, x.requestId, Map.of(),
+                            x.context == null ? null : x.context.scope()));
+            // the service was called and did not answer: the profile's envelope gets the plugins too
+            Plugins.ResponseResult changed = responsePlugins(x, Map.of(), wrapped.body(), null, Map.of(), outcome);
+            reply = new Reply(wrapped.status(), outcome, "application/json", Json.writeBytes(changed.body()),
+                    changed.headers());
+            clientLog = EventFactory.clientResponse(changed.body(), x.route.definition().logging());
         } else {
             ObjectNode error = YapiErrors.body(yapiStatus, outcome, message, x.requestId, List.of());
             reply = Reply.json(yapiStatus, outcome, error);
@@ -560,6 +621,7 @@ public class YapiHandler {
         if (reply.contentType() != null) {
             response.setContentType(reply.contentType());
         }
+        reply.headers().forEach(response::setHeader);
         response.setContentLength(reply.body().length);
         response.getOutputStream().write(reply.body());
         record(x, reply.outcome());

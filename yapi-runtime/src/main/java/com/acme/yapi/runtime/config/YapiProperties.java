@@ -18,12 +18,13 @@ import com.acme.yapi.core.session.SessionRecordCodec;
  * @param readableHeaders frontend headers that {@code ${header.*}} may read
  * @param logSink         {@code kafka}, or {@code console} for local development
  * @param localOverrides  {@code yapi-local.json}, read only in the {@code local} profile
+ * @param timeZone        the zone of {@code ${now}}, {@code ${today}} and {@code ${requestReceivedAt}}
  */
 @ConfigurationProperties("yapi")
 public record YapiProperties(String environment, String instanceId, List<String> readableHeaders, String logSink,
                                String localOverrides, Cache cache, Session session, Applications applications,
                                Compat compat, Kafka kafka, Spool spool, Forward forward, LegacyCounter legacyCounter,
-                               Test test, Local local) {
+                               Test test, Local local, java.time.ZoneId timeZone) {
 
     public YapiProperties {
         environment = environment == null ? "DEV" : environment;
@@ -40,6 +41,7 @@ public record YapiProperties(String environment, String instanceId, List<String>
         legacyCounter = legacyCounter == null ? new LegacyCounter(null, null, null, null, null) : legacyCounter;
         test = test == null ? new Test(false, null) : test;
         local = local == null ? new Local(false) : local;
+        timeZone = timeZone == null ? com.acme.yapi.core.request.RequestScope.DEFAULT_ZONE : timeZone;
     }
 
     public boolean consoleLog() {

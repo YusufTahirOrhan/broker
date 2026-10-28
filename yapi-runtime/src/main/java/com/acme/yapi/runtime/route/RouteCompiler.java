@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 
+import com.acme.yapi.core.plugin.Plugin;
+import com.acme.yapi.core.plugin.PluginDefinition;
 import com.acme.yapi.core.response.ResponseProfile;
 import com.acme.yapi.core.route.HttpMethodName;
 import com.acme.yapi.core.route.PathTemplate;
@@ -33,6 +35,14 @@ public final class RouteCompiler {
             return new Compiled.Broken<>(describe(parsed.errors()));
         }
         return new Compiled.Ok<>(new CompiledProfile(name, version, parsed.profile()));
+    }
+
+    public static Compiled<Plugin> plugin(String name, int version, JsonNode definition) {
+        PluginDefinition.Parsed parsed = PluginDefinition.parse(definition, RouteValidator.Context.anyHeader());
+        if (!parsed.valid()) {
+            return new Compiled.Broken<>(describe(parsed.errors()));
+        }
+        return new Compiled.Ok<>(new Plugin(name, version, parsed.definition()));
     }
 
     public static Compiled<Route> route(String maintask, String subtask, int version, String httpMethod,

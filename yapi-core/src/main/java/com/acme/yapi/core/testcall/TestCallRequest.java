@@ -1,5 +1,6 @@
 package com.acme.yapi.core.testcall;
 
+import java.util.List;
 import java.util.Map;
 
 import tools.jackson.databind.JsonNode;
@@ -14,10 +15,23 @@ import tools.jackson.databind.JsonNode;
  * @param headers         frontend request headers that {@code ${header.*}} may read
  * @param userId          the user {@code ${user.id}} and {@code X-uid} stand for
  * @param permission      what {@code ${user.permission}} stands for, or null
+ * @param plugins         the plugins of the subtask, in the order they apply (the central admin chooses them)
  */
 public record TestCallRequest(String maintask, String baseUrl, String httpMethod, String pathTemplate,
                               JsonNode definition, Profile responseProfile, JsonNode sample,
-                              Map<String, String> headers, String userId, String permission, String actor) {
+                              Map<String, String> headers, String userId, String permission, String actor,
+                              List<PluginRef> plugins) {
+
+    public TestCallRequest {
+        plugins = plugins == null ? List.of() : List.copyOf(plugins);
+    }
+
+    public TestCallRequest(String maintask, String baseUrl, String httpMethod, String pathTemplate,
+                           JsonNode definition, Profile responseProfile, JsonNode sample,
+                           Map<String, String> headers, String userId, String permission, String actor) {
+        this(maintask, baseUrl, httpMethod, pathTemplate, definition, responseProfile, sample, headers, userId,
+                permission, actor, List.of());
+    }
 
     /** Path of the broker's internal endpoint; it exists only where test calls are enabled. */
     public static final String PATH = "/internal/v1/test";
@@ -27,8 +41,11 @@ public record TestCallRequest(String maintask, String baseUrl, String httpMethod
     public record Profile(String name, Integer version, JsonNode definition) {
     }
 
+    public record PluginRef(String name, Integer version, JsonNode definition) {
+    }
+
     public TestCallRequest withBaseUrl(String url) {
         return new TestCallRequest(maintask, url, httpMethod, pathTemplate, definition, responseProfile, sample,
-                headers, userId, permission, actor);
+                headers, userId, permission, actor, plugins);
     }
 }

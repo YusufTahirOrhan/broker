@@ -1,6 +1,6 @@
 # Devir notu
 
-Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; çekirdek ve beş modül (giriş servisi dahil) yazıldı, `mvn -B verify` yeşil. 2026-10-16 turunda "Sıradaki iş"in 1–6. maddeleri yapıldı: Oracle 19c, yanıt verisinin loglanması, eski broker'la aynı oturum ve yanıtlar, giriş servisi, DEV'e bağlı yerel çalıştırma, `${user.permission}`; alarm (7) sonraki tur. Hepsi PR #1 ile, inceleme düzeltmeleriyle birlikte main'e merge edildi (2026-10-16). Düzeltmeler: yerel giriş servisi DEV'in ortak Redis anahtarlarına yazmaz (madde 5), giriş servisinin imza kontrolü `/actuator/` ve `/internal/` dışındaki her yolda ve imza anahtarı `local` dışında zorunlu, boşluklu şifre LDAP'a gitmez, yetki listesiz Koordinatör cevabı hata (madde 4). 2026-10-26 turunda "Sıradaki iş (2026-10-26)"in 1–7. maddeleri yapıldı: ad değişikliği (broker → yapi), ortam adları (TEST → PREPROD), Koordinatör'ün gerçek uçları, DEV'de magic key, admin'e giriş uygulamasının oturumuyla giriş, kullanıcı ayarları, alarm; her madde kendi commit'inde, PR #2 ile main'e merge edildi (2026-10-26, CI yeşil). `mvn -B verify`: 234 test. Tasarım dokümanı (rev 191) ve frontend rehberi (rev 23) canlıda bu tura göre güncellendi, repodaki kopyaları onlardan aktarıldı. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
+Bu repo, kurumdaki istek broker'ının dinamik ve gözlemlenebilir hale getirilmesi işinin backend'idir. Tasarım ve frontend sözleşmesi tamamlandı; çekirdek ve beş modül (giriş servisi dahil) yazıldı, `mvn -B verify` yeşil. 2026-10-16 turunda "Sıradaki iş"in 1–6. maddeleri yapıldı: Oracle 19c, yanıt verisinin loglanması, eski broker'la aynı oturum ve yanıtlar, giriş servisi, DEV'e bağlı yerel çalıştırma, `${user.permission}`; alarm (7) sonraki tur. Hepsi PR #1 ile, inceleme düzeltmeleriyle birlikte main'e merge edildi (2026-10-16). Düzeltmeler: yerel giriş servisi DEV'in ortak Redis anahtarlarına yazmaz (madde 5), giriş servisinin imza kontrolü `/actuator/` ve `/internal/` dışındaki her yolda ve imza anahtarı `local` dışında zorunlu, boşluklu şifre LDAP'a gitmez, yetki listesiz Koordinatör cevabı hata (madde 4). 2026-10-26 turunda "Sıradaki iş (2026-10-26)"in 1–7. maddeleri yapıldı: ad değişikliği (broker → yapi), ortam adları (TEST → PREPROD), Koordinatör'ün gerçek uçları, DEV'de magic key, admin'e giriş uygulamasının oturumuyla giriş, kullanıcı ayarları, alarm; her madde kendi commit'inde, PR #2 ile main'e merge edildi (2026-10-26, CI yeşil). 2026-10-28 turunda "Sıradaki iş (2026-10-28)"in 1–5. maddeleri yapıldı: `alarmService: null` düzeltmesi, reddedilen isteklerin `yapi_unauthorized` indeksi, yanıt profilinde koşullar ve alan seçme, login kontrolü ve tekrar giriş, eklentiler; her madde kendi commit'inde, main'e PR'la (merge edilmedi). `mvn -B verify`: 269 test. Tasarım dokümanı (rev 191) ve frontend rehberi (rev 23) canlıda bu tura göre güncellendi, repodaki kopyaları onlardan aktarıldı. Bu not, işi devralan oturumun bağlamı yeniden kurmadan devam etmesi içindir.
 
 Son güncelleme: 2026-10-28.
 
@@ -17,7 +17,7 @@ Son güncelleme: 2026-10-28.
 
 ## Sıradaki iş (2026-10-28)
 
-**Durum:** Yapılacak. Kullanıcının sunumundan gelen geri bildirimler; kararlar kullanıcıyla 2026-10-28'de netleşti.
+**Durum:** 1–5 yapıldı (2026-10-28); her maddenin "Yapıldı" notu altında, main'e PR'la (merge edilmedi). Kullanıcının sunumundan gelen geri bildirimler; kararlar kullanıcıyla 2026-10-28'de netleşti.
 
 Maddeler sırayla yapılır; her biri kendi commit'inde biter, her push'tan önce `mvn -B verify` yeşildir. Admin API sözleşmesi değişen maddede `docs/frontend-guide.md` ve değişiklik kaydı aynı commit'te güncellenir, commit mesajına "Frontend rehberi değişti" yazılır. `docs/design.md`'ye dokunulmaz; uygulanırken netleşenler "Tasarıma yansıtılacaklar"a yazılır. Eski Elastic dokümanlarının alanları ve değerleri değişmez. Hiçbir projeye ya da servise özel sınıf, ad, ayar ya da örnek eklenmez: testler ve rehber örnekleri genel adlar kullanır, belirli bir servisin adı kodda, testte ve belgede geçmez. Tur bitince main'e PR açılır, merge edilmez.
 
@@ -94,6 +94,19 @@ Subtask'lere istek ve yanıt anında alan ekleyen, adı ve versiyonu olan, yanı
 - **Görünürlük:** Log olayına uygulanan eklentilerin adı ve versiyonu (Elastic'te `yapi` nesnesine). Önizleme ve test çağrısı eklentileri uygular ve sonucu gösterir.
 - **Admin API:** `/plugins` altında profillerdeki desen: liste, CRUD, history, compare, rollback, preview.
 - **Belgeler:** Rehberde editör, ekran ve uçlar; `definition-rules`'da işlemler ve yer tutucular.
+- **Yapıldı (2026-10-28):** Core'da `plugin/PluginDefinition` (ayrıştırma ve doğrulama, form yollarıyla), `plugin/Plugin`, `plugin/Plugins` (seçim, istek ve yanıt işlemleri); `request/RequestScope` ve `template/ContextPlaceholders` (yeni yer tutucular; `RequestContext.scope`, `ResponseProfile.BackendResult.scope`); `RouteDefinition.plugins`/`disabledPlugins`; `LogEvent.plugins` ve Elastic'te `yapi.plugins`. env-admin'de `V3__plugins.sql` (`runtime_plugin`) ve `PUT /admin/v1/plugins/{name}` (profillerle aynı idempotency), listede `plugins`. Runtime snapshot'ta eklentiler (`RouteSnapshot.pluginsOf`), `YapiHandler` ve iç test ucu uygular; `yapi.time-zone` (`YAPI_TIME_ZONE`). Admin'de `V3__plugins.sql` (`plugin`, `plugin_history`, `plugin_deployment`, taşıma talebine `plugin_id`/`plugin_version`), `plugin/PluginRepository`, `PluginService`, `PluginController`; taşıma `SubjectType` (`ROUTE`, `PROFILE`, `PLUGIN`) ile genelleşti. Uygulanırken netleşenler ve varsayımlar:
+  - **İstekte dokunulmayanlar:** Tanımın `headers` ve `queryParams` anahtarları, `TEMPLATE` gövde şablonunun yazdığı yapraklar (bir yolun kendisi, onu kapsayan ya da onun içindeki yol) ve broker'ın header'ları (`X-uid`, `X-Request-Id`, `Content-Type`). Gövde tek bir yer tutucuysa (`"${request.payload}"`) ya da `MULTIPART`/`NONE` ise body işlemi yapılmaz; `PASS_THROUGH`'ta hepsi serbest. Form (`x-www-form-urlencoded`) gövde JSON sayılmaz. Header adları harf duyarsız eşleşir, query adları duyarlı.
+  - **Değer:** Değer şablonu `null`'ları korur (tek yer tutucu `null` dönerse `set` alanı `null` yapar, header'da yazmaz); değeri olmayan yer tutucu işlemi atlatır. `${request.<yol>}` eklentide `fields` tanımı aranmadan gövdeden okunur.
+  - **Kapsam dışı:** Login/logout (oturum işlemleri), alarm servisi çağrısı ve broker'ın kendi yanıtları (application, oturum, yetki, alan doğrulaması, profil yokken timeout ve bağlantı hatası) eklentisizdir. Profilli route'ta servis yanıt vermediğinde profilin hata zarfına eklenti uygulanır. Dosya yanıtında `Content-Length` her zaman servisinkidir.
+  - **Süreler:** `${backend.durationMs}` forwarder'ın çağrıyı gönderdiği andan status ve header'ların geldiği ana kadar (retry'lar dahil); `${durationMs}` isteğin geliş zamanından işlemin uygulandığı ana kadar. Saat dilimi `yapi.time-zone` (varsayılan `Europe/Istanbul`).
+  - **Log:** Olayın `plugins`'i en az bir işlemi olan ve uygulanan eklentiler, uygulama sırasıyla; RESPONSE olayında, yoksa `null`. Elastic'te ana dokümanın `yapi.plugins`'i (`name` keyword, `version` integer; `yapi-fields` şablonuna eklendi).
+  - **Bozuk eklenti:** Runtime'da `yapi.routes.skipped{kind=plugin}` ve hata logu; eklentiyi seçen route eklentisiz çalışır.
+  - **Yetki:** `GLOBAL` olan ya da olacak bir eklentiyi oluşturmak, değiştirmek, geri almak ve taşıma talebi açmak `APPROVER` ister (ROUTE_EDITOR'a ek olarak; `YAPI_ADMIN` ikisini de verir). Onay kuralı profillerle aynı (hedef ortam onay istiyorsa).
+  - **Ön kontrol `PLUGINS_ACTIVE`:** Subtask taşımasında (`DEPLOY`, `ROLLBACK`, `ENABLE`) `definition.plugins`'teki her eklentinin hedefte bir versiyonu var mı. `GLOBAL`/`PROJECT` eklentilere ve hedefteki versiyonun kapsamına bakılmaz. Eklenti kaydında `plugins`'teki adlar kayıtlı ve güncel versiyonu `SUBTASK` olmalı; `disabledPlugins`'tekiler kayıtlı olmalı.
+  - **Önizleme ve test:** Eklentiler ortamda aktif versiyonlarıyla, ortamda yoksa güncel versiyonlarıyla (profil gibi); test çağrısı onları `TestCallRequest.plugins` ile taşır. `${user.permissions}` önizlemede formdaki yetkiler, testte `${user.permission}`'ın değeri; `${route.version}` ikisinde de değersiz. `POST /plugins/preview` tek eklentiyi örnek bir subtask'e uygular; ortam `ÖNİZLEME`.
+  - **Projeler:** `PROJECT` eklentisinin `projects`'i merkezde kayıtlı maintask'lar olmalı (harf duyarsız), yazıldığı gibi saklanır; runtime harf duyarsız eşleştirir.
+  - **ORA-01466:** Yeni tablo migration'dan hemen sonra okunurken salt okunur snapshot transaction'ı "table definition has changed" verebiliyor; `RouteRepository.inSnapshot` bu hatada 1 sn arayla 6 kez dener.
+  - **Testler:** core `PluginsTest` (doğrulama hataları, seçim sırası, isteğe dokunulmayanlar, `PASS_THROUGH`, yanıt işlemleri, yeni yer tutucular tanımda) ve `LegacyDocumentsTest` (`yapi.plugins`), env-admin `AdminApiTest` (idempotency, eski talep, doğrulama), runtime `YapiFlowTest.pluginsAddToRequestsAndResponsesInTheirOrder` (üç kapsam, bozuk eklenti, ret, dosya) ve iç test ucu, admin `PluginsTest` (CRUD, roller, geçmiş, önizleme, taşıma, `PLUGINS_ACTIVE`, subtask kaydı, önizleme ve test çağrısı). Frontend rehberi değişti.
 
 ## Tamamlanan iş (2026-10-26)
 
@@ -442,7 +455,7 @@ Tasarım dokümanındakilere ek olarak netleşenler:
 
 ## Modüller ve durum
 
-Bu bölüm kodun güncel halini anlatır; "Sıradaki iş"teki maddeler bittikçe güncellenir. "Sıradaki iş"in 1–7. maddeleri bitti.
+Bu bölüm kodun güncel halini anlatır; "Sıradaki iş"teki maddeler bittikçe güncellenir. "Sıradaki iş (2026-10-28)"in 1–5. maddeleri bitti.
 
 ### yapi-core (yeşil)
 
@@ -462,6 +475,7 @@ Bu bölüm kodun güncel halini anlatır; "Sıradaki iş"teki maddeler bittikçe
 | `sample` | `SampleParser` (JSON ya da bash/cmd "Copy as cURL"; kimlik header'larını atar), `SampleTemplate` (alan çıkarımı ve operasyona ad eşleme) |
 | `diff` | `JsonDiff`: alan yolu bazında fark |
 | `rules` | `DefinitionRules`: `GET /meta/definition-rules` yanıtı |
+| `plugin` | `PluginDefinition` (eklenti tanımı ve doğrulaması), `Plugin`, `Plugins` (seçim; istek ve yanıt işlemleri) |
 
 Testleri `yapi-core/src/test` altında; tasarım dokümanındaki örnekleri (add_order_note, log-project profili, eski Elastic dokümanları) doğruluyorlar.
 
@@ -489,6 +503,7 @@ Paket `com.acme.yapi.runtime`. Tek endpoint `POST /yapi`; akış `web/YapiHandle
 8. Dosya yanıtı (`BINARY` ya da `Content-Disposition`): RESPONSE olayı onaylanınca stream; `client_response` `{"info": ...}`, `body_size` `Content-Length`'ten. Değilse gövde okunur, outcome gerçek status'tan; profil varsa zarflanır, yoksa gövde olduğu gibi döner. `client_response`: `logResponseBody` kapalıyken profilde `data` boş string, profilsizde `{"status": <kod>}`; açıkken maskeli zarf ya da gövde, `data` JSON metni, `maxBodyBytes`'ta kırpılır (`EventFactory`).
 9. Her yanıtta `X-Request-Id`; hata yollarında REQUEST ve RESPONSE birlikte gönderilip ikisi de beklenir.
 
+- **Eklentiler:** İstek kurulduktan sonra `Plugins.applyRequest` (oturum işlemleri hariç), yanıt profilinden sonra `Plugins.applyResponse` (dosyada yalnızca header'lar); uygulananlar RESPONSE olayının `plugins`'i.
 - **Alarm:** REQUEST olayı, alan doğrulaması ve servis isteğinin kurulmasından sonra, servis çağrısından önce `alarmPassed`: alarm route'u tanımdan (`ROUTE`) ya da snapshot'taki projenin `alarmRoute`'undan (`INHERIT`); `RouteCache`'te bulunur ve alarm servisi olmalıdır. Alarm varsa servis çağrılmaz: eski yanıtlar açıkken 200 `{"response": false, "badprocess": true, "status": 500}`, kapalıyken 403; outcome `ALARM`. Alarm servisi hatasında 503 `TECHNICAL_ERROR`. Frontend'den gelen istekte bulunan route alarm servisiyse bulunmamış sayılır (404).
 
 - **`status_code`:** Servis yanıt verdiyse servisin status'u; vermediyse (broker hataları, timeout, bağlantı hatası) frontend'e dönen status. ClickHouse kolonu böylece boş kalmaz.
@@ -511,6 +526,7 @@ Paket `com.acme.yapi.envadmin`. Uçlar `/admin/v1` altında; hatalar merkezle ay
 | --- | --- |
 | `PUT /routes/{maintask}/{subtask}` | Tasarımdaki tek ifadeyle uygular. Yanıt `{"applied", "configVersion", "alreadyApplied", "signalled"}`. Aynı `promotionId` tekrar gelirse `alreadyApplied: true`; daha yeni talep varsa 409 `STALE_PROMOTION` (`currentPromotionId`); proje ya da profil ortamda yoksa 409 `PROJECT_NOT_FOUND` / `PROFILE_NOT_FOUND`. Tanım `RouteValidator` ile (header okunabilirliği hariç) doğrulanır |
 | `PUT /response-profiles/{name}` | Aynı desen; `ResponseProfile.parse` ile doğrulanır |
+| `PUT /plugins/{name}` | Aynı desen; `PluginDefinition.parse` ile doğrulanır |
 | `POST /routes/{m}/{s}/disable` | Kill switch, `promotionId` ile; route yoksa 404 `ROUTE_NOT_FOUND`. `ENABLE` ayrı uç değil: hedefteki versiyon `PUT` ile yeniden uygulanır |
 | `PUT /projects/{maintask}` | `{"baseUrl", "enabled", "alarmRoute", "permissionPrefix", "actor"}`; değişiklik varsa config versiyonu artar ve sinyal gider (broker'lar base URL'i snapshot'la okur) |
 | `GET /routes` | Projeler, profiller, tüm route'lar (DISABLED dahil) ve config versiyonu |
@@ -536,7 +552,8 @@ Paket `com.acme.yapi.admin`. Sözleşme `docs/frontend-guide.md`; uygulama sıra
 | `environment` | `EnvironmentRepository` (sıra, onay, test ayarı DB'den), `EnvironmentClient` (Admin API; `ssl-bundle` ile mTLS, redirect yok). Bağlanamama `UnreachableException` (hiçbir şey değişmedi), istek gitti ama yanıt yok `NoAnswerException` (uygulanmış olabilir) |
 | `project`, `catalog`, `authz` | Proje kaydı (önek çakışması `PREFIX_OVERLAP`, harf duyarsız `DUPLICATE`), ortam ayarı önce ortama, sonra merkeze. Katalog ve yetkiler `mode: http` (her ortamın Koordinatör'ü, `koordinator/KoordinatorProjects`, ortam başına önbellek) ya da `memory`; yetkiler salt okunur |
 | `route`, `profile` | Güncel satır + aynı transaction'da history (snapshot Java'da kurulur, snake_case anahtarlar), iyimser kilit (`VERSION_CONFLICT` + `currentVersion`), geri alma, arşiv (`ROUTE_DEPLOYED`), karşılaştırma, doğrulama, önizleme (`BackendRequestBuilder`) |
-| `promotion` | Ön kontroller, onay kuralı (hedef `requires_approval` ya da versiyon anonim erişimi açıyorsa), dört göz (`FOUR_EYES` + `ck_four_eyes`), uygulama: yoklama → Admin API (`promotionId` = talep ID'si) → `route_deployment`/`response_profile_deployment`. Yanıt kaybolursa talep `APPLYING`'de kalır, `RETRY` aynı ID ile tamamlar |
+| `plugin` | Eklentiler: profillerle aynı desen (`PluginRepository`, `PluginService`, `PluginController`), `GLOBAL`'de APPROVER; önizleme ve test için ortamdaki versiyonlar (`forTrial`) |
+| `promotion` | Üç tür talep (`SubjectType`: `ROUTE`, `PROFILE`, `PLUGIN`). Ön kontroller, onay kuralı (hedef `requires_approval` ya da versiyon anonim erişimi açıyorsa), dört göz (`FOUR_EYES` + `ck_four_eyes`), uygulama: yoklama → Admin API (`promotionId` = talep ID'si) → `route_deployment`/`response_profile_deployment`. Yanıt kaybolursa talep `APPLYING`'de kalır, `RETRY` aynı ID ile tamamlar |
 | `spec` | Spec karşılaştırma (method + path, değişken adları yok sayılır; `CHANGED` saklanan `spec_fingerprint`'ten), istekten şablon, test (yalnızca `test_calls_allowed`; `yapi.audit` logu), yoklama |
 | `jobs` | `DriftCheck` (gece; ortamın listesiyle karşılaştırma + her ACTIVE route'a yoklama, `yapi.admin.drift` sayacı, `last_probe_status`), `CatalogSync` (ad yenileme, servisten kalkan proje `MISSING`). Birden çok instance'ta aynı anda çalışmaları zararsız (idempotent) |
 
@@ -599,6 +616,7 @@ Derlemede doğrulandı (Boot 4.1.1, Spring Framework 7.0, Jackson 3.1, Kafka 4.2
 Bu turda tasarım dokümanında değişmesi gereken bir şey çıkarsa buraya yazılır; canlı doküman buradan güncellenir.
 
 - 2026-10-16 turunun maddeleri canlı dokümana işlendi (rev 180).
+- **Eklentiler (2026-10-28, 5):** "Sıradaki iş (2026-10-28)" 5'teki "Yapıldı" notunun tamamı; yeni tablolar (merkez `plugin*`, runtime `runtime_plugin`), taşıma talebinin üçüncü türü, ortam Admin API'sinde `PUT /admin/v1/plugins/{name}`, yeni yer tutucuların tanım ve profillerde de geçerli olması, olayın `plugins` alanı ve `yapi.plugins`, `yapi.time-zone`.
 - **Login kontrolü (2026-10-28, 4):** Giriş servisinde `GET /users/me/session` ve cevapları; broker'ın her forward'u (anonim route'lar dahil) imzalaması, kullanıcısız imza; aynı istemciden tekrar girişte token'ın, yetkilerin ve kalan sürenin korunması, Koordinatör reddinin yine geçerli olması; admin 401'inde `loginUrl`.
 - **Yanıt profili koşulları (2026-10-28, 3):** "Sıradaki iş (2026-10-28)" 3'teki "Yapıldı" notu: profilde değersiz yer tutucunun `null`/boş metin kuralı ve gizli 5xx gövdesi istisnası, `httpStatus: "${backend.status}"`'ın yanıt yokken 504/502 olması, koşul operatörlerinin anlamları (`exists`'te `null` "var", tip duyarlı karşılaştırma, `notEquals` değersizken tutar), yol ve header kuralları, `exposeServerErrorBody`, önizlemede `matchedTemplate`/`matchedCase`.
 - **Reddedilen istekler (2026-10-28, 2):** "Sıradaki iş (2026-10-28)" 2'deki "Yapıldı" notu: olaya `denied_reason`, `route_permissions`, `has_project_permission` ve `request_body`; `yapi_unauthorized` indeksi ve alanları (`route_maintask`/`route_subtask` dahil, null'lar yazılır, `body` JSON metni, `token` yok); `has_project_permission`'ın ne zaman dolu olduğu; ClickHouse `denied_reason`; ortam Admin API'sinde `permissionPrefix` ve `runtime_project.permission_prefix`.

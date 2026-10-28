@@ -9,6 +9,8 @@ import java.util.regex.Pattern;
 
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.naming.Names;
+import com.acme.yapi.core.request.RequestScope;
+import com.acme.yapi.core.template.ContextPlaceholders;
 import com.acme.yapi.core.template.JsonTemplate;
 import com.acme.yapi.core.template.Placeholder;
 import com.acme.yapi.core.template.Resolver;
@@ -83,12 +85,18 @@ public final class ResponseProfile {
      * a connection failure.
      *
      * @param headers the service's response headers by {@link Names#key}; first value of each
+     * @param scope   what the request-wide placeholders read; null leaves them without a value
      */
     public record BackendResult(Integer status, JsonNode body, Outcome outcome, String requestId,
-                                Map<String, String> headers) {
+                                Map<String, String> headers, RequestScope scope) {
 
         public BackendResult(Integer status, JsonNode body, Outcome outcome, String requestId) {
-            this(status, body, outcome, requestId, Map.of());
+            this(status, body, outcome, requestId, Map.of(), null);
+        }
+
+        public BackendResult(Integer status, JsonNode body, Outcome outcome, String requestId,
+                             Map<String, String> headers) {
+            this(status, body, outcome, requestId, headers, null);
         }
     }
 
@@ -266,7 +274,8 @@ public final class ResponseProfile {
             }
             case Placeholder.OUTCOME, Placeholder.REQUEST_ID -> path.isEmpty() ? null
                     : "Profilde kullanılamayan yer tutucu: " + placeholder;
-            default -> "Profilde kullanılamayan yer tutucu: " + placeholder;
+            default -> ContextPlaceholders.handles(placeholder) ? ContextPlaceholders.problem(placeholder)
+                    : "Profilde kullanılamayan yer tutucu: " + placeholder;
         };
     }
 
@@ -371,7 +380,8 @@ public final class ResponseProfile {
             }
             case Placeholder.OUTCOME -> Json.string(result.outcome().name());
             case Placeholder.REQUEST_ID -> Json.string(result.requestId());
-            default -> Json.missing();
+            default -> ContextPlaceholders.handles(placeholder)
+                    ? ContextPlaceholders.resolve(placeholder, result.scope()) : Json.missing();
         };
     }
 

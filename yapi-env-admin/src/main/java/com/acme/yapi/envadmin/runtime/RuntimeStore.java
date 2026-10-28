@@ -44,6 +44,14 @@ public class RuntimeStore {
                                   long promotionId) {
     }
 
+    public record PluginSnapshot(String name, long pluginId, int version, JsonNode definition, String actor,
+                                 long promotionId) {
+    }
+
+    public record PluginRow(String name, long pluginId, int version, long promotionId, String appliedBy,
+                            Instant appliedAt) {
+    }
+
     public record ConfigVersion(long version, Instant updatedAt) {
     }
 
@@ -139,6 +147,39 @@ public class RuntimeStore {
                     .optional()
                     .orElse(-1L);
             return replayOrStale(current, profile.promotionId());
+        });
+    }
+
+    /** As {@link #applyProfile}: one idempotent statement, an older promotion never overwrites a newer one. */
+    public ApplyResult applyPlugin(PluginSnapshot plugin) {
+        return transactions.execute(status -> {
+            Optional<Long> version = bumpIf(merge(() -> jdbc.sql("""
+                            MERGE INTO runtime_plugin p
+                            USING dual ON (p.name = :name)
+                             WHEN MATCHED THEN UPDATE
+                                  SET p.plugin_id = :pluginId, p.version = :version, p.definition = :definition,
+                                      p.applied_by = :user, p.promotion_id = :promotionId, p.applied_at = SYSTIMESTAMP
+                                WHERE p.promotion_id < :promotionId
+                             WHEN NOT MATCHED THEN INSERT
+                                  (name, plugin_id, version, definition, applied_by, promotion_id)
+                                  VALUES (:name, :pluginId, :version, :definition, :user, :promotionId)
+                            """)
+                    .param("name", plugin.name())
+                    .param("pluginId", plugin.pluginId())
+                    .param("version", plugin.version())
+                    .param("definition", clob(Json.write(plugin.definition())))
+                    .param("user", plugin.actor())
+                    .param("promotionId", plugin.promotionId())
+                    .update()));
+            if (version.isPresent()) {
+                return new ApplyResult.Applied(version.get());
+            }
+            long current = jdbc.sql("SELECT promotion_id FROM runtime_plugin WHERE name = :name")
+                    .param("name", plugin.name())
+                    .query(Long.class)
+                    .optional()
+                    .orElse(-1L);
+            return replayOrStale(current, plugin.promotionId());
         });
     }
 
@@ -266,6 +307,17 @@ public class RuntimeStore {
                           FROM runtime_response_profile ORDER BY name
                         """)
                 .query((rs, row) -> new ProfileRow(rs.getString("name"), rs.getLong("profile_id"),
+                        rs.getInt("version"), rs.getLong("promotion_id"), rs.getString("applied_by"),
+                        instant(rs, "applied_at")))
+                .list();
+    }
+
+    public List<PluginRow> plugins() {
+        return jdbc.sql("""
+                        SELECT name, plugin_id, version, promotion_id, applied_by, applied_at
+                          FROM runtime_plugin ORDER BY name
+                        """)
+                .query((rs, row) -> new PluginRow(rs.getString("name"), rs.getLong("plugin_id"),
                         rs.getInt("version"), rs.getLong("promotion_id"), rs.getString("applied_by"),
                         instant(rs, "applied_at")))
                 .list();

@@ -3,6 +3,8 @@ package com.acme.yapi.core.logging;
 import java.time.Instant;
 import java.util.List;
 
+import com.acme.yapi.core.plugin.Plugin;
+
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -20,6 +22,8 @@ import tools.jackson.databind.JsonNode;
  *       route and either {@code alarms} (the values that raised one) with {@code params} (the masked request body)
  *       or {@code error} when the check could not be made.</li>
  *   <li>{@code denial}: RESPONSE only, for a {@code DENIED} request ({@link Denial}).</li>
+ *   <li>{@code plugins}: RESPONSE only, the plugins applied to the request or the response, by name and version;
+ *       null when none.</li>
  * </ul>
  */
 public record LogEvent(
@@ -54,7 +58,8 @@ public record LogEvent(
         String errorMessage,
         String yapiInstance,
         JsonNode alarm,
-        Denial denial) {
+        Denial denial,
+        List<Plugin.Applied> plugins) {
 
     public enum EventType {
         REQUEST, RESPONSE

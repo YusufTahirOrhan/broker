@@ -347,6 +347,37 @@ class AdminApiTest {
     }
 
     @Test
+    void pluginsAreAppliedOnceInPromotionOrderAndValidated() {
+        String plugin = """
+                {"promotionId": %d, "pluginId": 9, "version": %d, "actor": "sec.zeynep",
+                 "definition": {"scope": "GLOBAL",
+                                "request": [{"op": "set", "target": "header", "name": "X-Request-Time", "value": "${now}"}]}}
+                """;
+        long before = configVersion();
+
+        JsonHttp.Response first = http.put("/admin/v1/plugins/request-time", plugin.formatted(10, 1));
+        assertThat(first.status()).as(first.text()).isEqualTo(200);
+        assertThat(first.json().get("applied").booleanValue()).isTrue();
+        assertThat(configVersion()).isEqualTo(before + 1);
+        JsonHttp.Response replay = http.put("/admin/v1/plugins/request-time", plugin.formatted(10, 1));
+        assertThat(replay.json().get("alreadyApplied").booleanValue()).isTrue();
+        assertThat(http.put("/admin/v1/plugins/request-time", plugin.formatted(12, 2)).status()).isEqualTo(200);
+        JsonHttp.Response stale = http.put("/admin/v1/plugins/request-time", plugin.formatted(11, 1));
+        assertThat(stale.status()).isEqualTo(409);
+        assertThat(stale.json().get("code").stringValue()).isEqualTo("STALE_PROMOTION");
+        assertThat(http.get("/admin/v1/routes").json().get("plugins").get(0).get("version").intValue()).isEqualTo(2);
+
+        JsonHttp.Response invalid = http.put("/admin/v1/plugins/request-time", """
+                {"promotionId": 13, "pluginId": 9, "version": 3, "actor": "sec.zeynep",
+                 "definition": {"scope": "GLOBAL",
+                                "request": [{"op": "set", "target": "header", "name": "X-Took", "value": "${durationMs}"}]}}
+                """);
+        assertThat(invalid.status()).isEqualTo(400);
+        assertThat(invalid.json().get("errors").get(0).get("field").stringValue())
+                .isEqualTo("definition.request[0].value");
+    }
+
+    @Test
     void killSwitchDisablesTheRoute() {
         project("order-service", service.baseUrl());
         http.put("/admin/v1/routes/order-service/add_order_note", route(100, 3, null));
