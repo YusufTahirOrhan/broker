@@ -9,6 +9,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 import com.acme.yapi.core.json.Json;
+import com.acme.yapi.core.naming.Names;
 import com.acme.yapi.core.template.JsonTemplate;
 import com.acme.yapi.core.template.TemplateString;
 import com.acme.yapi.core.validation.FieldError;
@@ -26,7 +27,8 @@ public final class RouteDefinitionParser {
     public static final Set<String> ENVELOPE_FIELDS = Set.of("maintask", "subtask", "application", "uid");
 
     private static final Set<String> DEFINITION_KEYS =
-            Set.of("request", "response", "timeoutMs", "retry", "logging", "alarm", "alarmService");
+            Set.of("request", "response", "timeoutMs", "retry", "logging", "alarm", "alarmService", "plugins",
+                    "disabledPlugins");
     private static final Set<String> ALARM_KEYS = Set.of("check", "maintask", "subtask");
     private static final Set<String> ALARM_SERVICE_KEYS = Set.of("resultPath");
     private static final Set<String> REQUEST_KEYS = Set.of("fields", "pathVariables", "queryParams", "headers", "body");
@@ -48,6 +50,14 @@ public final class RouteDefinitionParser {
         }
     }
 
+    /**
+     * Whether a stored definition is an alarm service route: its {@code alarmService} is an object. A JSON
+     * {@code null} there is not one, as {@link #parse} reads it; screens, prechecks and the broker decide alike.
+     */
+    public static boolean isAlarmService(JsonNode definition) {
+        return Json.objectField(definition, "alarmService") != null;
+    }
+
     public static Parsed parse(JsonNode node) {
         List<FieldError> errors = new ArrayList<>();
         if (node == null || !node.isObject()) {
@@ -65,8 +75,11 @@ public final class RouteDefinitionParser {
         AlarmSpec alarm = parseAlarm(node.get("alarm"), errors);
         AlarmServiceSpec alarmService = parseAlarmService(node.get("alarmService"), errors);
 
+        List<String> plugins = parseNames(node.get("plugins"), "plugins", errors);
+        List<String> disabledPlugins = parseNames(node.get("disabledPlugins"), "disabledPlugins", errors);
+
         RouteDefinition definition = new RouteDefinition(request, responseType, timeoutMs, maxAttempts, logging,
-                alarm, alarmService);
+                alarm, alarmService, plugins, disabledPlugins);
         return new Parsed(errors.isEmpty() ? definition : null, errors);
     }
 
@@ -324,6 +337,32 @@ public final class RouteDefinitionParser {
             errors.add(new FieldError("alarmService.resultPath", "Noktalı bir JSON yolu olmalı, ör. data.alarms"));
         }
         return new AlarmServiceSpec(resultPath == null || resultPath.isEmpty() ? null : resultPath);
+    }
+
+    /** A list of plugin names, without repeats (ignoring case). */
+    private static List<String> parseNames(JsonNode node, String path, List<FieldError> errors) {
+        if (node == null || node.isNull()) {
+            return List.of();
+        }
+        if (!node.isArray()) {
+            errors.add(new FieldError(path, "Eklenti adlarının dizisi olmalı"));
+            return List.of();
+        }
+        List<String> names = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        int index = 0;
+        for (JsonNode element : node) {
+            String name = Json.isString(element) ? element.stringValue() : null;
+            if (!Names.isValidProfileName(name)) {
+                errors.add(new FieldError(path + "[" + index + "]", "Geçerli bir eklenti adı olmalı"));
+            } else if (!seen.add(Names.key(name))) {
+                errors.add(new FieldError(path + "[" + index + "]", "Aynı eklenti iki kez yazılmış: " + name));
+            } else {
+                names.add(name);
+            }
+            index++;
+        }
+        return List.copyOf(names);
     }
 
     private static String text(JsonNode node, String path, List<FieldError> errors) {

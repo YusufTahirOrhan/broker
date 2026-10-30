@@ -44,12 +44,23 @@ public class RuntimeStore {
                                   long promotionId) {
     }
 
+    public record PluginSnapshot(String name, long pluginId, int version, JsonNode definition, String actor,
+                                 long promotionId) {
+    }
+
+    public record PluginRow(String name, long pluginId, int version, long promotionId, String appliedBy,
+                            Instant appliedAt) {
+    }
+
     public record ConfigVersion(long version, Instant updatedAt) {
     }
 
-    /** @param alarmRoute the project's alarm service route; null when its subtasks inherit none */
+    /**
+     * @param alarmRoute       the project's alarm service route; null when its subtasks inherit none
+     * @param permissionPrefix the project's permission prefix; null until the central admin has sent it
+     */
     public record ProjectRow(String maintask, String baseUrl, boolean enabled, AlarmRoute alarmRoute,
-                             Instant updatedAt) {
+                             String permissionPrefix, Instant updatedAt) {
     }
 
     public record ProfileRow(String name, long profileId, int version, long promotionId, String appliedBy,
@@ -139,6 +150,39 @@ public class RuntimeStore {
         });
     }
 
+    /** As {@link #applyProfile}: one idempotent statement, an older promotion never overwrites a newer one. */
+    public ApplyResult applyPlugin(PluginSnapshot plugin) {
+        return transactions.execute(status -> {
+            Optional<Long> version = bumpIf(merge(() -> jdbc.sql("""
+                            MERGE INTO runtime_plugin p
+                            USING dual ON (p.name = :name)
+                             WHEN MATCHED THEN UPDATE
+                                  SET p.plugin_id = :pluginId, p.version = :version, p.definition = :definition,
+                                      p.applied_by = :user, p.promotion_id = :promotionId, p.applied_at = SYSTIMESTAMP
+                                WHERE p.promotion_id < :promotionId
+                             WHEN NOT MATCHED THEN INSERT
+                                  (name, plugin_id, version, definition, applied_by, promotion_id)
+                                  VALUES (:name, :pluginId, :version, :definition, :user, :promotionId)
+                            """)
+                    .param("name", plugin.name())
+                    .param("pluginId", plugin.pluginId())
+                    .param("version", plugin.version())
+                    .param("definition", clob(Json.write(plugin.definition())))
+                    .param("user", plugin.actor())
+                    .param("promotionId", plugin.promotionId())
+                    .update()));
+            if (version.isPresent()) {
+                return new ApplyResult.Applied(version.get());
+            }
+            long current = jdbc.sql("SELECT promotion_id FROM runtime_plugin WHERE name = :name")
+                    .param("name", plugin.name())
+                    .query(Long.class)
+                    .optional()
+                    .orElse(-1L);
+            return replayOrStale(current, plugin.promotionId());
+        });
+    }
+
     /** Kill switch: the route stays in the table as DISABLED, so brokers drop it on their next load. */
     public ApplyResult disableRoute(String maintask, String subtask, long promotionId, String actor) {
         return transactions.execute(status -> {
@@ -166,10 +210,12 @@ public class RuntimeStore {
     }
 
     /**
-     * Writes the project's base URL, switch and alarm route. Brokers read them with every snapshot, so a change moves
-     * the config version like a route change does. Returns the new version, or empty when nothing changed.
+     * Writes the project's base URL, switch, alarm route and permission prefix. Brokers read them with every snapshot,
+     * so a change moves the config version like a route change does. Returns the new version, or empty when nothing
+     * changed.
      */
-    public Optional<Long> upsertProject(String maintask, String baseUrl, boolean enabled, AlarmRoute alarmRoute) {
+    public Optional<Long> upsertProject(String maintask, String baseUrl, boolean enabled, AlarmRoute alarmRoute,
+                                        String permissionPrefix) {
         String alarmMaintask = alarmRoute == null ? null : alarmRoute.maintask();
         String alarmSubtask = alarmRoute == null ? null : alarmRoute.subtask();
         return transactions.execute(status -> bumpIf(merge(() -> jdbc.sql("""
@@ -177,18 +223,22 @@ public class RuntimeStore {
                         USING dual ON (p.maintask = :maintask)
                          WHEN MATCHED THEN UPDATE
                               SET p.base_url = :baseUrl, p.enabled = :enabled, p.alarm_maintask = :alarmMaintask,
-                                  p.alarm_subtask = :alarmSubtask, p.updated_at = SYSTIMESTAMP
+                                  p.alarm_subtask = :alarmSubtask, p.permission_prefix = :permissionPrefix,
+                                  p.updated_at = SYSTIMESTAMP
                             WHERE p.base_url <> :baseUrl OR p.enabled <> :enabled
                                OR DECODE(p.alarm_maintask, :alarmMaintask, 0, 1) = 1
                                OR DECODE(p.alarm_subtask, :alarmSubtask, 0, 1) = 1
-                         WHEN NOT MATCHED THEN INSERT (maintask, base_url, enabled, alarm_maintask, alarm_subtask)
-                              VALUES (:maintask, :baseUrl, :enabled, :alarmMaintask, :alarmSubtask)
+                               OR DECODE(p.permission_prefix, :permissionPrefix, 0, 1) = 1
+                         WHEN NOT MATCHED THEN INSERT (maintask, base_url, enabled, alarm_maintask, alarm_subtask,
+                                                       permission_prefix)
+                              VALUES (:maintask, :baseUrl, :enabled, :alarmMaintask, :alarmSubtask, :permissionPrefix)
                         """)
                 .param("maintask", maintask)
                 .param("baseUrl", baseUrl)
                 .param("enabled", flag(enabled))
                 .param("alarmMaintask", alarmMaintask)
                 .param("alarmSubtask", alarmSubtask)
+                .param("permissionPrefix", permissionPrefix)
                 .update())));
     }
 
@@ -234,7 +284,7 @@ public class RuntimeStore {
 
     public Optional<ProjectRow> project(String maintask) {
         return jdbc.sql("""
-                        SELECT maintask, base_url, enabled, alarm_maintask, alarm_subtask, updated_at
+                        SELECT maintask, base_url, enabled, alarm_maintask, alarm_subtask, permission_prefix, updated_at
                           FROM runtime_project WHERE maintask = :maintask
                         """)
                 .param("maintask", maintask)
@@ -244,7 +294,7 @@ public class RuntimeStore {
 
     public List<ProjectRow> projects() {
         return jdbc.sql("""
-                        SELECT maintask, base_url, enabled, alarm_maintask, alarm_subtask, updated_at
+                        SELECT maintask, base_url, enabled, alarm_maintask, alarm_subtask, permission_prefix, updated_at
                           FROM runtime_project ORDER BY maintask
                         """)
                 .query(RuntimeStore::projectRow)
@@ -257,6 +307,17 @@ public class RuntimeStore {
                           FROM runtime_response_profile ORDER BY name
                         """)
                 .query((rs, row) -> new ProfileRow(rs.getString("name"), rs.getLong("profile_id"),
+                        rs.getInt("version"), rs.getLong("promotion_id"), rs.getString("applied_by"),
+                        instant(rs, "applied_at")))
+                .list();
+    }
+
+    public List<PluginRow> plugins() {
+        return jdbc.sql("""
+                        SELECT name, plugin_id, version, promotion_id, applied_by, applied_at
+                          FROM runtime_plugin ORDER BY name
+                        """)
+                .query((rs, row) -> new PluginRow(rs.getString("name"), rs.getLong("plugin_id"),
                         rs.getInt("version"), rs.getLong("promotion_id"), rs.getString("applied_by"),
                         instant(rs, "applied_at")))
                 .list();
@@ -312,7 +373,7 @@ public class RuntimeStore {
         String alarmMaintask = rs.getString("alarm_maintask");
         return new ProjectRow(rs.getString("maintask"), rs.getString("base_url"), rs.getBoolean("enabled"),
                 alarmMaintask == null ? null : new AlarmRoute(alarmMaintask, rs.getString("alarm_subtask")),
-                instant(rs, "updated_at"));
+                rs.getString("permission_prefix"), instant(rs, "updated_at"));
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

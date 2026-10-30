@@ -2,6 +2,7 @@ package com.acme.yapi.admin.profile;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -172,10 +173,15 @@ public class ProfileService {
         return view;
     }
 
-    public record PreviewRequest(JsonNode definition, Integer status, JsonNode body) {
+    /** @param headers the sample answer's headers, for {@code ${backend.header.<ad>}}; may be left out */
+    public record PreviewRequest(JsonNode definition, Integer status, JsonNode body, Map<String, String> headers) {
     }
 
-    public record PreviewResult(int status, JsonNode body, String outcome) {
+    /**
+     * @param matchedTemplate {@code success} or {@code error}
+     * @param matchedCase     index of the case in that template whose conditions held; null when none did
+     */
+    public record PreviewResult(int status, JsonNode body, String outcome, String matchedTemplate, Integer matchedCase) {
     }
 
     /** The response the frontend would get for a sample backend answer; a null status stands for a timeout. */
@@ -188,9 +194,15 @@ public class ProfileService {
         com.acme.yapi.core.response.Outcome outcome = request.status() == null
                 ? com.acme.yapi.core.response.Outcome.TIMEOUT
                 : com.acme.yapi.core.response.Outcome.fromBackendStatus(request.status());
-        var rendered = profile.render(new ResponseProfile.BackendResult(request.status(),
-                request.body() == null ? Json.missing() : request.body(), outcome, "00000000-0000-7000-8000-000000000000"));
-        return new PreviewResult(rendered.status(), rendered.body(), outcome.name());
+        Map<String, String> headers = new HashMap<>();
+        if (request.headers() != null) {
+            request.headers().forEach((name, value) -> headers.put(Names.key(name), value));
+        }
+        ResponseProfile.Rendered rendered = profile.evaluate(new ResponseProfile.BackendResult(request.status(),
+                request.body() == null ? Json.missing() : request.body(), outcome, "00000000-0000-7000-8000-000000000000",
+                headers));
+        return new PreviewResult(rendered.response().status(), rendered.response().body(), outcome.name(),
+                rendered.template(), rendered.matchedCase());
     }
 
     public ProfileRepository.Row require(long id) {

@@ -56,10 +56,15 @@ public final class Problems {
     /** For filters that answer before Spring MVC: authentication and authorization failures. */
     public static void write(HttpServletResponse response, HttpStatus status, String code, String detail)
             throws IOException {
+        write(response, status, code, detail, Map.of());
+    }
+
+    public static void write(HttpServletResponse response, HttpStatus status, String code, String detail,
+                             Map<String, Object> properties) throws IOException {
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
-        response.getOutputStream().write(Json.writeBytes(body(status, code, detail, List.of(), Map.of())));
+        response.getOutputStream().write(Json.writeBytes(body(status, code, detail, List.of(), properties)));
     }
 
     private static String title(HttpStatus status, String code) {

@@ -30,7 +30,8 @@ import tools.jackson.databind.JsonNode;
         "yapi.admin.authorization.mode=memory",
         "yapi.admin.session.roles.VIEWER=YAPI_DEVELOPER,YAPI_ADMIN",
         "yapi.admin.session.roles.ROUTE_EDITOR=YAPI_DEVELOPER,YAPI_ADMIN",
-        "yapi.admin.session.roles.APPROVER=YAPI_ADMIN,DEGISIKLIK_KURULU"
+        "yapi.admin.session.roles.APPROVER=YAPI_ADMIN,DEGISIKLIK_KURULU",
+        "yapi.admin.login-url=https://giris.example.test/login"
 })
 class SessionLoginTest {
 
@@ -137,6 +138,7 @@ class SessionLoginTest {
     private static void assertUnauthenticated(JsonHttp.Response response) {
         assertThat(response.status()).as(response.text()).isEqualTo(401);
         assertThat(response.json().get("code").stringValue()).isEqualTo("UNAUTHENTICATED");
+        assertThat(response.json().get("loginUrl").stringValue()).isEqualTo("https://giris.example.test/login");
     }
 
     private static java.util.List<String> roles(JsonHttp.Response response) {

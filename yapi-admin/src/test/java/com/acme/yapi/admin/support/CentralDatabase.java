@@ -19,8 +19,9 @@ public final class CentralDatabase {
             new SingleConnectionDataSource(ORACLE.url(), ORACLE.owner(), OracleDatabase.PASSWORD, true));
 
     private static final String[] TABLES = {"promotion_request", "route_deployment", "response_profile_deployment",
-            "route_definition_history", "route_permission", "route_definition", "project_environment", "project",
-            "response_profile_history", "response_profile"};
+            "plugin_deployment", "route_definition_history", "route_permission", "route_definition",
+            "project_environment", "project", "response_profile_history", "response_profile", "plugin_history",
+            "plugin"};
 
     private CentralDatabase() {
     }
@@ -47,6 +48,7 @@ public final class CentralDatabase {
     public static void reset() {
         OWNER.sql("ALTER TRIGGER trg_route_history_append_only DISABLE").update();
         OWNER.sql("ALTER TRIGGER trg_profile_history_append_only DISABLE").update();
+        OWNER.sql("ALTER TRIGGER trg_plugin_history_append_only DISABLE").update();
         try {
             for (String table : TABLES) {
                 OWNER.sql("DELETE FROM " + table).update();
@@ -54,6 +56,7 @@ public final class CentralDatabase {
         } finally {
             OWNER.sql("ALTER TRIGGER trg_route_history_append_only ENABLE").update();
             OWNER.sql("ALTER TRIGGER trg_profile_history_append_only ENABLE").update();
+            OWNER.sql("ALTER TRIGGER trg_plugin_history_append_only ENABLE").update();
         }
     }
 }

@@ -3,6 +3,8 @@ package com.acme.yapi.core.logging;
 import java.time.Instant;
 import java.util.List;
 
+import com.acme.yapi.core.plugin.Plugin;
+
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -19,6 +21,9 @@ import tools.jackson.databind.JsonNode;
  *   <li>{@code alarm}: RESPONSE only, when an alarm check ran: {@code {"maintask", "subtask"}} of the alarm service
  *       route and either {@code alarms} (the values that raised one) with {@code params} (the masked request body)
  *       or {@code error} when the check could not be made.</li>
+ *   <li>{@code denial}: RESPONSE only, for a {@code DENIED} request ({@link Denial}).</li>
+ *   <li>{@code plugins}: RESPONSE only, the plugins applied to the request or the response, by name and version;
+ *       null when none.</li>
  * </ul>
  */
 public record LogEvent(
@@ -52,9 +57,30 @@ public record LogEvent(
         JsonNode clientResponse,
         String errorMessage,
         String yapiInstance,
-        JsonNode alarm) {
+        JsonNode alarm,
+        Denial denial,
+        List<Plugin.Applied> plugins) {
 
     public enum EventType {
         REQUEST, RESPONSE
+    }
+
+    /** Why the broker refused a request with {@code DENIED}. */
+    public enum DeniedReason {
+        PERMISSION, APPLICATION, SESSION
+    }
+
+    /**
+     * RESPONSE only, for a {@code DENIED} request. On the wire its parts are top-level fields.
+     *
+     * @param routePermissions     what the route asks for ({@code permissions}, then {@code foreign_permissions});
+     *                             null when no route was found
+     * @param hasProjectPermission whether one of the user's permissions starts with the route's project prefix and
+     *                             {@code _}; null without a route, a verified user or a known prefix
+     * @param requestBody          the frontend body as the REQUEST event logs it (masked), so the refusal is
+     *                             readable on its own
+     */
+    public record Denial(DeniedReason reason, List<String> routePermissions, Boolean hasProjectPermission,
+                         JsonNode requestBody) {
     }
 }

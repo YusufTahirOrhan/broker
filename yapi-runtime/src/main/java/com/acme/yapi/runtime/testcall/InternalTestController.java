@@ -9,6 +9,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
@@ -30,6 +32,10 @@ import com.acme.yapi.core.request.BackendRequest;
 import com.acme.yapi.core.request.BackendRequestBuilder;
 import com.acme.yapi.core.request.RequestBodyValidator;
 import com.acme.yapi.core.request.RequestBuildException;
+import com.acme.yapi.core.plugin.Plugin;
+import com.acme.yapi.core.plugin.PluginDefinition;
+import com.acme.yapi.core.plugin.Plugins;
+import com.acme.yapi.core.request.RequestScope;
 import com.acme.yapi.core.request.RequestContext;
 import com.acme.yapi.core.response.ClientResponse;
 import com.acme.yapi.core.response.Outcome;
@@ -67,8 +73,16 @@ public class InternalTestController {
     private final RouteValidator.Context readable;
     private final byte[] secret;
     private final int maxResponseBytes;
+    private final String environment;
+    private final java.time.ZoneId timeZone;
+
+    /** The test's plugins and what their response operations read. */
+    private record Plugged(List<Plugin> plugins, RequestContext context, Set<Plugin.Applied> applied) {
+    }
 
     public InternalTestController(Forwarder forwarder, UserContextSigner userContext, YapiProperties properties) {
+        this.environment = properties.environment();
+        this.timeZone = properties.timeZone();
         this.forwarder = forwarder;
         this.userContext = userContext;
         this.readable = RouteValidator.Context.of(properties.readableHeaders());
@@ -101,14 +115,24 @@ public class InternalTestController {
         if (call.sample() == null || !call.sample().isObject()) {
             errors.add(new FieldError("sample", "Örnek gövde bir JSON nesnesi olmalı"));
         }
+        List<Plugin> plugins = new ArrayList<>();
+        for (int i = 0; i < call.plugins().size(); i++) {
+            TestCallRequest.PluginRef ref = call.plugins().get(i);
+            PluginDefinition.Parsed parsed = PluginDefinition.parse(ref.definition(), RouteValidator.Context.anyHeader());
+            String prefix = "plugins[" + i + "].definition";
+            parsed.errors().forEach(error -> errors.add(error.prefixed(prefix)));
+            if (parsed.valid()) {
+                plugins.add(new Plugin(ref.name(), ref.version() == null ? 0 : ref.version(), parsed.definition()));
+            }
+        }
         if (!errors.isEmpty()) {
             return problem(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED",
                     "Tanım geçersiz: " + errors.size() + " alan hatalı.", errors);
         }
-        return ResponseEntity.ok(run(call, profile));
+        return ResponseEntity.ok(run(call, profile, plugins));
     }
 
-    private TestCallResult run(TestCallRequest call, ResponseProfile profile) {
+    private TestCallResult run(TestCallRequest call, ResponseProfile profile, List<Plugin> plugins) {
         RouteDefinition definition = RouteDefinitionParser.parse(call.definition()).definition();
         ObjectNode sample = (ObjectNode) call.sample();
         RequestBodyValidator.Result validated = RequestBodyValidator.validate(sample, definition.request().fields());
@@ -120,34 +144,60 @@ public class InternalTestController {
         if (call.headers() != null) {
             headers.putAll(call.headers());
         }
+        TraceContext trace = TraceContext.from(null);
+        // the test user holds the permission the form gave; the route is not saved, so it has no version
+        RequestScope scope = new RequestScope(environment, trace.traceId(), call.maintask(),
+                Json.stringField(sample, "subtask"), null, headers.get("X-Clientip"), headers.get("X-User-Agent"),
+                call.permission() == null ? List.of() : List.of(call.permission()), Instant.now(), timeZone, null);
+        RequestContext context = new RequestContext(sample, validated.effectiveBody(), headers::get, readable,
+                call.userId(), call.permission(), requestId).withScope(scope);
         BackendRequest request;
         try {
             request = BackendRequestBuilder.build(HttpMethodName.parse(call.httpMethod()).orElseThrow(),
-                    PathTemplate.parse(call.pathTemplate()), definition, call.baseUrl(),
-                    new RequestContext(sample, validated.effectiveBody(), headers::get, readable, call.userId(),
-                            call.permission(), requestId));
+                    PathTemplate.parse(call.pathTemplate()), definition, call.baseUrl(), context);
         } catch (RequestBuildException e) {
             return invalid(List.of(e.error()));
         }
+        Plugged plugged = new Plugged(plugins, context, new LinkedHashSet<>());
+        Plugins.RequestResult changed = Plugins.applyRequest(request, plugins, definition.request(), context.resolver());
+        request = changed.request();
+        plugged.applied().addAll(changed.applied());
         Map<String, String> extra = new LinkedHashMap<>();
-        extra.put("traceparent", TraceContext.from(null).traceparent());
+        extra.put("traceparent", trace.traceparent());
         if (userContext.enabled() && call.userId() != null) {
             extra.put(userContext.header(), userContext.sign(call.userId(), requestId, Instant.now()));
         }
         TestCallResult.RequestView sent = TestCallResult.RequestView.of(request);
         Forwarder.Result result = forwarder.send(request, definition.timeoutMs(), definition.maxAttempts(), extra);
         long started = result.startedNanos();
-        return switch (result) {
-            case Forwarder.TimedOut timedOut -> failed(sent, Outcome.TIMEOUT, profile, requestId, started);
-            case Forwarder.Failed failed -> failed(sent, Outcome.TECHNICAL_ERROR, profile, requestId, started);
+        Long backendMillis = millis(started);
+        TestCallResult tested = switch (result) {
+            case Forwarder.TimedOut timedOut -> failed(sent, Outcome.TIMEOUT, profile, requestId, started, plugged);
+            case Forwarder.Failed failed -> failed(sent, Outcome.TECHNICAL_ERROR, profile, requestId, started, plugged);
             case Forwarder.Responded responded -> responded(sent, responded.response(), definition, profile,
-                    requestId, started);
+                    requestId, started, plugged, backendMillis);
         };
+        return tested.withPlugins(plugged.applied());
+    }
+
+    /** The plugins' response operations on the frontend's response; {@code body} null for files. */
+    private static TestCallResult.ClientView client(int status, JsonNode body, Plugged plugged, Integer backendStatus,
+                                                    Map<String, String> backendHeaders, Outcome outcome,
+                                                    Long backendMillis) {
+        if (plugged.plugins().isEmpty()) {
+            return new TestCallResult.ClientView(status, body);
+        }
+        Plugins.ResponseValues values = new Plugins.ResponseValues(backendStatus, backendHeaders, outcome.name(),
+                backendMillis, plugged.context().scope().receivedAt(), plugged.context().scope());
+        Plugins.ResponseResult changed = Plugins.applyResponse(Map.of(), body, plugged.plugins(),
+                Plugins.responseResolver(plugged.context().resolver(), values));
+        plugged.applied().addAll(changed.applied());
+        return new TestCallResult.ClientView(status, changed.body(), changed.headers());
     }
 
     private TestCallResult responded(TestCallResult.RequestView sent, HttpResponse<InputStream> response,
                                      RouteDefinition definition, ResponseProfile profile, String requestId,
-                                     long started) {
+                                     long started, Plugged plugged, Long backendMillis) {
         int status = response.statusCode();
         Outcome outcome = Outcome.fromBackendStatus(status);
         Map<String, List<String>> headers = headers(response);
@@ -159,40 +209,49 @@ public class InternalTestController {
             }
             ObjectNode info = Json.object();
             info.put("info", BackendResponses.fileInfo(definition.logging(), response));
+            TestCallResult.ClientView file = client(status, null, plugged, status,
+                    BackendResponses.profileHeaders(response), outcome, backendMillis);
             return new TestCallResult(sent, new TestCallResult.ResponseView(status, headers, info, millis(started)),
-                    new TestCallResult.ClientView(status, info), outcome.name(), TestInterpretation.of(outcome, status),
-                    List.of());
+                    new TestCallResult.ClientView(status, info, file.headers()), outcome.name(),
+                    TestInterpretation.of(outcome, status), List.of());
         }
         BackendResponses.Body body;
         try {
             body = BackendResponses.read(response, maxResponseBytes,
                     started + TimeUnit.MILLISECONDS.toNanos(definition.timeoutMs()));
         } catch (TimeoutException e) {
-            return failed(sent, Outcome.TIMEOUT, profile, requestId, started);
+            return failed(sent, Outcome.TIMEOUT, profile, requestId, started, plugged);
         } catch (IOException e) {
-            return failed(sent, Outcome.TECHNICAL_ERROR, profile, requestId, started);
+            return failed(sent, Outcome.TECHNICAL_ERROR, profile, requestId, started, plugged);
         }
         JsonNode parsed = body.tooLarge() ? Json.string("Yanıt çok büyük")
                 : BackendResponses.parse(body.bytes(), response.headers().firstValue("Content-Type").orElse(null),
                 definition.responseType());
         JsonNode shown = Json.isMissing(parsed) ? null : parsed;
         TestCallResult.ClientView client;
+        Map<String, String> backendHeaders = BackendResponses.profileHeaders(response);
         if (profile != null) {
-            ClientResponse wrapped = profile.render(new ResponseProfile.BackendResult(status, parsed, outcome, requestId));
-            client = new TestCallResult.ClientView(wrapped.status(), wrapped.body());
+            ClientResponse wrapped = profile.render(new ResponseProfile.BackendResult(status, parsed, outcome, requestId,
+                    backendHeaders, plugged.context().scope()));
+            client = client(wrapped.status(), wrapped.body(), plugged, status, backendHeaders, outcome, backendMillis);
+        } else if (shown != null && shown.isObject()) {
+            client = client(status, shown, plugged, status, backendHeaders, outcome, backendMillis);
         } else {
-            client = new TestCallResult.ClientView(status, shown);
+            TestCallResult.ClientView headersOnly = client(status, null, plugged, status, backendHeaders, outcome,
+                    backendMillis);
+            client = new TestCallResult.ClientView(status, shown, headersOnly.headers());
         }
         return new TestCallResult(sent, new TestCallResult.ResponseView(status, headers, shown, millis(started)), client,
                 outcome.name(), TestInterpretation.of(outcome, status), List.of());
     }
 
     private static TestCallResult failed(TestCallResult.RequestView sent, Outcome outcome, ResponseProfile profile,
-                                         String requestId, long started) {
+                                         String requestId, long started, Plugged plugged) {
         TestCallResult.ClientView client;
         if (profile != null) {
-            ClientResponse wrapped = profile.render(new ResponseProfile.BackendResult(null, null, outcome, requestId));
-            client = new TestCallResult.ClientView(wrapped.status(), wrapped.body());
+            ClientResponse wrapped = profile.render(new ResponseProfile.BackendResult(null, null, outcome, requestId,
+                    Map.of(), plugged.context().scope()));
+            client = client(wrapped.status(), wrapped.body(), plugged, null, Map.of(), outcome, null);
         } else {
             int status = outcome == Outcome.TIMEOUT ? 504 : 502;
             ObjectNode error = Json.object();

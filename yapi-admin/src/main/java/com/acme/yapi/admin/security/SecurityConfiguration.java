@@ -37,12 +37,16 @@ import com.acme.yapi.admin.web.Problems;
 @Configuration(proxyBeanMethods = false)
 public class SecurityConfiguration {
 
-    private static final AuthenticationEntryPoint UNAUTHENTICATED = (request, response, exception) ->
-            Problems.write(response, HttpStatus.UNAUTHORIZED, "UNAUTHENTICATED", "Oturum yok ya da geçersiz.");
     private static final AccessDeniedHandler FORBIDDEN = (request, response, exception) ->
             Problems.write(response, HttpStatus.FORBIDDEN, "FORBIDDEN", "Bu işlem için rolünüz yetmiyor.");
 
-    private static HttpSecurity common(HttpSecurity http) throws Exception {
+    /** 401 with the login page, so the screen can send the user there. */
+    private static AuthenticationEntryPoint unauthenticated(LoginUrl loginUrl) {
+        return (request, response, exception) -> Problems.write(response, HttpStatus.UNAUTHORIZED, "UNAUTHENTICATED",
+                "Oturum yok ya da geçersiz.", loginUrl.properties());
+    }
+
+    private static HttpSecurity common(HttpSecurity http, LoginUrl loginUrl) throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
                 .cors(Customizer.withDefaults())
@@ -53,7 +57,7 @@ public class SecurityConfiguration {
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(handling -> handling
-                        .authenticationEntryPoint(UNAUTHENTICATED)
+                        .authenticationEntryPoint(unauthenticated(loginUrl))
                         .accessDeniedHandler(FORBIDDEN));
     }
 
@@ -66,9 +70,9 @@ public class SecurityConfiguration {
 
     @Bean
     @Profile("!local")
-    SecurityFilterChain session(HttpSecurity http, SessionVerifier verifier, AdminProperties properties)
-            throws Exception {
-        return common(http)
+    SecurityFilterChain session(HttpSecurity http, SessionVerifier verifier, AdminProperties properties,
+                                LoginUrl loginUrl) throws Exception {
+        return common(http, loginUrl)
                 .addFilterBefore(new SessionAuthenticationFilter(verifier, properties.session()),
                         AnonymousAuthenticationFilter.class)
                 .build();
@@ -76,9 +80,9 @@ public class SecurityConfiguration {
 
     @Bean
     @Profile("local")
-    SecurityFilterChain local(HttpSecurity http) throws Exception {
-        return common(http)
-                .httpBasic(basic -> basic.authenticationEntryPoint(UNAUTHENTICATED))
+    SecurityFilterChain local(HttpSecurity http, LoginUrl loginUrl) throws Exception {
+        return common(http, loginUrl)
+                .httpBasic(basic -> basic.authenticationEntryPoint(unauthenticated(loginUrl)))
                 .build();
     }
 

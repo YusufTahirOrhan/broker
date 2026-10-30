@@ -20,7 +20,7 @@ class ClickHouseWriterTest {
         assertThat(Json.fieldNames(row)).containsExactly("event_time", "request_id", "trace_id", "event_type",
                 "environment", "maintask", "subtask", "route_version", "response_profile", "response_profile_version",
                 "user_id", "client_ip", "user_agent", "application", "uid", "http_method", "target_path",
-                "status_code", "outcome", "duration_ms", "body", "body_size", "body_truncated", "error_message",
+                "status_code", "outcome", "denied_reason", "duration_ms", "body", "body_size", "body_truncated", "error_message",
                 "yapi_instance");
         row.forEachEntry((name, value) -> assertThat(value.isNull()).as(name).isFalse());
         assertThat(row.get("event_time").stringValue()).isEqualTo("2026-10-08T11:28:41.425Z");

@@ -23,12 +23,17 @@ public final class Requests {
     public record ProfileApply(Long promotionId, Long profileId, Integer version, JsonNode definition, String actor) {
     }
 
+    /** {@code PUT /admin/v1/plugins/{name}}. */
+    public record PluginApply(Long promotionId, Long pluginId, Integer version, JsonNode definition, String actor) {
+    }
+
     /** {@code POST /admin/v1/routes/{maintask}/{subtask}/disable}. */
     public record Disable(Long promotionId, String actor) {
     }
 
     /** {@code PUT /admin/v1/projects/{maintask}}; {@code alarmRoute} null clears it. */
-    public record ProjectApply(String baseUrl, Boolean enabled, AlarmRoute alarmRoute, String actor) {
+    public record ProjectApply(String baseUrl, Boolean enabled, AlarmRoute alarmRoute, String permissionPrefix,
+                               String actor) {
     }
 
     /** {@code POST /admin/v1/probe}; path variables without a value are filled with a sample. */

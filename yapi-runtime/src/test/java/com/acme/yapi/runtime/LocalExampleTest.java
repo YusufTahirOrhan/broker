@@ -13,7 +13,10 @@ import com.acme.yapi.core.route.RouteValidator;
 
 import tools.jackson.databind.JsonNode;
 
-/** {@code yapi-local.example.json} (the login service's routes) passes the same validation as a saved route. */
+/**
+ * {@code yapi-local.example.json} (the login service's routes: login, logout, session check) passes the same validation
+ * as a saved route.
+ */
 class LocalExampleTest {
 
     @Test
@@ -22,7 +25,7 @@ class LocalExampleTest {
         RouteValidator.Context readable = RouteValidator.Context.of(List.of("Accept-Language", "X-Clientip",
                 "X-User-Agent"));
 
-        assertThat(example.get("routes")).hasSize(2);
+        assertThat(example.get("routes")).hasSize(3);
         for (JsonNode route : example.get("routes")) {
             assertThat(RouteValidator.validate(Json.stringField(route, "httpMethod"),
                     Json.stringField(route, "pathTemplate"), route.get("definition"), readable))

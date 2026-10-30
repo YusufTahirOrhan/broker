@@ -38,7 +38,8 @@ public class ElasticBulkWriter implements SinkWriter {
 
     public ElasticBulkWriter(SinkProperties.Elastic settings) {
         this.settings = settings;
-        this.documents = new LegacyDocuments(settings.indexPrefix(), settings.indexZone(), settings.alarmIndex());
+        this.documents = new LegacyDocuments(settings.indexPrefix(), settings.indexZone(), settings.alarmIndex(),
+                settings.unauthorizedIndex());
         this.client = HttpClient.newBuilder().connectTimeout(settings.timeout()).build();
         if (settings.apiKey() != null && !settings.apiKey().isBlank()) {
             authorization = "ApiKey " + settings.apiKey();

@@ -16,7 +16,13 @@
             "outcome":                  { "type": "keyword" },
             "duration_ms":              { "type": "integer" },
             "body_truncated":           { "type": "boolean" },
-            "yapi_instance":          { "type": "keyword" }
+            "yapi_instance":          { "type": "keyword" },
+            "plugins": {
+              "properties": {
+                "name":                 { "type": "keyword" },
+                "version":              { "type": "integer" }
+              }
+            }
           }
         }
       }

@@ -59,6 +59,7 @@ class LoginApiTest {
         registry.add("login.ldap.urls", LDAP::url);
         registry.add("login.ldap.principal-pattern", EmbeddedLdap::principalPattern);
         registry.add("koordinator.url", koordinator::baseUrl);
+        registry.add("login.login-url", () -> "https://giris.example.test/login");
     }
 
     @AfterAll
@@ -135,12 +136,51 @@ class LoginApiTest {
     }
 
     @Test
-    void aNewLoginReplacesTheOldSession() {
+    void aLoginFromTheSessionsClientKeepsItsTokenAndRemainingTimeButTakesTheNewPermissions() {
+        JsonNode first = login("ali", "s3cret-Parola").json();
+        String token = first.get("X-Token").stringValue();
+        redis.expire("user:session:ali", java.time.Duration.ofSeconds(500));
+        koordinator.json("GET", PERMISSIONS + "ali", 200, """
+                {"additionalProp1": [{"yetkiIsim": "SORGU_ILERI", "askidaMi": false},
+                                     {"yetkiIsim": "SORGU_TEMEL", "askidaMi": true}]}
+                """);
+
+        JsonNode again = login("ali", "s3cret-Parola").json();
+
+        assertThat(again).isEqualTo(first);
+        assertThat(stored("ali")).isEqualTo(new SessionRecord("ali", token, IP, AGENT, List.of("SORGU_ILERI")));
+        assertThat(redis.getExpire("user:session:ali")).isBetween(1L, 500L);
+        // the password is checked every time, the open session does not stand in for it
+        assertThat(login("ali", "yanlis-Parola").json().get("login").booleanValue()).isFalse();
+        assertThat(stored("ali").token()).isEqualTo(token);
+    }
+
+    @Test
+    void aLoginFromAnotherClientReplacesTheOldSession() {
         String first = login("ali", "s3cret-Parola").json().get("X-Token").stringValue();
-        String second = login("ali", "s3cret-Parola").json().get("X-Token").stringValue();
+        String second = call("/login", Json.write(Map.of("uid", "ali", "password", "s3cret-Parola")),
+                Map.of("X-User-Agent", "Other/1.0")).json().get("X-Token").stringValue();
 
         assertThat(second).isNotEqualTo(first);
-        assertThat(stored("ali").token()).isEqualTo(second);
+        assertThat(stored("ali")).isEqualTo(new SessionRecord("ali", second, IP, "Other/1.0",
+                List.of("LOGPROJECT_TEMEL", "SORGU_TEMEL")));
+        assertThat(redis.getExpire("user:session:ali")).isBetween(86_000L, 86_400L);
+    }
+
+    @Test
+    void theSessionCheckTellsWhetherTheBrokerSignedAUser() {
+        JsonHttp client = new JsonHttp("http://localhost:" + port);
+        String withUser = UserContextToken.sign("k3y".getBytes(), "ali", "r1", Instant.now());
+        String withoutUser = UserContextToken.sign("k3y".getBytes(), null, "r2", Instant.now());
+
+        JsonHttp.Response valid = client.send("GET", "/users/me/session", null, Map.of("X-User-Context", withUser));
+        assertThat(valid.status()).isEqualTo(200);
+        assertThat(valid.json()).isEqualTo(Json.parse("{\"response\": true, \"valid\": true, \"uid\": \"ali\"}"));
+        JsonHttp.Response none = client.send("GET", "/users/me/session", null, Map.of("X-User-Context", withoutUser));
+        assertThat(none.json()).isEqualTo(Json.parse("""
+                {"response": true, "valid": false, "loginUrl": "https://giris.example.test/login"}
+                """));
+        assertThat(client.send("GET", "/users/me/session", null, Map.of()).status()).isEqualTo(403);
     }
 
     @Test

@@ -1,12 +1,17 @@
 package com.acme.yapi.core.rules;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.naming.Names;
+import com.acme.yapi.core.plugin.PluginDefinition;
+import com.acme.yapi.core.request.RequestScope;
+import com.acme.yapi.core.response.ResponseProfile;
 import com.acme.yapi.core.route.AlarmSpec;
+import com.acme.yapi.core.template.ContextPlaceholders;
 import com.acme.yapi.core.route.BodyMode;
 import com.acme.yapi.core.route.FieldType;
 import com.acme.yapi.core.route.HttpMethodName;
@@ -64,13 +69,35 @@ public final class DefinitionRules {
         lengths.put("pathTemplate", 512);
 
         ObjectNode placeholders = rules.putObject("placeholders");
-        strings(placeholders.putArray("definition"),
-                List.of("${request.<yol>}", "${request.uid}", "${request.application}", "${request.maintask}",
-                        "${request.subtask}", "${header.<ad>}", "${user.id}", "${user.permission}",
-                        "${requestId}"));
-        strings(placeholders.putArray("profile"),
-                List.of("${backend.status}", "${backend.body}", "${outcome}", "${requestId}"));
+        List<String> definition = new ArrayList<>(List.of("${request.<yol>}", "${request.uid}",
+                "${request.application}", "${request.maintask}", "${request.subtask}", "${header.<ad>}", "${user.id}",
+                "${user.permission}", "${requestId}"));
+        definition.addAll(ContextPlaceholders.SHOWN);
+        strings(placeholders.putArray("definition"), definition);
+        List<String> profilePlaceholders = new ArrayList<>(List.of("${backend.status}", "${backend.body}", "${backend.body.<yol>}",
+                "${backend.header.<ad>}", "${outcome}", "${requestId}"));
+        profilePlaceholders.addAll(ContextPlaceholders.SHOWN.stream().filter(shown -> !shown.startsWith("${user."))
+                .toList());
+        strings(placeholders.putArray("profile"), profilePlaceholders);
+        List<String> pluginRequest = new ArrayList<>(List.of("${request.<yol>}", "${header.<ad>}", "${user.id}",
+                "${user.permission}", "${requestId}"));
+        pluginRequest.addAll(ContextPlaceholders.SHOWN);
+        strings(placeholders.putArray("pluginRequest"), pluginRequest);
+        strings(placeholders.putArray("pluginResponse"), PluginDefinition.RESPONSE_ONLY);
+
+        ObjectNode plugin = rules.putObject("plugin");
+        strings(plugin.putArray("scopes"), Arrays.stream(PluginDefinition.Scope.values()).map(Enum::name).toList());
+        strings(plugin.putArray("ops"), PluginDefinition.OPS);
+        strings(plugin.putArray("requestTargets"), PluginDefinition.REQUEST_TARGETS);
+        strings(plugin.putArray("responseTargets"), PluginDefinition.RESPONSE_TARGETS);
+        strings(plugin.putArray("forbiddenResponseHeaders"), PluginDefinition.FORBIDDEN_RESPONSE_HEADERS);
+        plugin.put("timeZone", RequestScope.DEFAULT_ZONE.getId());
         strings(placeholders.putArray("alarmService"), List.of("${alarm.values}"));
+
+        ObjectNode profile = rules.putObject("profile");
+        strings(profile.putArray("operators"), ResponseProfile.OPERATORS);
+        strings(profile.putArray("httpStatus"), List.of("<100-599>", ResponseProfile.BACKEND_STATUS));
+        profile.put("exposeServerErrorBodyDefault", false);
 
         ObjectNode alarm = rules.putObject("alarm");
         strings(alarm.putArray("checks"), Arrays.stream(AlarmSpec.Check.values()).map(Enum::name).toList());

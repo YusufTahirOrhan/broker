@@ -28,6 +28,7 @@ import org.springframework.test.context.DynamicPropertySource;
 
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.logging.LogEvent;
+import com.acme.yapi.core.plugin.Plugin;
 import com.acme.yapi.core.route.AlarmRoute;
 import com.acme.yapi.core.runtime.RuntimeSignals;
 import com.acme.yapi.core.session.SessionRecord;
@@ -362,6 +363,40 @@ class YapiFlowTest {
     }
 
     @Test
+    void profileCasesSeeTheServicesFieldsHeadersAndStatus() {
+        RuntimeFixture.profile("cased", 1, """
+                {"success": {
+                   "cases": [{"when": [{"value": "${backend.body.status-code}", "exists": true}],
+                              "httpStatus": 200, "body": {"status": "${backend.body.status-code}",
+                                                          "message": "${backend.body.message}",
+                                                          "trace": "${backend.header.X-Trace}"}}],
+                   "httpStatus": 200, "body": {"status": 200, "data": "${backend.body}"}},
+                 "error": {"httpStatus": "${backend.status}",
+                           "body": {"status": "${backend.status}", "reason": "Hata: ${backend.body}"}}}
+                """);
+        RuntimeFixture.route("LogProject", "get_case", "GET", "/cases/{id}", List.of("LOGPROJECT_TEMEL"), false,
+                "cased", """
+                {"request": {"fields": [{"name": "id", "type": "integer", "required": true}],
+                             "pathVariables": {"id": "${request.id}"}}}
+                """);
+        cache.reload();
+        backend.on("GET", "/cases/1", (exchange, request) -> FakeHttpServer.respond(exchange, 200,
+                Map.of("Content-Type", "application/json", "X-Trace", "t-1"),
+                "{\"status-code\": 7}".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        backend.json("GET", "/cases/2", 200, "{\"id\": 2}");
+        backend.json("GET", "/cases/3", 404, "{\"code\": \"YOK\"}");
+
+        JsonHttp.Response flagged = yapi("tok-1", "{\"maintask\": \"LogProject\", \"subtask\": \"get_case\", \"id\": 1}");
+        assertThat(flagged.status()).isEqualTo(200);
+        assertThat(flagged.json()).isEqualTo(Json.parse("{\"status\": 7, \"message\": null, \"trace\": \"t-1\"}"));
+        assertThat(yapi("tok-1", "{\"maintask\": \"LogProject\", \"subtask\": \"get_case\", \"id\": 2}").json())
+                .isEqualTo(Json.parse("{\"status\": 200, \"data\": {\"id\": 2}}"));
+        JsonHttp.Response missing = yapi("tok-1", "{\"maintask\": \"LogProject\", \"subtask\": \"get_case\", \"id\": 3}");
+        assertThat(missing.status()).isEqualTo(404);
+        assertThat(missing.json()).isEqualTo(Json.parse("{\"status\": 404, \"reason\": \"Hata: {\\\"code\\\":\\\"YOK\\\"}\"}"));
+    }
+
+    @Test
     void yapiErrorsUseTheCommonFormatAndAreLoggedToo() {
         JsonHttp.Response noToken = yapi(null, "{\"maintask\": \"order-service\", \"subtask\": \"add_order_note\"}");
         assertError(noToken, 400, "INVALID_REQUEST");
@@ -500,6 +535,55 @@ class YapiFlowTest {
     }
 
     @Test
+    void refusedRequestsSayWhyAndWhatTheRouteAskedFor() {
+        RuntimeFixture.project("order-service", backend.baseUrl(), null, "ORDER");
+        cache.reload();
+        session("tok-3", "u888", "ORDER_EXPORT");
+        String getOrder = "{\"maintask\": \"Order-Service\", \"subtask\": \"GET_ORDER\", \"orderId\": 1, \"password\": \"x\"}";
+
+        LogEvent.Denial ownProject = denial(yapi("tok-3", getOrder));
+        assertThat(ownProject.reason()).isEqualTo(LogEvent.DeniedReason.PERMISSION);
+        assertThat(ownProject.routePermissions()).containsExactly("ORDER_READ");
+        assertThat(ownProject.hasProjectPermission()).isTrue();
+        assertThat(ownProject.requestBody().get("maintask").stringValue()).isEqualTo("Order-Service");
+        assertThat(ownProject.requestBody().get("password").stringValue()).isEqualTo("xxxx");
+        assertThat(denial(yapi("tok-2", getOrder)).hasProjectPermission()).isFalse();
+        // no prefix sent for this project: whether the user has one of its permissions cannot be told
+        assertThat(denial(yapi("tok-2", "{\"maintask\": \"LogProject\", \"subtask\": \"get_id\", \"id\": 1}"))
+                .hasProjectPermission()).isNull();
+
+        JsonHttp.Response application = yapi("tok-1", getOrder.replace("}", ", \"application\": \"kiosk\"}"));
+        LogEvent applicationEvent = events.awaitType(application.header("X-Request-Id"), LogEvent.EventType.RESPONSE);
+        assertThat(applicationEvent.denial().reason()).isEqualTo(LogEvent.DeniedReason.APPLICATION);
+        assertThat(applicationEvent.denial().routePermissions()).containsExactly("ORDER_READ");
+        assertThat(applicationEvent.denial().hasProjectPermission()).isNull();
+        assertThat(applicationEvent.maintask()).isEqualTo("order-service");
+        assertThat(applicationEvent.subtask()).isEqualTo("get_order");
+
+        LogEvent.Denial knownRoute = denial(yapi("missing-session", getOrder));
+        assertThat(knownRoute.reason()).isEqualTo(LogEvent.DeniedReason.SESSION);
+        assertThat(knownRoute.routePermissions()).containsExactly("ORDER_READ");
+        assertThat(knownRoute.hasProjectPermission()).isNull();
+        LogEvent.Denial unknownRoute = denial(yapi("missing-session", "{\"maintask\": \"order-service\", \"subtask\": \"nope\"}"));
+        assertThat(unknownRoute.reason()).isEqualTo(LogEvent.DeniedReason.SESSION);
+        assertThat(unknownRoute.routePermissions()).isNull();
+
+        JsonHttp.Response login = yapi("login", "{\"uid\": \"u42\", \"application\": \"kiosk\"}");
+        assertThat(events.awaitType(login.header("X-Request-Id"), LogEvent.EventType.RESPONSE).denial()).isNull();
+        backend.json("GET", "/orders/1", 200, "{}");
+        JsonHttp.Response served = yapi("tok-1", getOrder);
+        assertThat(served.status()).isEqualTo(200);
+        assertThat(events.awaitType(served.header("X-Request-Id"), LogEvent.EventType.RESPONSE).denial()).isNull();
+    }
+
+    private LogEvent.Denial denial(JsonHttp.Response refused) {
+        LogEvent response = events.awaitType(refused.header("X-Request-Id"), LogEvent.EventType.RESPONSE);
+        assertThat(response.outcome()).isEqualTo("DENIED");
+        assertThat(response.denial()).as(response.toString()).isNotNull();
+        return response.denial();
+    }
+
+    @Test
     void anInvalidSessionGetsTheLegacyAnswerWhetherTheRouteExistsOrNot() {
         String known = "{\"maintask\": \"order-service\", \"subtask\": \"get_order\", \"orderId\": 1}";
         String unknown = "{\"maintask\": \"order-service\", \"subtask\": \"nope\"}";
@@ -591,11 +675,88 @@ class YapiFlowTest {
         assertThat(pings).hasSize(2);
         assertThat(pings.get(0).header("X-uid")).isEqualTo("u12345");
         assertThat(pings.get(1).header("X-uid")).isNull();
+        // both calls are signed; only the one with a valid session names the user
+        assertThat(signedUser(pings.get(0))).isEqualTo("u12345");
+        assertThat(signedUser(pings.get(1))).isNull();
+    }
+
+    private static String signedUser(FakeHttpServer.Recorded call) {
+        return com.acme.yapi.core.context.UserContextToken.verify("k3y".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                call.header("X-User-Context"), java.time.Instant.now(), java.time.Duration.ofMinutes(1))
+                .orElseThrow(() -> new AssertionError("imzasız çağrı")).userId();
     }
 
     private double legacyCount(String maintask, String subtask) {
         var counter = meters.find("yapi.gelen.istekler").tags("maintask", maintask, "subtask", subtask).counter();
         return counter == null ? 0 : counter.count();
+    }
+
+    @Test
+    void pluginsAddToRequestsAndResponsesInTheirOrder() {
+        RuntimeFixture.plugin("stamp", 2, """
+                {"scope": "GLOBAL",
+                 "request": [{"op": "set", "target": "header", "name": "X-Request-Date", "value": "${today}"},
+                             {"op": "set", "target": "header", "name": "X-Channel", "value": "PLUGIN"},
+                             {"op": "set", "target": "body", "name": "meta.environment", "value": "${environment}"},
+                             {"op": "set", "target": "body", "name": "source", "value": "PLUGIN"},
+                             {"op": "set", "target": "query", "name": "trace", "value": "${traceId}"}],
+                 "response": [{"op": "set", "target": "header", "name": "X-Response-Time", "value": "${durationMs}"},
+                              {"op": "set", "target": "body", "name": "meta.subtask", "value": "${route.subtask}"}]}
+                """);
+        RuntimeFixture.plugin("orders-only", 1, """
+                {"scope": "PROJECT", "projects": ["order-service"],
+                 "response": [{"op": "set", "target": "header", "name": "X-Order-Plugin", "value": "${backend.status}"}]}
+                """);
+        RuntimeFixture.plugin("chosen", 4, """
+                {"scope": "SUBTASK",
+                 "request": [{"op": "set", "target": "header", "name": "X-Sicil", "value": "${user.id}"}]}
+                """);
+        // a broken row is skipped with a metric; the other plugins and every route still serve
+        RuntimeFixture.plugin("broken", 1, "{\"scope\": \"EVERYWHERE\"}");
+        RuntimeFixture.route("order-service", "add_order_note", "POST", "/orders/{id}/notes", List.of("ORDER_WRITE"),
+                false, null, CoreFixtures.ADD_ORDER_NOTE.replaceFirst("\"response\"", "\"plugins\": [\"chosen\"], \"response\""));
+        double skipped = meters.find("yapi.routes.skipped").tag("kind", "plugin").counter() == null ? 0
+                : meters.find("yapi.routes.skipped").tag("kind", "plugin").counter().count();
+        cache.reload();
+        assertThat(meters.find("yapi.routes.skipped").tag("kind", "plugin").counter().count()).isEqualTo(skipped + 1);
+        backend.json("POST", "/orders/42/notes", 201, "{\"noteId\": 9}");
+
+        JsonHttp.Response note = yapi("tok-1", """
+                {"maintask": "order-service", "subtask": "add_order_note", "siparisNo": 42, "notMetni": "Merhaba"}
+                """);
+
+        assertThat(note.status()).isEqualTo(201);
+        assertThat(note.json()).isEqualTo(Json.parse("{\"noteId\": 9, \"meta\": {\"subtask\": \"add_order_note\"}}"));
+        assertThat(Long.parseLong(note.header("X-Response-Time"))).isNotNegative();
+        assertThat(note.header("X-Order-Plugin")).isEqualTo("201");
+        FakeHttpServer.Recorded sent = backend.requests("/orders/42/notes").getFirst();
+        assertThat(sent.header("X-Request-Date")).isEqualTo(java.time.LocalDate.now(java.time.ZoneId.of("Europe/Istanbul")).toString());
+        // what the definition writes itself stays: its header, its body fields
+        assertThat(sent.header("X-Channel")).isEqualTo("WEB");
+        assertThat(sent.header("X-Sicil")).isEqualTo("u12345");
+        assertThat(sent.query()).startsWith("notify=false&trace=");
+        assertThat(Json.parse(sent.bodyText())).isEqualTo(Json.parse("""
+                {"text": "Merhaba", "authorId": "u12345", "source": "WEB", "meta": {"environment": "PREPROD"}}
+                """));
+        LogEvent event = events.awaitType(note.header("X-Request-Id"), LogEvent.EventType.RESPONSE);
+        assertThat(event.plugins()).extracting(Plugin.Applied::name).containsExactly("stamp", "orders-only", "chosen");
+        assertThat(event.plugins().getFirst().version()).isEqualTo(2);
+
+        // a refusal is the broker's own answer: no plugin
+        JsonHttp.Response refused = yapi("tok-2", """
+                {"maintask": "order-service", "subtask": "add_order_note", "siparisNo": 42, "notMetni": "x"}
+                """);
+        assertThat(refused.header("X-Response-Time")).isNull();
+        assertThat(events.awaitType(refused.header("X-Request-Id"), LogEvent.EventType.RESPONSE).plugins()).isNull();
+
+        // a file gets header operations only, its bytes are untouched
+        byte[] excel = "excel".getBytes(StandardCharsets.US_ASCII);
+        backend.on("GET", "/reports/6/excel", (exchange, request) -> FakeHttpServer.respond(exchange, 200,
+                Map.of("Content-Type", "application/vnd.ms-excel", "Content-Disposition", "attachment"), excel));
+        JsonHttp.Response file = yapi("tok-1", "{\"maintask\": \"files\", \"subtask\": \"download_report\", \"id\": 6}");
+        assertThat(file.bytes()).isEqualTo(excel);
+        assertThat(file.header("X-Response-Time")).isNotNull();
+        assertThat(file.header("Content-Disposition")).isEqualTo("attachment");
     }
 
     @Test
@@ -717,6 +878,28 @@ class YapiFlowTest {
         assertThat(invalid.json().get("errors").valueStream().map(error -> error.get("field").stringValue()))
                 .containsExactlyInAnyOrder("siparisNo", "notMetni");
         assertThat(backend.requests("/orders/5/notes")).hasSize(1);
+
+        // the plugins the central admin chose for the subtask apply to the test too
+        String withPlugin = call.replace("\"actor\": \"devops.ali\"}", """
+                "actor": "devops.ali",
+                 "plugins": [{"name": "stamp", "version": 3, "definition": {"scope": "GLOBAL",
+                   "request": [{"op": "set", "target": "header", "name": "X-Env", "value": "${environment}"}],
+                   "response": [{"op": "set", "target": "body", "name": "meta.outcome", "value": "${outcome}"},
+                                {"op": "set", "target": "header", "name": "X-Took", "value": "${durationMs}"}]}}]}""");
+        JsonNode plugged = http.send("POST", TestCallRequest.PATH, withPlugin.formatted(backend.baseUrl(),
+                        CoreFixtures.ADD_ORDER_NOTE, CoreFixtures.LOG_PROJECT_PROFILE,
+                        "{\"siparisNo\": 5, \"notMetni\": \"x\"}"),
+                Map.of(TestCallRequest.SECRET_HEADER, "s3cret")).json();
+        assertThat(plugged.get("request").get("headers").get("X-Env").stringValue()).isEqualTo("PREPROD");
+        assertThat(plugged.get("clientResponse").get("body").get("meta").get("outcome").stringValue())
+                .isEqualTo("SUCCESS");
+        assertThat(plugged.get("clientResponse").get("headers").has("X-Took")).isTrue();
+        assertThat(plugged.get("plugins").get(0).get("name").stringValue()).isEqualTo("stamp");
+        JsonNode badPlugin = http.send("POST", TestCallRequest.PATH, withPlugin.replace("\"GLOBAL\"", "\"ALL\"")
+                        .formatted(backend.baseUrl(), CoreFixtures.ADD_ORDER_NOTE, CoreFixtures.LOG_PROJECT_PROFILE,
+                                "{\"siparisNo\": 5, \"notMetni\": \"x\"}"),
+                Map.of(TestCallRequest.SECRET_HEADER, "s3cret")).json();
+        assertThat(badPlugin.get("errors").get(0).get("field").stringValue()).isEqualTo("plugins[0].definition.scope");
     }
 
     private static void sleep(long millis) {

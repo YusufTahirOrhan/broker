@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.naming.Names;
+import com.acme.yapi.core.plugin.PluginDefinition;
 import com.acme.yapi.core.response.ResponseProfile;
 import com.acme.yapi.core.route.AlarmRoute;
 import com.acme.yapi.core.route.HttpMethodName;
@@ -133,6 +134,34 @@ public class AdminController {
         return response;
     }
 
+    @PutMapping("/plugins/{name}")
+    public ApplyResponse applyPlugin(@PathVariable String name, @RequestBody Requests.PluginApply body,
+                                     HttpServletRequest http) {
+        List<FieldError> errors = new ArrayList<>();
+        if (!Names.isValidProfileName(name)) {
+            errors.add(new FieldError("name", "Geçersiz eklenti adı"));
+        }
+        checkPromotion(body.promotionId(), errors);
+        checkActor(body.actor(), errors);
+        if (body.pluginId() == null || body.pluginId() < 1) {
+            errors.add(new FieldError("pluginId", "Zorunlu"));
+        }
+        if (body.version() == null || body.version() < 1) {
+            errors.add(new FieldError("version", "1 ya da daha büyük olmalı"));
+        }
+        PluginDefinition.parse(body.definition(), RouteValidator.Context.anyHeader()).errors()
+                .forEach(error -> errors.add(error.prefixed("definition")));
+        if (!errors.isEmpty()) {
+            throw ApiException.validation(errors);
+        }
+        ApplyResult result = store.applyPlugin(new RuntimeStore.PluginSnapshot(name, body.pluginId(),
+                body.version(), body.definition(), body.actor(), body.promotionId()));
+        ApplyResponse response = respond(result);
+        Audit.record(http, "plugin.apply", body.actor(), body.promotionId(), name + " v" + body.version(),
+                describe(response));
+        return response;
+    }
+
     @PostMapping("/routes/{maintask}/{subtask}/disable")
     public ApplyResponse disable(@PathVariable String maintask, @PathVariable String subtask,
                                  @RequestBody Requests.Disable body, HttpServletRequest http) {
@@ -149,7 +178,7 @@ public class AdminController {
     }
 
     public record ProjectResponse(String maintask, String baseUrl, boolean enabled, AlarmRoute alarmRoute,
-                                  boolean changed, long configVersion, boolean signalled) {
+                                  String permissionPrefix, boolean changed, long configVersion, boolean signalled) {
     }
 
     @PutMapping("/projects/{maintask}")
@@ -166,13 +195,17 @@ public class AdminController {
         if (alarm != null && !Names.isValidSubtask(alarm.subtask())) {
             errors.add(new FieldError("alarmRoute.subtask", "Geçerli bir subtask olmalı"));
         }
+        String prefix = body.permissionPrefix();
+        if (prefix != null && !Names.isValidPrefix(prefix)) {
+            errors.add(new FieldError("permissionPrefix", "Geçerli bir yetki öneki olmalı"));
+        }
         if (!errors.isEmpty()) {
             throw ApiException.validation(errors);
         }
         boolean enabled = body.enabled() == null || body.enabled();
-        Optional<Long> version = store.upsertProject(maintask, body.baseUrl(), enabled, alarm);
+        Optional<Long> version = store.upsertProject(maintask, body.baseUrl(), enabled, alarm, prefix);
         boolean signalled = version.isPresent() && signals.publishRoutesChanged(version.get());
-        ProjectResponse response = new ProjectResponse(maintask, body.baseUrl(), enabled, alarm, version.isPresent(),
+        ProjectResponse response = new ProjectResponse(maintask, body.baseUrl(), enabled, alarm, prefix, version.isPresent(),
                 version.orElseGet(() -> store.configVersion().version()), signalled);
         Audit.record(http, "project.apply", body.actor(), null, maintask,
                 (response.changed() ? "changed" : "unchanged") + " v" + response.configVersion());
@@ -181,7 +214,7 @@ public class AdminController {
 
     public record Listing(String environment, long configVersion, Instant configUpdatedAt,
                           List<RuntimeStore.ProjectRow> projects, List<RuntimeStore.ProfileRow> profiles,
-                          List<RuntimeStore.RouteRow> routes) {
+                          List<RuntimeStore.PluginRow> plugins, List<RuntimeStore.RouteRow> routes) {
     }
 
     /** Everything the environment serves, for drift checks against the central deployments. */
@@ -189,7 +222,7 @@ public class AdminController {
     public Listing routes() {
         RuntimeStore.ConfigVersion version = store.configVersion();
         return new Listing(properties.environment(), version.version(), version.updatedAt(), store.projects(),
-                store.profiles(), store.routes());
+                store.profiles(), store.plugins(), store.routes());
     }
 
     public record InstanceStatus(String instanceId, Long loadedVersion, Instant loadedAt, boolean upToDate) {

@@ -65,6 +65,13 @@ public class ProjectRepository {
                 .query(ProjectRepository::row).optional();
     }
 
+    /** By maintask, ignoring case, as the broker finds it. */
+    public Optional<Row> findByMaintask(String maintask) {
+        return jdbc.sql("SELECT " + COLUMNS + FROM + " WHERE LOWER(p.maintask) = LOWER(:maintask)")
+                .param("maintask", maintask)
+                .query(ProjectRepository::row).optional();
+    }
+
     public List<Row> all() {
         return list(null, null);
     }

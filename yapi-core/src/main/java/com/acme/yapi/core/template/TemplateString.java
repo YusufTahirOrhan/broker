@@ -78,6 +78,14 @@ public final class TemplateString {
      * field out instead of sending a half-filled value.
      */
     public JsonNode render(Resolver resolver, boolean keepNulls) {
+        return render(resolver, keepNulls, false);
+    }
+
+    /**
+     * As {@link #render(Resolver, boolean)}; with {@code absentAsEmpty} a placeholder without a value inside text
+     * becomes empty text instead of leaving the whole value out (response profiles).
+     */
+    public JsonNode render(Resolver resolver, boolean keepNulls, boolean absentAsEmpty) {
         if (isSinglePlaceholder()) {
             JsonNode value = resolver.resolve((Placeholder) parts.getFirst());
             if (Json.isMissing(value)) {
@@ -93,7 +101,10 @@ public final class TemplateString {
             if (part instanceof Placeholder placeholder) {
                 JsonNode value = resolver.resolve(placeholder);
                 if (Json.isAbsent(value)) {
-                    return Json.missing();
+                    if (!absentAsEmpty) {
+                        return Json.missing();
+                    }
+                    continue;
                 }
                 text.append(Json.text(value));
             } else {

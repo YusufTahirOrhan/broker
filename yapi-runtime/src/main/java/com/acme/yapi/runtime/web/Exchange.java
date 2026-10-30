@@ -1,9 +1,15 @@
 package com.acme.yapi.runtime.web;
 
 import java.time.Instant;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import com.acme.yapi.core.ids.Ids;
+import com.acme.yapi.core.logging.LogEvent;
+import com.acme.yapi.core.plugin.Plugin;
+import com.acme.yapi.core.request.RequestContext;
 import com.acme.yapi.runtime.forward.TraceContext;
 import com.acme.yapi.runtime.route.Route;
 import com.acme.yapi.runtime.session.Session;
@@ -39,6 +45,20 @@ final class Exchange {
     boolean requestLogged;
     /** The alarm check's record for the RESPONSE event; null when no check ran. */
     ObjectNode alarm;
+    /** Why the broker refused the request; null unless the outcome is {@code DENIED}. */
+    LogEvent.DeniedReason deniedReason;
+    /** The route the refused request asked for, when there was one ({@link #route} may still be unset). */
+    Route deniedRoute;
+    /** Whether the refused user holds a permission of the route's project; null when that cannot be told. */
+    Boolean hasProjectPermission;
+    /** The route's plugins, in the order they apply; empty for session operations. */
+    List<Plugin> plugins = List.of();
+    /** The plugins that changed the request or the response, for the RESPONSE event. */
+    final Set<Plugin.Applied> appliedPlugins = new LinkedHashSet<>();
+    /** The request's placeholders, for the response operations of the plugins. */
+    RequestContext context;
+    /** The service call's duration until its status and headers arrived. */
+    Long backendDurationMs;
 
     Exchange(TraceContext trace, String token, String clientIp, String userAgent) {
         this.trace = trace;

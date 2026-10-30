@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import com.acme.yapi.admin.security.LoginUrl;
+
 import tools.jackson.databind.node.ObjectNode;
 
 @RestControllerAdvice
@@ -24,9 +26,20 @@ public class ProblemHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ProblemHandler.class);
 
+    private final LoginUrl loginUrl;
+
+    public ProblemHandler(LoginUrl loginUrl) {
+        this.loginUrl = loginUrl;
+    }
+
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ObjectNode> api(ApiException e) {
-        return Problems.of(e);
+        if (e.status() != HttpStatus.UNAUTHORIZED) {
+            return Problems.of(e);
+        }
+        Map<String, Object> properties = new java.util.LinkedHashMap<>(e.properties());
+        properties.putAll(loginUrl.properties());
+        return Problems.of(e.status(), e.code(), e.getMessage(), e.errors(), properties);
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

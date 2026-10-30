@@ -12,11 +12,17 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import com.acme.yapi.core.json.Json;
+import com.acme.yapi.core.session.SessionRecord;
+import com.acme.yapi.core.session.SessionRecordCodec;
 import com.acme.yapi.login.config.LoginProperties;
 import com.acme.yapi.login.koordinator.KoordinatorClient;
 import com.acme.yapi.login.koordinator.StaticKoordinatorClient;
@@ -26,9 +32,10 @@ import com.acme.yapi.login.session.SessionStore;
 import com.acme.yapi.login.web.LoginController;
 
 /** What needs a broken Redis. */
+@ExtendWith(OutputCaptureExtension.class)
 class LoginUnitTest {
 
-    private static final LoginProperties PROPERTIES = new LoginProperties(null, null, null, null, null, null, null, null);
+    private static final LoginProperties PROPERTIES = new LoginProperties(null, null, null, null, null, null, null, null, null);
 
     @SuppressWarnings("unchecked")
     private static LoginController controller(StringRedisTemplate redis) {
@@ -55,5 +62,22 @@ class LoginUnitTest {
             assertThat(Json.write(controller(redis).login(body, "10.0.0.1", "agent")))
                     .isEqualTo("{\"status\":401,\"Ldap\":false,\"login\":false,\"X-Token\":\"404\"}");
         }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void aLoginAgainWhosePermissionsCannotBeWrittenKeepsTheOpenSession(CapturedOutput output) {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> values = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        when(redis.getStringSerializer()).thenReturn(new StringRedisTemplate().getStringSerializer());
+        when(values.get("user:session:ali")).thenReturn(SessionRecordCodec.DEFAULT.write(
+                new SessionRecord("ali", "open-token", "10.0.0.1", "agent", List.of("OLD"))));
+        doThrow(new RedisConnectionFailureException("down")).when(redis).execute(any(RedisCallback.class));
+        byte[] body = "{\"uid\": \"ali\", \"password\": \"p\"}".getBytes();
+
+        assertThat(Json.write(controller(redis).login(body, "10.0.0.1", "agent")))
+                .contains("\"login\":true", "\"X-Token\":\"open-token\"");
+        assertThat(output.getAll()).contains("Açık oturumun yetkileri güncellenemedi");
     }
 }

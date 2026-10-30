@@ -1,6 +1,7 @@
 package com.acme.yapi.runtime.web;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 
 import org.springframework.stereotype.Component;
@@ -13,6 +14,7 @@ import com.acme.yapi.core.route.LoggingSpec;
 import com.acme.yapi.core.route.RouteDefinitionParser;
 import com.acme.yapi.runtime.config.YapiProperties;
 import com.acme.yapi.runtime.config.InstanceId;
+import com.acme.yapi.runtime.route.Route;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -35,17 +37,20 @@ class EventFactory {
     }
 
     LogEvent request(Exchange x) {
-        JsonNode body = null;
-        if (x.body != null) {
-            // session operations are logged whole whatever the flag says; the password is always masked
-            if (x.route == null || x.sessionOperation != null || x.route.definition().logging().logRequestBody()) {
-                body = Masker.mask(x.body, maskFields(x));
-            } else {
-                body = envelopeOnly(x.body);
-            }
+        return event(x, LogEvent.EventType.REQUEST, x.receivedAt, null, null, null, requestBody(x), x.rawBody.length,
+                false, null, null);
+    }
+
+    /** The frontend body as it is logged: masked, or only its envelope when the route does not log it. */
+    private static JsonNode requestBody(Exchange x) {
+        if (x.body == null) {
+            return null;
         }
-        return event(x, LogEvent.EventType.REQUEST, x.receivedAt, null, null, null, body, x.rawBody.length, false,
-                null, null);
+        // session operations are logged whole whatever the flag says; the password is always masked
+        if (x.route == null || x.sessionOperation != null || x.route.definition().logging().logRequestBody()) {
+            return Masker.mask(x.body, maskFields(x));
+        }
+        return envelopeOnly(x.body);
     }
 
     /** {@code client_response} as it is logged, and whether its text had to be cut to the route's limit. */
@@ -172,19 +177,38 @@ class EventFactory {
                            Long durationMs, JsonNode body, Integer bodySize, Boolean truncated,
                            JsonNode clientResponse, String errorMessage) {
         boolean known = x.route != null;
+        // a refused request names the route it asked for, even when the broker stopped before taking it
+        Route named = known ? x.route : x.deniedRoute;
         // a session operation reaches the login service's route; the legacy document keeps the body's names
-        boolean bodyNames = !known || x.sessionOperation != null;
-        String maintask = !bodyNames ? x.route.maintask() : x.knownProject != null ? x.knownProject : x.maintask;
+        boolean bodyNames = named == null || x.sessionOperation != null;
+        String maintask = !bodyNames ? named.maintask() : x.knownProject != null ? x.knownProject : x.maintask;
         String httpMethod = known ? x.route.method().name() : null;
         String path = x.targetPath != null ? x.targetPath : known ? x.route.pathTemplate().source() : null;
         Integer profileVersion = known && x.route.profile() != null ? x.route.profile().version() : null;
         String profile = known && x.route.profile() != null ? x.route.profile().name() : null;
         return new LogEvent(x.requestId, x.trace.traceId(), type, time, environment, maintask,
-                bodyNames ? x.subtask : x.route.subtask(), known ? x.route.version() : null, profile, profileVersion,
+                bodyNames ? x.subtask : named.subtask(), known ? x.route.version() : null, profile, profileVersion,
                 x.application, x.uid, x.session == null ? null : x.session.userId(), x.queryId,
                 x.session == null ? null : x.session.permissionList(), x.token, x.sessionOperation, x.clientIp,
                 x.userAgent, httpMethod, path, statusCode, outcome, durationMs, body, bodySize, truncated,
-                clientResponse, errorMessage, instance, type == LogEvent.EventType.RESPONSE ? x.alarm : null);
+                clientResponse, errorMessage, instance, type == LogEvent.EventType.RESPONSE ? x.alarm : null,
+                type == LogEvent.EventType.RESPONSE ? denial(x) : null,
+                type == LogEvent.EventType.RESPONSE ? applied(x) : null);
+    }
+
+    /** The plugins that worked on the request or its response, in the order they apply; null when none. */
+    private static List<com.acme.yapi.core.plugin.Plugin.Applied> applied(Exchange x) {
+        List<com.acme.yapi.core.plugin.Plugin.Applied> applied = x.plugins.stream()
+                .map(com.acme.yapi.core.plugin.Plugin::applied).filter(x.appliedPlugins::contains).toList();
+        return applied.isEmpty() ? null : applied;
+    }
+
+    private static LogEvent.Denial denial(Exchange x) {
+        if (x.deniedReason == null) {
+            return null;
+        }
+        return new LogEvent.Denial(x.deniedReason, x.deniedRoute == null ? null : x.deniedRoute.permissions(),
+                x.hasProjectPermission, requestBody(x));
     }
 
     private static Set<String> maskFields(Exchange x) {

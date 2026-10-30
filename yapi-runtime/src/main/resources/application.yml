@@ -58,6 +58,8 @@ management:
 
 yapi:
   environment: ${YAPI_ENVIRONMENT:DEV}
+  # ${now}, ${today} ve ${requestReceivedAt} bu saat diliminde yazılır
+  time-zone: ${YAPI_TIME_ZONE:Europe/Istanbul}
   instance-id: ${YAPI_INSTANCE_ID:}
   readable-headers:
     - Accept-Language

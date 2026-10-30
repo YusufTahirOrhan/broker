@@ -72,8 +72,18 @@ public final class RuntimeFixture {
 
     /** A project whose subtasks inherit {@code alarmRoute} (null: none). */
     public static long project(String maintask, String baseUrl, AlarmRoute alarmRoute) {
-        STORE.upsertProject(maintask, baseUrl, true, alarmRoute);
+        return project(maintask, baseUrl, alarmRoute, null);
+    }
+
+    /** A project with its permission prefix, as the central admin sends it. */
+    public static long project(String maintask, String baseUrl, AlarmRoute alarmRoute, String permissionPrefix) {
+        STORE.upsertProject(maintask, baseUrl, true, alarmRoute, permissionPrefix);
         return configVersion();
+    }
+
+    public static void plugin(String name, int version, String definition) {
+        applied(STORE.applyPlugin(new RuntimeStore.PluginSnapshot(name, 9, version, Json.parse(definition), "test",
+                PROMOTIONS.incrementAndGet())));
     }
 
     public static void profile(String name, int version, String definition) {

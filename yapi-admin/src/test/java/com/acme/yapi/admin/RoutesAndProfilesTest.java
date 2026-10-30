@@ -266,4 +266,51 @@ class RoutesAndProfilesTest extends AdminTestBase {
         assertThat(timeout.get("outcome").stringValue()).isEqualTo("TIMEOUT");
         assertThat(timeout.get("status").intValue()).isEqualTo(400);
     }
+
+    @Test
+    void profileCasesArePreviewedAndValidatedWithFormPaths() {
+        String definition = """
+                {"success": {
+                   "cases": [{"when": [{"value": "${backend.body.status-code}", "exists": true}],
+                              "httpStatus": 200, "body": {"status": "${backend.body.status-code}",
+                                                          "message": "${backend.body.message}",
+                                                          "trace": "${backend.header.X-Trace}"}}],
+                   "httpStatus": 200, "body": {"status": 200, "data": "${backend.body}"}},
+                 "error": {"httpStatus": "${backend.status}", "body": {"status": "${backend.status}"}}}
+                """;
+
+        JsonNode matched = post("viewer", "/response-profiles/preview", """
+                {"definition": %s, "status": 200, "body": {"status-code": 409}, "headers": {"x-trace": "t-1"}}
+                """.formatted(definition)).json();
+        assertThat(matched.get("matchedTemplate").stringValue()).isEqualTo("success");
+        assertThat(matched.get("matchedCase").intValue()).isZero();
+        assertThat(matched.get("body")).isEqualTo(Json.parse("{\"status\": 409, \"message\": null, \"trace\": \"t-1\"}"));
+
+        JsonNode plain = post("viewer", "/response-profiles/preview", """
+                {"definition": %s, "status": 200, "body": {"id": 1}}
+                """.formatted(definition)).json();
+        assertThat(plain.has("matchedCase")).isTrue();
+        assertThat(plain.get("matchedCase").isNull()).isTrue();
+        JsonNode timeout = post("viewer", "/response-profiles/preview", """
+                {"definition": %s, "status": null}
+                """.formatted(definition)).json();
+        assertThat(timeout.get("matchedTemplate").stringValue()).isEqualTo("error");
+        assertThat(timeout.get("status").intValue()).isEqualTo(504);
+
+        JsonHttp.Response invalid = post("editor", "/response-profiles", """
+                {"name": "broken-cases", "definition": {"success": {"httpStatus": 200, "body": {},
+                   "cases": [{"when": [{"value": "${backend.body.a..b}", "like": 1}], "httpStatus": 200,
+                              "body": {"x": "${requestId}"}}]},
+                 "error": {"httpStatus": 500, "body": {}}}}
+                """);
+        assertStatus(invalid, 400);
+        assertThat(invalid.json().get("errors").valueStream().map(error -> error.get("field").stringValue()))
+                .containsExactlyInAnyOrder("definition.success.cases[0].when[0].like",
+                        "definition.success.cases[0].when[0]", "definition.success.cases[0].when[0].value");
+        JsonNode rules = get("viewer", "/meta/definition-rules").json();
+        assertThat(rules.get("profile").get("operators").valueStream().map(JsonNode::stringValue))
+                .containsExactly("exists", "equals", "notEquals", "in");
+        assertThat(rules.get("placeholders").get("profile").valueStream().map(JsonNode::stringValue))
+                .contains("${backend.body.<yol>}", "${backend.header.<ad>}");
+    }
 }

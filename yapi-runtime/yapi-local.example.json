@@ -39,6 +39,16 @@
         },
         "response": { "type": "JSON" }
       }
+    },
+    {
+      "maintask": "giris",
+      "subtask": "session_check",
+      "httpMethod": "GET",
+      "pathTemplate": "/users/me/session",
+      "anonymous": true,
+      "definition": {
+        "response": { "type": "JSON" }
+      }
     }
   ]
 }

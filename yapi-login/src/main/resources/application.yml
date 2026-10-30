@@ -49,6 +49,8 @@ login:
   # servis başlamaz.
   user-context-secret: ${YAPI_USER_CONTEXT_SECRET:}
   user-context-max-age: 60s
+  # Oturumu olmayan kullanıcının yönlendirileceği giriş sayfası (GET /users/me/session); ortam başına girilir
+  login-url: ${YAPI_LOGIN_URL:}
   applications:
     key: yapi:applications
     refresh-interval: 5m

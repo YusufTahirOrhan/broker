@@ -72,6 +72,7 @@ class LoginEndToEndTest {
                         Map.entry("login.ldap.mode", "static"),
                         Map.entry("login.ldap.users.ali", "parola"),
                         Map.entry("login.user-context-secret", "e2e-k3y"),
+                        Map.entry("login.login-url", "https://giris.example.test/login"),
                         Map.entry("login.applications.refresh-interval", "1h"),
                         Map.entry("koordinator.url", koordinator.baseUrl()),
                         // the broker's classpath brings JDBC and Flyway along; the login service uses neither
@@ -111,6 +112,7 @@ class LoginEndToEndTest {
         RuntimeFixture.project("giris", "http://localhost:" + loginPort());
         RuntimeFixture.route("giris", "login", "POST", "/login", List.of(), true, null, YapiFlowTest.LOGIN);
         RuntimeFixture.route("giris", "logout", "POST", "/logout", List.of(), true, null, YapiFlowTest.LOGOUT);
+        RuntimeFixture.route("giris", "session_check", "GET", "/users/me/session", List.of(), true, null, "{}");
         RuntimeFixture.project("order-service", orders.baseUrl());
         RuntimeFixture.route("order-service", "get_order", "GET", "/orders/{id}", List.of("ORDER_READ"), false, null, """
                 {"request": {"fields": [{"name": "orderId", "type": "integer", "required": true}],
@@ -132,6 +134,14 @@ class LoginEndToEndTest {
         JsonNode body = loggedIn.json();
         assertThat(Json.fieldNames(body)).containsExactly("response", "status", "LDAP", "login", "X-Token");
         String token = body.get("X-Token").stringValue();
+
+        // 1b. the session check on an anonymous route knows the user; logging in again keeps the token
+        String check = "{\"maintask\": \"giris\", \"subtask\": \"session_check\", \"uid\": \"ali\", \"application\": \"web\"}";
+        assertThat(yapi(token, check, Map.of()).json())
+                .isEqualTo(Json.parse("{\"response\": true, \"valid\": true, \"uid\": \"ali\"}"));
+        assertThat(yapi("login", """
+                {"maintask": "giris", "subtask": "login", "uid": "ali", "password": "parola", "application": "web"}
+                """, Map.of()).json().get("X-Token").stringValue()).isEqualTo(token);
 
         // 2. the token works from the same client
         JsonHttp.Response ok = yapi(token, order, Map.of());
@@ -160,5 +170,10 @@ class LoginEndToEndTest {
         // 6. the same request no longer passes
         assertThat(yapi(token, order, Map.of()).json()).isEqualTo(Json.parse(sessionInvalid));
         assertThat(orders.requests("/orders/7")).hasSize(2);
+
+        // 7. the session check now says so, with where to log in
+        assertThat(yapi(token, check, Map.of()).json()).isEqualTo(Json.parse("""
+                {"response": true, "valid": false, "loginUrl": "https://giris.example.test/login"}
+                """));
     }
 }

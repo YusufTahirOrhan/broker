@@ -292,6 +292,8 @@ class PromotionFlowTest extends AdminTestBase {
                 settings.formatted("{\"maintask\": \"Guvenlik\", \"subtask\": \"alarm_kontrol\"}"));
         assertStatus(set, 200);
         assertThat(set.json().get("alarmRoute").get("subtask").stringValue()).isEqualTo("alarm_kontrol");
+        assertThat(ENVIRONMENTS.get("DEV").projects.get("kredi").get("permissionPrefix").stringValue())
+                .isEqualTo("KREDI");
         assertThat(ENVIRONMENTS.get("DEV").projects.get("kredi").get("alarmRoute").get("maintask").stringValue())
                 .isEqualTo("guvenlik");
         assertThat(get("viewer", "/projects/" + projectId).json().toString()).contains("\"alarmRoute\"");
@@ -311,5 +313,37 @@ class PromotionFlowTest extends AdminTestBase {
         JsonHttp.Response named = promote("editor", "ROUTE", own, 1, "PREPROD", "DEPLOY", null);
         assertThat(named.status()).isEqualTo(422);
         assertThat(check(named.json(), "ALARM_ROUTE_ACTIVE").get("ok").booleanValue()).isFalse();
+    }
+
+    @Test
+    void aNullAlarmServiceIsNotAnAlarmService() {
+        project("crm", "CRM", "P-300");
+        long security = project("guvenlik", "GUVENLIK", "P-400");
+        long notService = route(security, """
+                {"subtask": "kontrol", "httpMethod": "POST", "pathTemplate": "/kontrol", "permissions": [],
+                 "foreignPermissions": ["CRM_AGENT"], "definition": {"alarmService": null}}
+                """);
+        long projectId = project("kredi", "KREDI", "P-100");
+        long named = route(projectId, """
+                {"subtask": "ozel", "httpMethod": "POST", "pathTemplate": "/ozel", "permissions": [],
+                 "foreignPermissions": ["CRM_AGENT"],
+                 "definition": {"alarm": {"check": "ROUTE", "maintask": "guvenlik", "subtask": "kontrol"}}}
+                """);
+
+        JsonHttp.Response setting = put("lead", "/projects/" + projectId + "/environments/DEV", """
+                {"baseUrl": "http://kredi.dev.svc:8080", "enabled": true,
+                 "alarmRoute": {"maintask": "guvenlik", "subtask": "kontrol"}}
+                """);
+        assertStatus(setting, 400);
+        assertThat(setting.json().get("errors").get(0).get("message").stringValue())
+                .isEqualTo("Alarm servisi route'u değil: guvenlik/kontrol");
+
+        applied(promote("editor", "ROUTE", notService, 1, "DEV", "DEPLOY", null));
+        JsonHttp.Response blocked = promote("editor", "ROUTE", named, 1, "DEV", "DEPLOY", null);
+        assertThat(blocked.status()).as(blocked.text()).isEqualTo(422);
+        JsonNode alarm = check(blocked.json(), "ALARM_ROUTE_ACTIVE");
+        assertThat(alarm.get("ok").booleanValue()).isFalse();
+        assertThat(alarm.get("message").stringValue())
+                .isEqualTo("Alarm route'u guvenlik/kontrol DEV ortamındaki versiyonunda alarm servisi değil");
     }
 }

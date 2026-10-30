@@ -6,6 +6,7 @@ import java.util.function.Function;
 
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.route.RouteValidator;
+import com.acme.yapi.core.template.ContextPlaceholders;
 import com.acme.yapi.core.template.Placeholder;
 import com.acme.yapi.core.template.Resolver;
 
@@ -23,20 +24,27 @@ import tools.jackson.databind.node.ObjectNode;
  * @param permission    {@code ${user.permission}}: the first of the route's permissions the user has
  *                      ({@link #firstPermission}); null without a session or without such a permission
  * @param alarmValues   {@code ${alarm.values}} in an alarm service route: the checked request's values; null elsewhere
+ * @param scope         what the request-wide placeholders read ({@link ContextPlaceholders}); null leaves them
+ *                      without a value
  */
 public record RequestContext(ObjectNode originalBody, ObjectNode effectiveBody, Function<String, String> headerLookup,
                              RouteValidator.Context readable, String userId, String permission, String requestId,
-                             List<String> alarmValues) {
+                             List<String> alarmValues, RequestScope scope) {
 
     public RequestContext(ObjectNode originalBody, ObjectNode effectiveBody, Function<String, String> headerLookup,
                           RouteValidator.Context readable, String userId, String permission, String requestId) {
-        this(originalBody, effectiveBody, headerLookup, readable, userId, permission, requestId, null);
+        this(originalBody, effectiveBody, headerLookup, readable, userId, permission, requestId, null, null);
     }
 
     /** The context of an alarm service call made for this request. */
     public RequestContext withAlarmValues(List<String> values) {
         return new RequestContext(originalBody, effectiveBody, headerLookup, readable, userId, permission, requestId,
-                List.copyOf(values));
+                List.copyOf(values), scope);
+    }
+
+    public RequestContext withScope(RequestScope requestScope) {
+        return new RequestContext(originalBody, effectiveBody, headerLookup, readable, userId, permission, requestId,
+                alarmValues, requestScope);
     }
 
     /**
@@ -66,11 +74,15 @@ public record RequestContext(ObjectNode originalBody, ObjectNode effectiveBody, 
             case Placeholder.REQUEST_ID -> Json.string(requestId);
             case Placeholder.ALARM -> "values".equals(placeholder.path()) && alarmValues != null
                     ? Json.stringArray(alarmValues) : Json.missing();
-            default -> Json.missing();
+            default -> ContextPlaceholders.handles(placeholder)
+                    ? ContextPlaceholders.resolve(placeholder, scope) : Json.missing();
         };
     }
 
     private JsonNode user(String field) {
+        if ("permissions".equals(field)) {
+            return scope == null || userId == null ? Json.missing() : Json.stringArray(scope.userPermissions());
+        }
         String value = switch (field) {
             case "id" -> userId;
             case "permission" -> permission;

@@ -11,6 +11,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.acme.yapi.admin.environment.Environment;
 import com.acme.yapi.admin.environment.EnvironmentClient;
 import com.acme.yapi.admin.environment.EnvironmentRepository;
+import com.acme.yapi.admin.plugin.PluginRepository;
 import com.acme.yapi.admin.profile.ProfileRepository;
 import com.acme.yapi.admin.route.RouteRepository;
 import com.acme.yapi.admin.route.RouteSnapshots;
@@ -33,16 +34,18 @@ public class PromotionApplier {
     private final PromotionRepository promotions;
     private final RouteRepository routes;
     private final ProfileRepository profiles;
+    private final PluginRepository plugins;
     private final EnvironmentRepository environments;
     private final EnvironmentClient client;
     private final TransactionTemplate transactions;
 
     public PromotionApplier(PromotionRepository promotions, RouteRepository routes, ProfileRepository profiles,
-                            EnvironmentRepository environments, EnvironmentClient client,
+                            PluginRepository plugins, EnvironmentRepository environments, EnvironmentClient client,
                             TransactionTemplate transactions) {
         this.promotions = promotions;
         this.routes = routes;
         this.profiles = profiles;
+        this.plugins = plugins;
         this.environments = environments;
         this.client = client;
         this.transactions = transactions;
@@ -52,10 +55,10 @@ public class PromotionApplier {
         PromotionRepository.Row request = promotions.find(id).orElseThrow();
         Environment target = environments.require(request.targetEnv());
         try {
-            if (request.route()) {
-                applyRoute(request, target, actor);
-            } else {
-                applyProfile(request, target, actor);
+            switch (request.type()) {
+                case ROUTE -> applyRoute(request, target, actor);
+                case PROFILE -> applyProfile(request, target, actor);
+                case PLUGIN -> applyPlugin(request, target, actor);
             }
         } catch (EnvironmentClient.UnreachableException e) {
             promotions.failed(id, e.getMessage() + "; hedef ortamda hiçbir şey değişmedi.");
@@ -160,6 +163,28 @@ public class PromotionApplier {
         transactions.executeWithoutResult(tx -> {
             promotions.applied(request.id(), configVersion);
             profiles.upsertDeployment(profile.id(), target.code(), request.profileVersion(), actor);
+        });
+    }
+
+    private void applyPlugin(PromotionRepository.Row request, Environment target, String actor)
+            throws EnvironmentClient.UnreachableException, EnvironmentClient.NoAnswerException {
+        PluginRepository.Row plugin = plugins.find(request.pluginId()).orElseThrow();
+        JsonNode snapshot = plugins.history(plugin.id(), request.pluginVersion()).orElseThrow().snapshot();
+        ObjectNode body = Json.object();
+        body.put("promotionId", request.id());
+        body.put("pluginId", plugin.id());
+        body.put("version", request.pluginVersion());
+        body.set("definition", snapshot.get("definition"));
+        body.put("actor", actor);
+        EnvironmentClient.Response response = client.send(target, "PUT", "/admin/v1/plugins/" + plugin.name(), body);
+        if (!response.ok()) {
+            promotions.failed(request.id(), describe(response));
+            return;
+        }
+        long configVersion = response.body().get("configVersion").longValue();
+        transactions.executeWithoutResult(tx -> {
+            promotions.applied(request.id(), configVersion);
+            plugins.upsertDeployment(plugin.id(), target.code(), request.pluginVersion(), actor);
         });
     }
 

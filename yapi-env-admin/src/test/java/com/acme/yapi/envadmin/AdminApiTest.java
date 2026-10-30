@@ -193,6 +193,30 @@ class AdminApiTest {
     }
 
     @Test
+    void thePermissionPrefixOfAProjectIsPartOfItsSettings() {
+        project("order-service", "http://order-service.preprod.svc:8080");
+        long before = configVersion();
+        String withPrefix = """
+                {"baseUrl": "http://order-service.preprod.svc:8080", "permissionPrefix": "ORDER", "actor": "devops.ali"}
+                """;
+
+        JsonHttp.Response set = http.put("/admin/v1/projects/order-service", withPrefix);
+        assertThat(set.json().get("changed").booleanValue()).as(set.text()).isTrue();
+        assertThat(set.json().get("permissionPrefix").stringValue()).isEqualTo("ORDER");
+        assertThat(jdbc.sql("SELECT permission_prefix FROM runtime_project WHERE maintask = 'order-service'")
+                .query(String.class).single()).isEqualTo("ORDER");
+        assertThat(http.put("/admin/v1/projects/order-service", withPrefix).json().get("changed").booleanValue())
+                .isFalse();
+        assertThat(configVersion()).isEqualTo(before + 1);
+
+        JsonHttp.Response invalid = http.put("/admin/v1/projects/order-service", """
+                {"baseUrl": "http://order-service.preprod.svc:8080", "permissionPrefix": "order_", "actor": "devops.ali"}
+                """);
+        assertThat(invalid.status()).isEqualTo(400);
+        assertThat(invalid.json().get("errors").get(0).get("field").stringValue()).isEqualTo("permissionPrefix");
+    }
+
+    @Test
     void baseUrlMustBeAPlainHttpAddress() {
         JsonHttp.Response response = http.put("/admin/v1/projects/order-service",
                 "{\"baseUrl\": \"file:///etc/passwd\", \"actor\": \"devops.ali\"}");
@@ -320,6 +344,37 @@ class AdminApiTest {
         assertThat(response.status()).isEqualTo(400);
         assertThat(response.json().get("errors").valueStream().map(error -> error.get("field").stringValue()))
                 .contains("definition.success.body.x", "definition.error");
+    }
+
+    @Test
+    void pluginsAreAppliedOnceInPromotionOrderAndValidated() {
+        String plugin = """
+                {"promotionId": %d, "pluginId": 9, "version": %d, "actor": "sec.zeynep",
+                 "definition": {"scope": "GLOBAL",
+                                "request": [{"op": "set", "target": "header", "name": "X-Request-Time", "value": "${now}"}]}}
+                """;
+        long before = configVersion();
+
+        JsonHttp.Response first = http.put("/admin/v1/plugins/request-time", plugin.formatted(10, 1));
+        assertThat(first.status()).as(first.text()).isEqualTo(200);
+        assertThat(first.json().get("applied").booleanValue()).isTrue();
+        assertThat(configVersion()).isEqualTo(before + 1);
+        JsonHttp.Response replay = http.put("/admin/v1/plugins/request-time", plugin.formatted(10, 1));
+        assertThat(replay.json().get("alreadyApplied").booleanValue()).isTrue();
+        assertThat(http.put("/admin/v1/plugins/request-time", plugin.formatted(12, 2)).status()).isEqualTo(200);
+        JsonHttp.Response stale = http.put("/admin/v1/plugins/request-time", plugin.formatted(11, 1));
+        assertThat(stale.status()).isEqualTo(409);
+        assertThat(stale.json().get("code").stringValue()).isEqualTo("STALE_PROMOTION");
+        assertThat(http.get("/admin/v1/routes").json().get("plugins").get(0).get("version").intValue()).isEqualTo(2);
+
+        JsonHttp.Response invalid = http.put("/admin/v1/plugins/request-time", """
+                {"promotionId": 13, "pluginId": 9, "version": 3, "actor": "sec.zeynep",
+                 "definition": {"scope": "GLOBAL",
+                                "request": [{"op": "set", "target": "header", "name": "X-Took", "value": "${durationMs}"}]}}
+                """);
+        assertThat(invalid.status()).isEqualTo(400);
+        assertThat(invalid.json().get("errors").get(0).get("field").stringValue())
+                .isEqualTo("definition.request[0].value");
     }
 
     @Test

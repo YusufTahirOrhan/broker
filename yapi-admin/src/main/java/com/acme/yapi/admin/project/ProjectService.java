@@ -26,6 +26,7 @@ import com.acme.yapi.admin.web.ApiException;
 import com.acme.yapi.core.json.Json;
 import com.acme.yapi.core.naming.Names;
 import com.acme.yapi.core.route.AlarmRoute;
+import com.acme.yapi.core.route.RouteDefinitionParser;
 import com.acme.yapi.core.validation.FieldError;
 
 import tools.jackson.databind.JsonNode;
@@ -226,6 +227,8 @@ public class ProjectService {
         } else {
             request.putObject("alarmRoute").put("maintask", alarm.maintask()).put("subtask", alarm.subtask());
         }
+        // the broker tells from it whether a refused user holds a permission of the project
+        request.put("permissionPrefix", project.permissionPrefix());
         request.put("actor", user.username());
         JsonNode applied = environmentClient.call(environment, "PUT", "/admin/v1/projects/" + project.maintask(), request);
         projects.upsertEnvironment(id, code, body.baseUrl(), specPath, enabled, alarm);
@@ -252,7 +255,7 @@ public class ProjectService {
                     + requested.subtask()));
             return null;
         }
-        if (route.get().definition() == null || !route.get().definition().has("alarmService")) {
+        if (!RouteDefinitionParser.isAlarmService(route.get().definition())) {
             errors.add(new FieldError("alarmRoute", "Alarm servisi route'u değil: " + route.get().maintask() + "/"
                     + route.get().subtask()));
             return null;

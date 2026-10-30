@@ -136,6 +136,51 @@ public final class Json {
         return value != null && value.isString() ? value.stringValue() : null;
     }
 
+    /**
+     * The value at a path of object keys and array indexes ({@code items.0.id} as {@code ["items", "0", "id"]}); a
+     * segment is an index only where the value is an array. Missing when any step does not exist.
+     */
+    public static JsonNode at(JsonNode node, List<String> path) {
+        JsonNode current = node;
+        for (String segment : path) {
+            if (current == null || current.isMissingNode()) {
+                return missing();
+            }
+            if (current.isObject()) {
+                current = current.get(segment);
+            } else if (current.isArray() && !segment.isEmpty() && segment.chars().allMatch(Character::isDigit)
+                    && segment.length() < 10) {
+                current = current.get(Integer.parseInt(segment));
+            } else {
+                return missing();
+            }
+        }
+        return current == null ? missing() : current;
+    }
+
+    /**
+     * Equality of two JSON values that keeps their type (409 is not "409") but compares numbers by value, so
+     * 409 read as an int and as a long are the same.
+     */
+    public static boolean sameValue(JsonNode a, JsonNode b) {
+        if (a == null || b == null) {
+            return a == b;
+        }
+        if (a.isNumber() && b.isNumber()) {
+            return a.decimalValue().compareTo(b.decimalValue()) == 0;
+        }
+        return canonical(a).equals(canonical(b));
+    }
+
+    /** A field whose value is a JSON object, or null when it is absent, null or anything else. */
+    public static ObjectNode objectField(JsonNode node, String field) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        JsonNode value = node.get(field);
+        return value != null && value.isObject() ? (ObjectNode) value : null;
+    }
+
     public static List<String> fieldNames(JsonNode node) {
         List<String> names = new ArrayList<>();
         if (node != null && node.isObject()) {

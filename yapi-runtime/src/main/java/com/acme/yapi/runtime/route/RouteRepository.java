@@ -10,12 +10,14 @@ import javax.sql.DataSource;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.acme.yapi.core.json.Json;
+import com.acme.yapi.core.plugin.Plugin;
 import com.acme.yapi.core.route.AlarmRoute;
 import com.acme.yapi.runtime.metrics.YapiMetrics;
 
@@ -51,6 +53,9 @@ public class RouteRepository {
     private record ProfileRow(String name, int version, String definition) {
     }
 
+    private record PluginRow(String name, int version, String definition) {
+    }
+
     private record RouteRow(String maintask, String subtask, int version, String httpMethod, String pathTemplate,
                             List<String> permissions, boolean anonymous, String responseProfile, String definition,
                             String baseUrl) {
@@ -70,6 +75,12 @@ public class RouteRepository {
                     .query((rs, row) -> new ProfileRow(rs.getString("name"), rs.getInt("version"),
                             rs.getString("definition")))
                     .list();
+            List<PluginRow> pluginRows = jdbc.sql("""
+                            SELECT name, version, definition FROM runtime_plugin
+                            """)
+                    .query((rs, row) -> new PluginRow(rs.getString("name"), rs.getInt("version"),
+                            rs.getString("definition")))
+                    .list();
             List<RouteRow> routeRows = jdbc.sql("""
                             SELECT r.maintask, r.subtask, r.version, r.http_method, r.path_template, r.permissions,
                                    r.anonymous, r.response_profile, r.definition, p.base_url
@@ -83,11 +94,13 @@ public class RouteRepository {
                             rs.getString("response_profile"), rs.getString("definition"), rs.getString("base_url")))
                     .list();
             List<RouteSnapshot.Project> projects = jdbc.sql("""
-                            SELECT maintask, base_url, enabled, alarm_maintask, alarm_subtask FROM runtime_project
+                            SELECT maintask, base_url, enabled, alarm_maintask, alarm_subtask, permission_prefix
+                              FROM runtime_project
                             """)
                     .query((rs, row) -> new RouteSnapshot.Project(rs.getString("maintask"), rs.getString("base_url"),
                             rs.getBoolean("enabled"), rs.getString("alarm_maintask") == null ? null
-                            : new AlarmRoute(rs.getString("alarm_maintask"), rs.getString("alarm_subtask"))))
+                            : new AlarmRoute(rs.getString("alarm_maintask"), rs.getString("alarm_subtask")),
+                            rs.getString("permission_prefix")))
                     .list();
 
             Map<String, CompiledProfile> profiles = new HashMap<>();
@@ -96,6 +109,14 @@ public class RouteRepository {
                     case RouteCompiler.Compiled.Ok<CompiledProfile> ok -> profiles.put(row.name(), ok.value());
                     case RouteCompiler.Compiled.Broken<CompiledProfile> broken -> skip("profile", row.name(),
                             broken.reason());
+                }
+            }
+            // a broken plugin is left out; the routes that would use it are served without it
+            List<Plugin> plugins = new ArrayList<>();
+            for (PluginRow row : pluginRows) {
+                switch (RouteCompiler.plugin(row.name(), row.version(), Json.tryParse(row.definition()))) {
+                    case RouteCompiler.Compiled.Ok<Plugin> ok -> plugins.add(ok.value());
+                    case RouteCompiler.Compiled.Broken<Plugin> broken -> skip("plugin", row.name(), broken.reason());
                 }
             }
             List<Route> routes = new ArrayList<>();
@@ -116,13 +137,43 @@ public class RouteRepository {
                     case RouteCompiler.Compiled.Broken<Route> broken -> skip("route", name, broken.reason());
                 }
             }
-            return RouteSnapshot.of(version, routes, projects, profiles.values());
+            return RouteSnapshot.of(version, routes, projects, profiles.values(), plugins);
         });
     }
 
-    /** Runs the reads in one read-only transaction: every query sees the database as of the transaction's start. */
+    /**
+     * Runs the reads in one read-only transaction: every query sees the database as of the transaction's start.
+     * Right after a migration Oracle refuses to read a table created a moment before the transaction's start
+     * (ORA-01466, "table definition has changed"); the read is tried again for a few seconds.
+     */
     public <T> T inSnapshot(Supplier<T> reads) {
-        return snapshotTransaction.execute(status -> reads.get());
+        for (int attempt = 1; ; attempt++) {
+            try {
+                return snapshotTransaction.execute(status -> reads.get());
+            } catch (DataAccessException e) {
+                if (attempt >= DEFINITION_CHANGED_ATTEMPTS || !definitionChanged(e)) {
+                    throw e;
+                }
+                log.warn("Tablo tanımı az önce değişti (ORA-01466); snapshot yeniden okunuyor ({}. deneme)", attempt);
+                try {
+                    Thread.sleep(1_000);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+    }
+
+    private static final int DEFINITION_CHANGED_ATTEMPTS = 6;
+
+    private static boolean definitionChanged(Throwable e) {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof java.sql.SQLException sql && sql.getErrorCode() == 1466) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void skip(String kind, String name, String reason) {

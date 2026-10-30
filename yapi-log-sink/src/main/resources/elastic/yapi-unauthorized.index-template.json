@@ -1,0 +1,29 @@
+{
+  "index_patterns": ["yapi_unauthorized"],
+  "priority": 100,
+  "template": {
+    "mappings": {
+      "dynamic": false,
+      "properties": {
+        "request_id":             { "type": "keyword" },
+        "time":                   { "type": "date" },
+        "environment":            { "type": "keyword" },
+        "denied_reason":          { "type": "keyword" },
+        "status":                 { "type": "short" },
+        "uid":                    { "type": "keyword" },
+        "user_id":                { "type": "keyword" },
+        "application":            { "type": "keyword" },
+        "maintask":               { "type": "keyword" },
+        "subtask":                { "type": "keyword" },
+        "route_maintask":         { "type": "keyword" },
+        "route_subtask":          { "type": "keyword" },
+        "route_permissions":      { "type": "keyword" },
+        "user_permissions":       { "type": "keyword" },
+        "has_project_permission": { "type": "boolean" },
+        "client_ip":              { "type": "keyword" },
+        "user_agent":             { "type": "keyword", "ignore_above": 1024 },
+        "body":                   { "type": "text" }
+      }
+    }
+  }
+}

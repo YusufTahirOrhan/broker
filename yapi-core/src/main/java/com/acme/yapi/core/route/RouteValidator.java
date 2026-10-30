@@ -12,6 +12,7 @@ import java.util.stream.Collectors;
 
 import com.acme.yapi.core.naming.Names;
 import com.acme.yapi.core.template.JsonTemplate;
+import com.acme.yapi.core.template.ContextPlaceholders;
 import com.acme.yapi.core.template.Placeholder;
 import com.acme.yapi.core.template.TemplateString;
 import com.acme.yapi.core.validation.FieldError;
@@ -41,6 +42,8 @@ public final class RouteValidator {
     public static final List<String> FORBIDDEN_HEADER_EXCEPTIONS = List.of("X-User-Agent");
     private static final Set<String> ALLOWED_USER_HEADERS = Set.of("x-user-agent");
     private static final Pattern HEADER_NAME = Pattern.compile("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$");
+    /** {@code ${user.<field>}} in definitions and plugins. */
+    public static final Set<String> USER_FIELDS = Set.of("id", "permission", "permissions");
 
     private RouteValidator() {
     }
@@ -195,9 +198,9 @@ public final class RouteValidator {
                 }
             }
             case Placeholder.USER -> {
-                if (!"id".equals(placeholder.path()) && !"permission".equals(placeholder.path())) {
-                    errors.add(new FieldError(path,
-                            "Kullanıcı için yalnızca ${user.id} ve ${user.permission} kullanılabilir"));
+                if (!USER_FIELDS.contains(placeholder.path())) {
+                    errors.add(new FieldError(path, "Kullanıcı için yalnızca ${user.id}, ${user.permission} ve "
+                            + "${user.permissions} kullanılabilir"));
                 }
             }
             case Placeholder.REQUEST_ID -> {
@@ -213,8 +216,14 @@ public final class RouteValidator {
                 }
             }
             case Placeholder.BACKEND, Placeholder.OUTCOME ->
-                    errors.add(new FieldError(path, placeholder + " yalnızca yanıt profillerinde kullanılır"));
-            default -> errors.add(new FieldError(path, "Bilinmeyen yer tutucu: " + placeholder));
+                    errors.add(new FieldError(path, placeholder + " yalnızca yanıtta (profil, eklenti) kullanılır"));
+            default -> {
+                String problem = ContextPlaceholders.handles(placeholder) ? ContextPlaceholders.problem(placeholder)
+                        : "Bilinmeyen yer tutucu: " + placeholder;
+                if (problem != null) {
+                    errors.add(new FieldError(path, problem));
+                }
+            }
         }
     }
 
