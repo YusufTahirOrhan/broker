@@ -29,8 +29,10 @@ Broker `X-Token: login` ve `X-Token: logout` isteklerini gövdedeki maintask'a b
   değil, isimsiz öğe) Koordinatör hatasıdır: giriş reddedilir, uyarı loglanır.
 - Tekrar giriş: kimlik her girişte doğrulanır (LDAP ya da magic key, sonra Koordinatör). Başarılıysa ve kullanıcının
   kaydı aynı `X-Clientip` ve `X-User-Agent` ile duruyorsa yeni token üretilmez: aynı başarılı gövde mevcut token'la
-  döner, kayda (yetkiler ve kalan süre dahil) dokunulmaz. Başka istemciden giriş eskisi gibi yeni oturumla eskisini
-  ezer. Kayıt okunamazsa yeni oturum açılır.
+  döner. Kayda Koordinatör'den yeni alınan yetkiler yazılır; token, istemci bilgileri, kayıt biçimi ve kalan süre
+  aynı kalır (`SET ... XX KEEPTTL`; süresi o arada dolan kayıt geri gelmez). Bu yazma başarısız olursa giriş yine
+  mevcut token'la başarılı döner, kayıt eski yetkilerle kalır ve uyarı loglanır. Başka istemciden giriş eskisi gibi
+  yeni oturumla eskisini ezer. Kayıt okunamazsa yeni oturum açılır.
 - Logout kaydı yalnızca onu açan istemci kapatabilir (`login.logout.require-client-match`, varsayılan true).
 - `/actuator/` ve `/internal/` ile başlayanlar dışındaki her uç (yeni uçlar dahil) yalnızca broker'ın imzaladığı, en
   fazla 60 sn önce verilmiş `X-User-Context` ile kabul edilir; değilse 403. Yol, container'ın çözdüğü ve normalize

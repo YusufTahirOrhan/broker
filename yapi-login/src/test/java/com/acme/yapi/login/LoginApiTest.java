@@ -136,15 +136,19 @@ class LoginApiTest {
     }
 
     @Test
-    void aLoginFromTheSessionsClientKeepsItsTokenAndRemainingTime() {
+    void aLoginFromTheSessionsClientKeepsItsTokenAndRemainingTimeButTakesTheNewPermissions() {
         JsonNode first = login("ali", "s3cret-Parola").json();
         String token = first.get("X-Token").stringValue();
         redis.expire("user:session:ali", java.time.Duration.ofSeconds(500));
+        koordinator.json("GET", PERMISSIONS + "ali", 200, """
+                {"additionalProp1": [{"yetkiIsim": "SORGU_ILERI", "askidaMi": false},
+                                     {"yetkiIsim": "SORGU_TEMEL", "askidaMi": true}]}
+                """);
 
         JsonNode again = login("ali", "s3cret-Parola").json();
 
         assertThat(again).isEqualTo(first);
-        assertThat(stored("ali").token()).isEqualTo(token);
+        assertThat(stored("ali")).isEqualTo(new SessionRecord("ali", token, IP, AGENT, List.of("SORGU_ILERI")));
         assertThat(redis.getExpire("user:session:ali")).isBetween(1L, 500L);
         // the password is checked every time, the open session does not stand in for it
         assertThat(login("ali", "yanlis-Parola").json().get("login").booleanValue()).isFalse();
